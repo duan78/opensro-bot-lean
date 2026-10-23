@@ -10,6 +10,9 @@ const Team = {
   socket: null, state: 'off', message: 'Team relay off.', peers: new Map(), name: '',
   attempts: 0, retryAt: -Infinity, sentAt: -Infinity, cfgKey: null, handlers: {},
   cfg() { return Settings.profile.team; },
+  online() { return this.socket?.readyState === 1; },
+  // An event for the room, or for everyone on the relay when the public lane is on for it.
+  emit(event, scope = 'room') { return this.send({ type: 'msg', scope, payload: { kind: 'event', event } }); },
   reset() {
     this.close();
     this.peers.clear();
@@ -26,8 +29,11 @@ const Team = {
   // Extension point for later phases (shared intel, coordination): subscribe to a message type.
   on(type, fn) { (this.handlers[type] ||= []).push(fn); },
   payload() {
+    const pose = World.pose();
     return { hunting: !!Hunt.running, alive: World.inWorld() && !World.isDead(),
-      mode: String(Controller.mode || 'idle'), level: World.gp?.progression?.level ?? null };
+      mode: String(Controller.mode || 'idle'), level: World.gp?.progression?.level ?? null,
+      role: String(this.cfg().role || 'none'), townTrip: !!Town.trip, hasRes: !!Resurrect.skill(),
+      pos: pose ? { regionId: pose.regionId, x: Math.round(pose.x), z: Math.round(pose.z) } : null };
   },
   send(msg) {
     if (this.socket?.readyState !== 1) return false;
@@ -127,8 +133,8 @@ const Team = {
     const t = now();
     return [...this.peers.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([name, peer]) => {
       const s = peer.state || {};
-      const what = s.hunting ? 'hunting' : s.alive === false ? 'dead' : s.mode || 'idle';
-      return name + ' · ' + what + (Number.isInteger(s.level) ? ' · level ' + s.level : '') + ' · ' + Math.max(0, Math.round((t - peer.at) / 1000)) + ' s ago';
+      const what = s.townTrip ? 'in town' : s.hunting ? 'hunting' : s.alive === false ? 'dead' : s.mode || 'idle';
+      return name + (s.role && s.role !== 'none' ? ' (' + s.role + ')' : '') + ' · ' + what + (Number.isInteger(s.level) ? ' · level ' + s.level : '') + ' · ' + Math.max(0, Math.round((t - peer.at) / 1000)) + ' s ago';
     });
   },
 };

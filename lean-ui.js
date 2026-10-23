@@ -539,7 +539,7 @@ const UI = {
     } else if (this.current === 'Party') {
       this.sections('partyMembers', 'partyHeal', 'partyBuffs', 'partyParty', 'partyTrace');
     } else if (this.current === 'Team') {
-      this.sections('teamRelay');
+      this.sections('teamRelay', 'teamWorld');
     } else if (this.current === 'Items') {
       this.drawItems();
     } else if (this.current === 'Setup') {
@@ -994,11 +994,33 @@ const UI = {
       this.check('Connect to a team relay', () => team().enabled, v => { team().enabled = v; Team.reset(); this.draw(); }),
       this.text('Relay address (wss://…)', () => team().url, v => { team().url = v; Team.tick(); }),
       this.text('Room key', () => team().token, v => { team().token = v; Team.tick(); }),
+      this.select('This character\'s role', [['none', 'No role'], ['tank', 'Tank'], ['healer', 'Healer'], ['support', 'Support'], ['dps', 'Damage'], ['scout', 'Scout']], () => team().role, v => team().role = v),
+      this.check('Assist: fight what a teammate fights', () => team().assist, v => team().assist = v),
+      this.check('Recall to town together', () => team().townSync, v => team().townSync = v),
       this.teamNote,
-      el('p', 'A private channel between your own characters over a WebSocket relay you control. Characters that enter the same room key see each other\'s presence here; nothing is sent to anyone else, and the bot never depends on it: with the relay off or unreachable everything else works exactly as before. The address must start with wss://. See docs/TEAM.md in the repository for the plan and the reference relay under relay/.', 'muted')));
+      el('p', 'A private channel between your own characters over a WebSocket relay you control. Characters that enter the same room key see each other\'s presence here; nothing is sent to anyone else, and the bot never depends on it: with the relay off or unreachable everything else works exactly as before. The address must start with wss://. Assist joins the fight a teammate (or party member) is already in; town sync starts your town trip when a teammate starts theirs. The room\'s console page on the relay can stop everyone or call a group town trip.', 'muted')));
+    const share = this.group('Sharing');
+    share.append(this.check('Also share with every room on this relay', () => team().share.public, v => team().share.public = v),
+      this.check('Shared: interesting monsters (champion and up)', () => team().share.monsters, v => team().share.monsters = v),
+      this.check('Shared: other players seen', () => team().share.players, v => team().share.players = v),
+      this.check('Shared: unique appearances', () => team().share.uniques, v => team().share.uniques = v),
+      el('p', 'The room key holders always see everything above. The public pool (every room on your relay) only ever receives what these boxes allow, and never your own position, build or inventory. Unique announcements from the game\'s server are shared as events; your own sightings carry positions.', 'muted'));
+    host.append(share);
     const peers = this.group('Connected characters');
     peers.append(this.teamPeers, el('p', 'Each character announces itself every 5 seconds and is dropped from this list after 15 seconds of silence.', 'muted'));
     host.append(peers);
+  },
+  section_teamWorld(host) {
+    this.teamUniques = el('div');
+    this.teamPlayers = el('div');
+    this.teamDrops = el('div');
+    const uniques = this.group('Unique tracker');
+    uniques.append(this.teamUniques, el('p', 'Built from the game\'s own server-wide announcements, shared sightings and kills. The respawn timer restarts at death (3-6 h depending on the unique). Hunt here moves your saved hunting spot to the last known position.', 'muted'));
+    const players = this.group('Players seen by the team');
+    players.append(this.teamPlayers, el('p', 'Every player the team sees, newest first. A player who attacks a teammate outside a party is marked hostile.', 'muted'));
+    const drops = this.group('Team drops');
+    drops.append(this.teamDrops);
+    host.append(uniques, players, drops);
   },
   section_settingsStats(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
@@ -1221,6 +1243,23 @@ const UI = {
       this.teamNote.textContent = Team.status();
       const rows = Team.peerRows();
       this.teamPeers.replaceChildren(...(rows.length ? rows.map(text => el('div', text)) : [el('div', 'No other character in the room yet.', 'muted')]));
+      if (this.teamUniques) {
+        const uniqueRows = TeamKnowledge.uniqueRows();
+        this.teamUniques.replaceChildren(...(uniqueRows.length ? uniqueRows.map((text, i) => {
+          const name = [...TeamKnowledge.uniques.values()].sort((a, b) => (b.at || 0) - (a.at || 0))[i]?.name;
+          const row = el('div', text);
+          if (name) row.append(this.button('Hunt here', () => TeamArbiter.huntAtUnique(name)));
+          return row;
+        }) : [el('div', 'No unique recorded yet; they appear when the server announces one or someone sees one.', 'muted')]));
+      }
+      if (this.teamPlayers) {
+        const playerRows = TeamKnowledge.playerRows();
+        this.teamPlayers.replaceChildren(...(playerRows.length ? playerRows.map(text => el('div', text)) : [el('div', 'No other player seen yet.', 'muted')]));
+      }
+      if (this.teamDrops) {
+        const dropRows = TeamKnowledge.dropRows();
+        this.teamDrops.replaceChildren(...(dropRows.length ? dropRows.map(text => el('div', text)) : [el('div', 'Nothing picked up yet.', 'muted')]));
+      }
     }
     if (!this.status) return;
     if (this.is('Supplies') && this.petPotionNote) this.petPotionNote.textContent = PetPotion.message;

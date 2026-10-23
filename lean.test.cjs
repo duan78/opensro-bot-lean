@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Route, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Team, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Route, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Team, TeamIntel, TeamKnowledge, TeamArbiter, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -4258,8 +4258,8 @@ async function updateTests() {
   }
   await check('updates compare numeric version components and ignore malformed versions', async () => {
     const f = fixture();
-    for (const v of ['9.9.9', '1.3.1', '2.0.0']) assert.equal(f.Updates.newer(v), true);
-    for (const v of ['1.2.9', '1.2.36', '1.3.0', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
+    for (const v of ['9.9.9', '1.4.1', '2.0.0']) assert.equal(f.Updates.newer(v), true);
+    for (const v of ['1.2.9', '1.2.36', '1.3.0', '1.4.0', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
   });
   await check('updates pin metadata and user-initiated installer to the same trusted commit', async () => {
     const f = fixture(), calls = updater(f); f.UI.updateButton = {};
@@ -4516,7 +4516,7 @@ function teamFixture(url = 'wss://relay.example', token = 'room-key') {
   }
   f.win.WebSocket = FakeSocket;
   f.World.charName = 'RelayOne';
-  f.Settings.profile.team = { enabled: true, url, token };
+  Object.assign(f.Settings.profile.team, { enabled: true, url, token });
   return Object.assign(f, { teamSockets: sockets });
 }
 
@@ -4584,4 +4584,128 @@ test('a changed room key reconnects into the new room, and the bus waits for the
   assert.equal(next.sent[0].token, 'second-key');
   const g = teamFixture(); g.World.charName = '';
   g.Team.tick(); assert.equal(g.teamSockets.length, 0); assert.ok(g.Team.status().includes('character name'));
+});
+
+// ---- Team edition phases 2-6 ----
+function connectedTeam() {
+  const f = teamFixture();
+  f.Team.tick(); const s = f.teamSockets[0]; s.open();
+  f.World.gp.progression.level = 40;
+  return Object.assign(f, { socket: s });
+}
+
+test('the live digest publishes interesting monsters and players, and merges the room\'s digests by gid', () => {
+  const f = connectedTeam();
+  f.World.ents.set(700, { gid: 700, kind: 'monster', rarity: 4, name: 'Giant rat', level: 38, regionId: 1, x: 150, y: 0, z: 150, appearanceState: [1, 0, 0] });
+  f.World.ents.set(701, { gid: 701, kind: 'monster', rarity: 0, name: 'Rat', level: 30, regionId: 1, x: 150, y: 0, z: 150, appearanceState: [1, 0, 0] });
+  f.World.ents.set(702, { gid: 702, kind: 'player', name: 'Stranger', level: 55, regionId: 1, x: 120, y: 0, z: 130, appearanceState: [1, 0, 0] });
+  f.TeamIntel.sentAt = -Infinity;
+  f.TeamIntel.tick();
+  const published = f.socket.sent.filter(m => m.type === 'msg' && m.payload.kind === 'intel').at(-1);
+  const gids = published.payload.payload.monsters.map(r => r.gid);
+  assert.deepEqual(gids, [700], 'only the giant is interesting; the normal rat is not');
+  assert.ok(published.payload.payload.players.some(r => r.gid === 702 && r.name === 'Stranger'));
+  f.socket.receive({ type: 'msg', from: 'AltTwo', payload: { kind: 'intel', payload: {
+    monsters: [
+      { gid: 800, name: 'Party mob', cls: 'party', unique: false, regionId: 1, x: 10, z: 10, level: 41, hpPct: 40 },
+      { gid: 801, name: 'Far away', cls: 'giant', unique: false, regionId: 9000, x: 10, z: 10 }],
+    players: [{ gid: 802, name: 'RemotePlayer', regionId: 1, x: 5, z: 5 }],
+    edges: [{ c: 802, cn: 'RemotePlayer', t: 800, d: 900, age: 100 }] } } });
+  assert.ok(f.TeamIntel.world.get(800)?.src === 'AltTwo', 'the shared party mob lands in the world');
+  assert.ok(!f.TeamIntel.world.has(801), 'a monster from an implausible region is not merged');
+  assert.ok(f.TeamIntel.edges.get(800)?.casterName === 'RemotePlayer', 'the shared combat edge lands');
+  assert.ok(f.TeamKnowledge.players.get('RemotePlayer')?.gid === 802, 'the player sighting feeds the knowledge base');
+  f.advance(20001); f.TeamIntel.tick();
+  assert.ok(!f.TeamIntel.world.has(800), 'shared monsters expire');
+});
+
+test('casts build combat edges, a hostile cast is recorded, and a unique kill closes the window', () => {
+  const f = connectedTeam();
+  f.socket.receive({ type: 'peer', name: 'AltTwo', state: { hunting: true, pos: { regionId: 1, x: 100, z: 100 } } });
+  f.World.ents.set(710, { gid: 710, kind: 'monster', rarity: 4, name: 'Giant', level: 40, regionId: 1, x: 150, y: 0, z: 150, appearanceState: [1, 0, 0] });
+  f.World.ents.set(711, { gid: 711, kind: 'monster', rarity: 3, name: 'Tiger Girl', level: 20, regionId: 1, x: 150, y: 0, z: 150, appearanceState: [1, 0, 0] });
+  f.World.ents.set(720, { gid: 720, kind: 'player', name: 'AltTwo', level: 40, regionId: 1, x: 100, y: 0, z: 100, appearanceState: [1, 0, 0] });
+  f.World.ents.set(721, { gid: 721, kind: 'player', name: 'Enemy', level: 60, regionId: 1, x: 100, y: 0, z: 100, appearanceState: [1, 0, 0] });
+  f.bus.emit('cast', { caster: 720, target: 710, results: [{ target: 710, impacts: [{ damage: 500 }] }] });
+  f.bus.emit('cast', { caster: 721, target: 1, results: [{ target: 1, impacts: [{ damage: 300 }] }] });
+  f.bus.emit('cast', { caster: 720, target: 711, results: [{ target: 711, impacts: [{ damage: 9000, fatal: true }] }] });
+  assert.equal(f.TeamIntel.edges.get(710).casterName, 'AltTwo');
+  assert.ok(f.TeamKnowledge.players.get('Enemy')?.hostile >= 1, 'a player casting at us outside a party is hostile');
+  const tiger = f.TeamKnowledge.uniques.get('Tiger Girl');
+  assert.ok(tiger?.deadAt > 0, 'the fatal cast on the unique records its death');
+  assert.ok(f.TeamKnowledge.uniqueRows()[0].includes('window'), 'the tracker shows a respawn window');
+});
+
+test('unique announcements from the game become tracked events, shared per the checkboxes', () => {
+  const f = connectedTeam();
+  f.bus.emit('notice', { key: 'UIIT_MSG_APPEAR_TIGER_GIRL', args: [] });
+  assert.ok(f.TeamKnowledge.uniques.get('Tiger Girl')?.appearAt > 0);
+  const events = f.socket.sent.filter(m => m.type === 'msg' && m.payload.kind === 'event');
+  assert.equal(events.length, 1, 'the appearance is announced to the room');
+  assert.equal(events[0].scope, 'room');
+  f.Settings.profile.team.share.public = true;
+  f.bus.emit('notice', { key: 'UIIT_MSG_DEAD_TIGER_GIRL', args: ['Killer'] });
+  const scoped = f.socket.sent.filter(m => m.type === 'msg' && m.payload.kind === 'event');
+  assert.equal(scoped.length, 3, 'with the public lane on, the death goes to the room and to everyone');
+  assert.ok(scoped.some(m => m.scope === 'public'));
+  f.socket.receive({ type: 'msg', from: 'AltTwo', payload: { kind: 'event', event: { kind: 'unique', name: 'Isyutaru', state: 'appear', pos: { regionId: 1, x: 10, z: 10 } } } });
+  assert.ok(f.TeamKnowledge.uniques.get('Isyutaru')?.pos, 'a peer sighting carries its position');
+  f.socket.receive({ type: 'kv-value', key: 'knowledge', value: { uniques: { Medusa: { name: 'Medusa', at: Date.now() - 1000, deadAt: Date.now() - 1000 } }, drops: { 'Sox blade': 1 } } });
+  assert.ok(f.TeamKnowledge.uniques.get('Medusa')?.deadAt, 'hydration from the room store keeps the record');
+  assert.equal(f.TeamKnowledge.drops.get('Sox blade'), 1);
+});
+
+test('assist targets a teammate\'s monster, and never steals an engaged target', () => {
+  const f = connectedTeam();
+  f.Settings.profile.team.assist = true;
+  f.socket.receive({ type: 'peer', name: 'AltTwo', state: { hunting: true } });
+  f.World.ents.set(710, { gid: 710, kind: 'monster', rarity: 4, name: 'Giant', level: 40, regionId: 1, x: 150, y: 0, z: 150, appearanceState: [1, 0, 0] });
+  f.World.ents.set(720, { gid: 720, kind: 'player', name: 'AltTwo', level: 40, regionId: 1, x: 100, y: 0, z: 100, appearanceState: [1, 0, 0] });
+  f.bus.emit('cast', { caster: 720, target: 710, results: [{ target: 710, impacts: [{ damage: 100 }] }] });
+  assert.equal(f.Hunt.teamTarget(null)?.gid, 710, 'with no target of our own, the teammate\'s monster is chosen');
+  assert.equal(f.Hunt.teamTarget({ gid: 999 }), null, 'an engaged target is never replaced');
+  f.Settings.profile.team.assist = false;
+  assert.equal(f.Hunt.teamTarget(null), null);
+});
+
+test('a resurrection claim makes the dead member wait, and the note says who is coming', () => {
+  const f = connectedTeam();
+  f.Settings.profile.party.acceptRes = true;
+  assert.equal(f.Party.reviveDelay(), 5000, 'without a claim the default short wait applies');
+  f.socket.receive({ type: 'msg', from: 'AltTwo', payload: { kind: 'event', event: { kind: 'res-claim', target: 'RelayOne' } } });
+  assert.equal(f.Party.reviveDelay(), 60000);
+  assert.ok(f.Party.waitNote().includes('AltTwo'));
+});
+
+test('town sync follows a teammate\'s town trip once per minute, and console commands reach the room', () => {
+  const f = connectedTeam();
+  f.Settings.profile.team.townSync = true;
+  let townBegins = 0;
+  const realBegin = f.Town.begin;
+  f.Town.begin = () => { townBegins++; };
+  f.Hunt.start();
+  f.socket.receive({ type: 'msg', from: 'AltTwo', payload: { kind: 'event', event: { kind: 'town', who: 'AltTwo' } } });
+  f.socket.receive({ type: 'msg', from: 'AltTwo', payload: { kind: 'event', event: { kind: 'town', who: 'AltTwo' } } });
+  assert.equal(townBegins, 1, 'the second call inside a minute is ignored');
+  assert.ok(f.Hunt.running);
+  f.socket.receive({ type: 'msg', from: 'console', payload: { kind: 'event', event: { kind: 'cmd', action: 'stop' } } });
+  assert.equal(f.Hunt.running, false, 'the console stop reaches the bot');
+  f.Town.begin = realBegin;
+});
+
+test('loot feeds the shared drop log', () => {
+  const f = connectedTeam();
+  f.bus.emit('loot', { kind: 'item', name: 'Sox blade', count: 1 });
+  f.bus.emit('loot', { kind: 'item', name: 'Sox blade', count: 1 });
+  f.bus.emit('loot', { kind: 'gold', gold: 500 });
+  assert.equal(f.TeamKnowledge.dropRows().join('|'), 'Sox blade ×2|Gold 500');
+});
+
+test('huntAtUnique moves the saved spot only when a position is known', () => {
+  const f = connectedTeam();
+  assert.equal(f.TeamArbiter.huntAtUnique('Tiger Girl'), false, 'no record yet: refused');
+  f.TeamKnowledge.uniques.set('Tiger Girl', { name: 'Tiger Girl', at: Date.now(), pos: { regionId: 1, x: 400, z: 500 } });
+  assert.equal(f.TeamArbiter.huntAtUnique('Tiger Girl'), true);
+  const center = f.Settings.profile.hunt.center;
+  assert.equal(JSON.stringify(center), JSON.stringify({ regionId: 1, x: 400, y: 0, z: 500 }));
 });

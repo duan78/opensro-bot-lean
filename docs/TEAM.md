@@ -49,13 +49,41 @@ later phase:
 ## Architecture
 
 ```
-TeamBus       transport: one WebSocket, rooms by key, reconnect/backoff, heartbeats   [phase 1 ✓]
-TeamIntel     live shared world: entity digests, combat edges, unique sightings       [phase 2]
-TeamKnowledge persistent, versioned: unique tracker, player DB, drops, learnings      [phase 3]
-TeamArbiter   decisions: squads, roles, policies, etiquette, spot claims              [phase 4]
-              coordinated cycles (town window, deterministic res) + fleet console     [phase 5]
-              missions: party composition, unique hunts, job caravans                 [phase 6]
+TeamBus       transport: one WebSocket, rooms by key, reconnect/backoff, heartbeats   [shipped, 1.3.0]
+TeamIntel     live shared world: entity digests, combat edges, shared map layer       [shipped, 1.4.0]
+TeamKnowledge persistent via the relay's room store: unique tracker with respawn
+              windows, player DB with hostility, shared drop log                       [shipped, 1.4.0]
+TeamArbiter   decisions: roles, assist, spot-claim warnings, town sync,
+              resurrection claims, console commands                                    [shipped, 1.4.0]
+              missions: automatic party composition, job caravans                      [designed, deferred]
 ```
+
+What 1.4.0 delivers per phase, honestly:
+
+- **Phase 2 (live intel)** — complete: digests of interesting monsters (champion and up, party
+  mobs, uniques with an HP estimate), players in view, and combat edges from every cast around
+  (observed via the bot's own cast bus event); merged by gid with source, TTLs and a
+  region-plausibility filter; drawn as a dimmed layer on the map, own view always winning.
+- **Phase 3 (knowledge)** — complete for its first scope: the relay keeps a per-room key-value
+  store (persisted across restarts) holding the team's shared memory; the unique tracker runs on
+  the game's own division-wide announcements (UIIT_MSG_APPEAR/DEAD notices already reach the
+  bot's bus) plus sightings and fatal casts, with respawn windows (timer restarts at death,
+  3-6 h per unique); the player database records names, positions, levels and hostility (a
+  player casting at a teammate outside a party); drops are counted per item name.
+- **Phase 4 (arbiter)** — complete for its first scope: roles are declared and displayed (they
+  do not yet drive behaviour beyond presence); assist targets the monster a teammate or party
+  member is fighting; spot claims warn when two characters start on top of each other. Team
+  etiquette between unpartied characters is the bot's existing no-KS rule by design.
+- **Phase 5 (coordinated cycles)** — complete for its first scope: synchronized town trips
+  (optional follow), deterministic resurrection claims (the dead member waits up to 60 s), and
+  the fleet console (relay page `/?key=…` with Stop everyone / Town trip buttons). A shared
+  trip window negotiated by a coordinator is future work.
+- **Phase 6 (missions)** — partial by choice: unique converge is manual (tracker button moves
+  the hunting spot) plus toasts and sound; automatic party composition and job caravans need
+  live verification of trade mechanics and are deferred until the rest is field-tested.
+- **Public pool** — the per-category checkboxes are live (monsters, players, uniques) with the
+  public scope fanned out by the relay to every room. The public *store* (knowledge KV shared
+  across rooms) is not wired yet; public is events-only so far.
 
 **The team is defined by the relay, not by the game party.** Fleet → squads (each with a
 mission) → characters with roles (tank, healer, buffer, dps, puller, scout, mule,
@@ -77,17 +105,19 @@ opacity, fading with age, source on hover; pinned uniques; a Team panel listing 
 and states; toasts and sounds for unique spawns and contacts. All of it works with hunting
 stopped — the extension is useful on its own.
 
-## Phase 1 — presence (implemented)
+## Phase 1 — presence (implemented in 1.3.0, extended ever since)
 
 `lean-team.js` + the Team page + `relay/` (reference server). Each character announces
-`{hunting, alive, mode, level}` every 5 s; peers expire after 15 s of silence; reconnects
-back off 5→60 s; every failure path degrades to "team relay off" behaviour. Settings are
-per character (`team: {enabled, url, token}`), stored under the usual profile prefix.
+`{hunting, alive, mode, level, role, townTrip, hasRes, pos}` every 5 s; peers expire after 15 s
+of silence; reconnects back off 5→60 s; every failure path degrades to "team relay off"
+behaviour. Settings are per character (`team: {enabled, url, token, role, assist, townSync,
+share}`), stored under the usual profile prefix.
 
-Tested in simulation only (`lean.test.cjs`, fake WebSocket): connect/hello/welcome, beats and
-peer expiry, `wss://` enforcement, backoff, room-key change, relay errors, off-switch, and
-that hunting still starts with the relay failing. A live check against a real relay is still
-to do.
+Tested in simulation (452 integration tests: presence, digests, edges, unique announcements,
+assist, resurrection claims, town sync, console commands, drops, spot moves) and against a live
+local relay (`relay/smoke-test.cjs`: hello/welcome, beat forwarding, the KV round trip, public
+events). None of it has run with real characters on a live server yet — that is the one thing
+simulation cannot replace.
 
 ## Verification honesty
 

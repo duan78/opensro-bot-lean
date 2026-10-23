@@ -84,7 +84,7 @@ Hunt.tick = function () {
     this.state = 'resting'; return;
   }
   if (Combat.buffs(true)) { this.state = 'buff'; return; }
-  const target = this.threat(current) || current || this.chooseTarget();
+  const target = this.threat(current) || current || this.teamTarget(current) || this.chooseTarget();
   if (target) { this.engage(target); return; }
   this.targetGid = 0; this.state = Loot.active?.petGid ? 'loot' : 'search';
   if (H.returnToCenter && H.center && dist2D(World.pose(), H.center) > Math.max(40, H.radius * 0.5) && now() - this.lastMoveAt > 2500) {
@@ -173,7 +173,7 @@ const Controller = {
   tick() {
     try {
       this.guard('Reconnect', () => Reconnect.tick());
-      this.guard('Team', () => Team.tick());
+      this.guard('Team', () => { Team.tick(); TeamIntel.tick(); TeamKnowledge.tick(); });
       Restock.sample();
       Alchemy.tick();
       if (BuffGear.run) {
