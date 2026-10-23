@@ -14,6 +14,7 @@ const DEFAULT_PROFILE = {
   mastery: { enabled: false, ids: [], gap: 0, skills: false, scope: 'rotation', reserve: 0, order: 'masteries' },
   party: { autoAcceptMatching: false, autoRecruit: false, joinMain: false, mainName: '', autoRes: false, acceptRes: false, resRadius: 300, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true,
     support: { enabled: false, whileStopped: false, range: 30, heal: { id: 0, group: 0, pct: 60, self: false }, group: { id: 0, group: 0, pct: 60, count: 2 }, buffs: [] } },
+  team: { enabled: false, url: '', token: '' },
   wardrobe: { on: true, phantom: true, realAnim: true, hideAvatars: false,
     eq: {}, av: {}, pet: { atk: 0, pick: 0, mount: 0 }, presets: {}, undo: null },
   macro: {
@@ -57,7 +58,7 @@ const DEFAULT_PROFILE = {
 function botProfile(input) {
   const result = deepMerge(DEFAULT_PROFILE, {});
   if (!input || typeof input !== 'object') return result;
-  for (const key of ['macro', 'potion', 'hunt', 'wardrobe', 'party', 'alchemy', 'mastery', 'statPoints', 'trace', 'items']) {
+  for (const key of ['macro', 'potion', 'hunt', 'wardrobe', 'party', 'team', 'alchemy', 'mastery', 'statPoints', 'trace', 'items']) {
     if (!input[key] || typeof input[key] !== 'object') continue;
     for (const field of Object.keys(DEFAULT_PROFILE[key])) {
       if (field in input[key]) result[key][field] = deepMerge(DEFAULT_PROFILE[key][field], input[key][field]);

@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.2.128
-// @updateURL    https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.meta.js
-// @downloadURL  https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js
-// @description  Combat, reliable looting, potions, restocking and walk-back in one compact panel.
+// @version      1.3.0
+// @updateURL    https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.meta.js
+// @downloadURL  https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.user.js
+// @description  Combat, reliable looting, potions, restocking, walk-back and an optional team relay in one compact panel.
 // @author       Adapted from TSK's OpenSRO Assistant
 // @license      GPL-2.0-or-later
 // @match        https://opensro.online/play*
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.2.128';
+const VERSION = '1.3.0';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -198,6 +198,7 @@ const DEFAULT_PROFILE = {
   mastery: { enabled: false, ids: [], gap: 0, skills: false, scope: 'rotation', reserve: 0, order: 'masteries' },
   party: { autoAcceptMatching: false, autoRecruit: false, joinMain: false, mainName: '', autoRes: false, acceptRes: false, resRadius: 300, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true,
     support: { enabled: false, whileStopped: false, range: 30, heal: { id: 0, group: 0, pct: 60, self: false }, group: { id: 0, group: 0, pct: 60, count: 2 }, buffs: [] } },
+  team: { enabled: false, url: '', token: '' },
   wardrobe: { on: true, phantom: true, realAnim: true, hideAvatars: false,
     eq: {}, av: {}, pet: { atk: 0, pick: 0, mount: 0 }, presets: {}, undo: null },
   macro: {
@@ -241,7 +242,7 @@ const DEFAULT_PROFILE = {
 function botProfile(input) {
   const result = deepMerge(DEFAULT_PROFILE, {});
   if (!input || typeof input !== 'object') return result;
-  for (const key of ['macro', 'potion', 'hunt', 'wardrobe', 'party', 'alchemy', 'mastery', 'statPoints', 'trace', 'items']) {
+  for (const key of ['macro', 'potion', 'hunt', 'wardrobe', 'party', 'team', 'alchemy', 'mastery', 'statPoints', 'trace', 'items']) {
     if (!input[key] || typeof input[key] !== 'object') continue;
     for (const field of Object.keys(DEFAULT_PROFILE[key])) {
       if (field in input[key]) result[key][field] = deepMerge(DEFAULT_PROFILE[key][field], input[key][field]);
@@ -4699,6 +4700,142 @@ const Support = {
 };
 
 
+// Team relay bus: a private WebSocket channel between this bot and the player's other characters.
+// Phase 1 carries presence only: who is connected, hunting, alive, at what level. Every character that
+// knows the room key joins the same room on the relay; the relay forwards beats between them and holds
+// no game logic. The bus is an independent service: it runs with hunting stopped, survives world
+// transitions, and a relay that is off or unreachable changes nothing about the bot's own behaviour.
+const TEAM_BEAT_MS = 5000;   // presence cadence; the relay drops a client silent for 30 s
+const TEAM_PEER_TTL_MS = 15000; // a peer whose beat stops is forgotten, not kept half-alive
+const TEAM_BACKOFF_MS = [5000, 10000, 20000, 60000]; // reconnect delay per consecutive failure
+const Team = {
+  socket: null, state: 'off', message: 'Team relay off.', peers: new Map(), name: '',
+  attempts: 0, retryAt: -Infinity, sentAt: -Infinity, cfgKey: null, handlers: {},
+  cfg() { return Settings.profile.team; },
+  reset() {
+    this.close();
+    this.peers.clear();
+    this.attempts = 0; this.retryAt = -Infinity; this.sentAt = -Infinity;
+    const on = !!this.cfg().enabled;
+    this.state = on ? 'connecting' : 'off';
+    this.message = on ? 'Connecting to the team relay…' : 'Team relay off.';
+  },
+  close() {
+    const s = this.socket;
+    this.socket = null;
+    if (s) { s.onopen = s.onclose = s.onmessage = s.onerror = null; try { s.close(); } catch {} }
+  },
+  // Extension point for later phases (shared intel, coordination): subscribe to a message type.
+  on(type, fn) { (this.handlers[type] ||= []).push(fn); },
+  payload() {
+    return { hunting: !!Hunt.running, alive: World.inWorld() && !World.isDead(),
+      mode: String(Controller.mode || 'idle'), level: World.gp?.progression?.level ?? null };
+  },
+  send(msg) {
+    if (this.socket?.readyState !== 1) return false;
+    try { this.socket.send(JSON.stringify(msg)); return true; } catch { return false; }
+  },
+  connect(url, token) {
+    let s = null;
+    try { s = new W.WebSocket(url); } catch (e) {
+      this.message = 'Relay address refused: ' + (e?.message || e).slice?.(0, 100);
+      this.scheduleRetry();
+      return;
+    }
+    this.socket = s;
+    this.state = 'connecting';
+    this.message = 'Connecting to the team relay…';
+    s.onopen = () => {
+      if (this.socket !== s) return;
+      this.attempts = 0;
+      this.state = 'online';
+      this.message = 'Connected as ' + this.name + '.';
+      this.sentAt = now();
+      this.send({ v: 1, type: 'hello', token, name: this.name, state: this.payload() });
+      UI.toast('Team relay connected.', 'info', 3000);
+    };
+    s.onmessage = e => { if (this.socket === s) this.receive(e?.data); };
+    // The browser always fires close after an error, so retries are owned by close alone.
+    s.onerror = () => {};
+    s.onclose = () => { if (this.socket === s) { this.socket = null; this.scheduleRetry(); } };
+  },
+  scheduleRetry(note = '') {
+    const delay = TEAM_BACKOFF_MS[Math.min(this.attempts, TEAM_BACKOFF_MS.length - 1)];
+    this.attempts++;
+    this.retryAt = now() + delay;
+    this.state = 'retrying';
+    this.message = (note || 'Relay connection lost') + '; retrying in ' + Math.round(delay / 1000) + ' s.';
+    if (this.attempts <= 2) Log.warn('Team relay: ' + this.message);
+  },
+  receive(text) {
+    let msg = null;
+    try { msg = JSON.parse(String(text)); } catch { return; }
+    if (!msg || typeof msg !== 'object') return;
+    switch (msg.type) {
+      case 'welcome':
+        this.peers = new Map((Array.isArray(msg.peers) ? msg.peers : [])
+          .filter(p => p?.name && p.name !== this.name)
+          .map(p => [p.name, { state: p.state || {}, at: now() }]));
+        break;
+      case 'peer':
+        if (msg.name && msg.name !== this.name) this.peers.set(msg.name, { state: msg.state || {}, at: now() });
+        break;
+      case 'join':
+        if (msg.name && msg.name !== this.name && !this.peers.has(msg.name)) {
+          this.peers.set(msg.name, { state: {}, at: now() });
+          UI.toast(msg.name + ' joined the team relay.', 'info', 3000);
+        }
+        break;
+      case 'leave':
+        if (msg.name && this.peers.delete(msg.name)) UI.toast(msg.name + ' left the team relay.', 'info', 3000);
+        break;
+      case 'error': {
+        const note = 'Relay: ' + String(msg.message || 'error').slice(0, 120);
+        Log.warn('Team relay: ' + note);
+        this.close();
+        this.scheduleRetry(note);
+        break;
+      }
+    }
+    for (const fn of this.handlers[msg.type] || []) {
+      try { fn(msg); } catch (e) { Log.error('Team handler error: ' + (e?.message || e)); }
+    }
+  },
+  tick() {
+    const c = this.cfg();
+    const key = !!c.enabled + '|' + c.url + '|' + c.token;
+    if (key !== this.cfgKey) { this.cfgKey = key; this.reset(); }
+    const t = now();
+    for (const [name, peer] of this.peers) if (t - peer.at > TEAM_PEER_TTL_MS) this.peers.delete(name);
+    if (!c.enabled) return;
+    const url = String(c.url || '').trim();
+    // The game page is HTTPS: a remote relay must use wss, or the browser blocks the socket silently.
+    if (!/^wss:\/\//i.test(url)) { this.state = 'off'; this.message = 'The relay address must start with wss://.'; return; }
+    if (typeof W.WebSocket !== 'function') { this.state = 'off'; this.message = 'This browser has no WebSocket.'; return; }
+    const name = String(World.charName || World.gp?.social?.localName || '');
+    if (!name) { this.state = 'waiting'; this.message = 'Waiting for the character name…'; return; }
+    this.name = name;
+    if (!this.socket && t >= this.retryAt) this.connect(url, String(c.token || ''));
+    if (this.socket?.readyState === 1 && t - this.sentAt >= TEAM_BEAT_MS) {
+      if (this.send({ type: 'beat', name: this.name, state: this.payload() })) this.sentAt = t;
+    }
+  },
+  status() {
+    if (!this.cfg().enabled) return 'Team relay off.';
+    if (this.state === 'online') return 'Connected as ' + this.name + '; ' + this.peers.size + (this.peers.size === 1 ? ' peer' : ' peers') + ' in the room.';
+    return this.message;
+  },
+  peerRows() {
+    const t = now();
+    return [...this.peers.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([name, peer]) => {
+      const s = peer.state || {};
+      const what = s.hunting ? 'hunting' : s.alive === false ? 'dead' : s.mode || 'idle';
+      return name + ' · ' + what + (Number.isInteger(s.level) ? ' · level ' + s.level : '') + ' · ' + Math.max(0, Math.round((t - peer.at) / 1000)) + ' s ago';
+    });
+  },
+};
+
+
 // Single owner for movement/combat/pickup. Potion use remains a separate emergency lane.
 const startHunting = Hunt.start;
 Hunt.start = function (...args) {
@@ -4874,6 +5011,7 @@ const Controller = {
   tick() {
     try {
       this.guard('Reconnect', () => Reconnect.tick());
+      this.guard('Team', () => Team.tick());
       Restock.sample();
       Alchemy.tick();
       if (BuffGear.run) {
@@ -8824,7 +8962,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.2.128", "title": "Town trips no longer stop on an item the merchant won't buy", "items": ["A town trip could stop at the weapon merchant with \"Inventory rejected: 2\". The bot had tried to sell an item the game does not allow merchants to buy (quest and event items, for example), and one refusal ended the whole trip.", "Items the game marks unsellable are now never offered, even with a Sell rule. They stay in the pet or bag.", "If the merchant still refuses an item, the bot keeps it, logs a warning and sells the rest, then carries on with the trip.", "Written from the code and simulated game state; not yet seen on a live server."]}, {"version": "1.2.127", "title": "Bag selling no longer stops on a full bag", "items": ["With **Sell items from the character bag too** on, a town trip with a completely full bag stopped before it ever reached the merchant that sells: at arrival (\"free a character bag slot\"), or at the potion merchant (no room for potions).", "Now, with that switch on, the trip goes to the repair merchant first (sell, ammunition, repair), then the potion merchant, then the world statue. A full bag is emptied before potions are bought. With the switch off, the order is unchanged.", "Written from the code and simulated game state; not yet seen on a live server."]}, {"version": "1.2.126", "title": "Sell from the character bag on town trips", "items": ["New switch in Scroll town cycle: **Sell items from the character bag too**. When on, the town trip sells unprotected items from your own bag at the repair merchant, after the pet loot, by the same rules as pet loot. Off by default.", "Never sold from the bag: potions, scrolls, supplies, Keep names, buff-set gear, the alchemy weapon, and anything with a Store, Keep or Drop rule. A Sell rule always sells.", "Tested in simulation only; not yet confirmed on the live server."]}, {"version": "1.2.125", "title": "Keep reconnecting through a long outage", "items": ["Overnight the bot could end up stopped with the game's \"Disconnected from the server.\" box on screen. Two gaps: that plain box (no \"session ended\" text) only ever repeated the same enter-character attempts, which fail once the server has dropped the login; and the limit of 3 page reloads per 30 minutes was permanent, so a server that was down for hours used up the reloads and the bot never tried again.", "Now, when the resume and three fresh entries have failed, the bot reloads the page just like after \"session ended\": the game restores the login from its own session cookie, the bot enters the character and hunting resumes.", "The reload limit is a pause: once the oldest reload is 30 minutes old, the bot tries again, for up to the 12 hours it keeps reconnecting."], "note": "Written from the code and simulated game state; not yet seen on a live server."}, {"version": "1.2.124", "title": "After a disconnect in town, do the town services and reverse", "items": ["After reconnecting, the bot walked from town to the hunting spot in short legs. From town that route often does not exist (\"no walkable route to the hunting spot\"), so it gave up and the character stayed in town.", "Now, when the character is back in a town far from the hunting spot and the town cycle's \"Revive in town and reverse to last scroll point\" is on, the bot runs the same trip as after a death: town services (potions, repairs, storage), then the reverse scroll to the last scroll point, then hunting. This covers a disconnect in town, while loading town, or a death while disconnected.", "Without that setting, or when the character is not in a known town, it still walks back as before."], "note": "Written from the code and simulated game state; not yet seen on a live server."}, {"version": "1.2.123", "title": "Alt accounts keep applying to the main's party", "items": ["With two alt accounts joining the same main, one could get in while the other sat on \"Waiting for the party board…\" forever. The main answers one application at a time, so the second application could be dropped, and the alt never tried again.", "An application that has not been answered after 30 seconds is now sent again, for as long as the alt is outside the main's party. The check already ran on every tick; only this wait was open-ended."], "note": "Found by reading the code with two alts in mind; not yet confirmed on a live server. If an alt still fails to join, its status line under Party says why."}, {"version": "1.2.122", "title": "Revive and return after dying while disconnected", "items": ["If the character was killed while the connection was gone (mobs kept hitting it), the bot came back, saw a dead character and gave up: \"hunting was not resumed\". It never revived or walked back to the hunting spot.", "Now, when hunting was running and the character comes back dead, the bot starts hunting again so the normal death handling takes over: it revives (with \"Revive at return point and continue\" or the town auto-revive on) and walks back to the hunting spot. With \"On death\" set to \"Stop hunting\", it stops after the death, as it always does."]}, {"version": "1.2.121", "title": "Recover from \"Your session ended while the connection was gone\"", "items": ["When the connection is gone for more than about 30 seconds the server ends the game session, and the game shows \"Your session ended while the connection was gone. Please log in again.\" The bot used to keep trying to resume that session, which can no longer work, and the window stayed on screen.", "The bot now skips the resume and enters the character again straight away. If that has not brought the character back after 30 seconds, it reloads the page: the game restores your login from its own session cookie, the bot enters the character and hunting resumes, as after a failed load (1.2.120). It shares that reload limit of 3 per 30 minutes.", "The window's Confirm button is never pressed, because it logs you out. If the login really is gone, the status line says so and the bot waits for you."], "note": "Written from the game's own code and simulated game state; not yet seen on a live server."}];
+const RELEASE_NOTES = [{"version": "1.3.0", "title": "Team relay (phase 1: presence)", "items": ["New Team page: connect several characters through your own WebSocket relay; while it runs, each character sees the others' presence (name, hunting, alive, level) in the panel.", "A reference relay server (rooms by room key, presence forwarding, no game logic) is included under relay/ in the repository.", "Presence is private to one room key; nothing is shared beyond it. The bot never depends on the relay: off or unreachable, everything else works exactly as before.", "Update checks now come from this fork's repository (duan78/opensro-bot-lean) instead of the original."], "note": "Presence, heartbeats and reconnection are tested in simulation only; a live relay check is still to do."}, {"version": "1.2.128", "title": "Town trips no longer stop on an item the merchant won't buy", "items": ["A town trip could stop at the weapon merchant with \"Inventory rejected: 2\". The bot had tried to sell an item the game does not allow merchants to buy (quest and event items, for example), and one refusal ended the whole trip.", "Items the game marks unsellable are now never offered, even with a Sell rule. They stay in the pet or bag.", "If the merchant still refuses an item, the bot keeps it, logs a warning and sells the rest, then carries on with the trip.", "Written from the code and simulated game state; not yet seen on a live server."]}, {"version": "1.2.127", "title": "Bag selling no longer stops on a full bag", "items": ["With **Sell items from the character bag too** on, a town trip with a completely full bag stopped before it ever reached the merchant that sells: at arrival (\"free a character bag slot\"), or at the potion merchant (no room for potions).", "Now, with that switch on, the trip goes to the repair merchant first (sell, ammunition, repair), then the potion merchant, then the world statue. A full bag is emptied before potions are bought. With the switch off, the order is unchanged.", "Written from the code and simulated game state; not yet seen on a live server."]}, {"version": "1.2.126", "title": "Sell from the character bag on town trips", "items": ["New switch in Scroll town cycle: **Sell items from the character bag too**. When on, the town trip sells unprotected items from your own bag at the repair merchant, after the pet loot, by the same rules as pet loot. Off by default.", "Never sold from the bag: potions, scrolls, supplies, Keep names, buff-set gear, the alchemy weapon, and anything with a Store, Keep or Drop rule. A Sell rule always sells.", "Tested in simulation only; not yet confirmed on the live server."]}, {"version": "1.2.125", "title": "Keep reconnecting through a long outage", "items": ["Overnight the bot could end up stopped with the game's \"Disconnected from the server.\" box on screen. Two gaps: that plain box (no \"session ended\" text) only ever repeated the same enter-character attempts, which fail once the server has dropped the login; and the limit of 3 page reloads per 30 minutes was permanent, so a server that was down for hours used up the reloads and the bot never tried again.", "Now, when the resume and three fresh entries have failed, the bot reloads the page just like after \"session ended\": the game restores the login from its own session cookie, the bot enters the character and hunting resumes.", "The reload limit is a pause: once the oldest reload is 30 minutes old, the bot tries again, for up to the 12 hours it keeps reconnecting."], "note": "Written from the code and simulated game state; not yet seen on a live server."}, {"version": "1.2.124", "title": "After a disconnect in town, do the town services and reverse", "items": ["After reconnecting, the bot walked from town to the hunting spot in short legs. From town that route often does not exist (\"no walkable route to the hunting spot\"), so it gave up and the character stayed in town.", "Now, when the character is back in a town far from the hunting spot and the town cycle's \"Revive in town and reverse to last scroll point\" is on, the bot runs the same trip as after a death: town services (potions, repairs, storage), then the reverse scroll to the last scroll point, then hunting. This covers a disconnect in town, while loading town, or a death while disconnected.", "Without that setting, or when the character is not in a known town, it still walks back as before."], "note": "Written from the code and simulated game state; not yet seen on a live server."}, {"version": "1.2.123", "title": "Alt accounts keep applying to the main's party", "items": ["With two alt accounts joining the same main, one could get in while the other sat on \"Waiting for the party board…\" forever. The main answers one application at a time, so the second application could be dropped, and the alt never tried again.", "An application that has not been answered after 30 seconds is now sent again, for as long as the alt is outside the main's party. The check already ran on every tick; only this wait was open-ended."], "note": "Found by reading the code with two alts in mind; not yet confirmed on a live server. If an alt still fails to join, its status line under Party says why."}, {"version": "1.2.122", "title": "Revive and return after dying while disconnected", "items": ["If the character was killed while the connection was gone (mobs kept hitting it), the bot came back, saw a dead character and gave up: \"hunting was not resumed\". It never revived or walked back to the hunting spot.", "Now, when hunting was running and the character comes back dead, the bot starts hunting again so the normal death handling takes over: it revives (with \"Revive at return point and continue\" or the town auto-revive on) and walks back to the hunting spot. With \"On death\" set to \"Stop hunting\", it stops after the death, as it always does."]}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -8845,11 +8983,11 @@ const Updates = {
     const abort = new AbortController(), timer = setTimeout(() => abort.abort(), 15000);
     try {
       const options = { signal: abort.signal, cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' };
-      const response = await W.fetch('https://api.github.com/repos/nixxane/opensro-bot-lean/commits/main', options);
+      const response = await W.fetch('https://api.github.com/repos/duan78/opensro-bot-lean/commits/main', options);
       if (!response.ok) return;
       const { sha } = await response.json();
       if (typeof sha !== 'string' || !/^[a-f0-9]{40}$/.test(sha)) return;
-      const base = 'https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + sha + '/bot.lean.';
+      const base = 'https://raw.githubusercontent.com/duan78/opensro-bot-lean/' + sha + '/bot.lean.';
       const metadata = await W.fetch(base + 'meta.js', options);
       if (!metadata.ok) return;
       const match = (await metadata.text()).match(/^\/\/ @version\s+(\d+\.\d+\.\d+)\s*$/m);
@@ -8867,7 +9005,7 @@ const Updates = {
   // to update. Shown as plain text only; a missing or odd file just leaves the plain Update button.
   async headline(sha, version, options) {
     try {
-      const response = await W.fetch('https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + sha + '/notes/' + version + '.md', options);
+      const response = await W.fetch('https://raw.githubusercontent.com/duan78/opensro-bot-lean/' + sha + '/notes/' + version + '.md', options);
       if (!response.ok) return '';
       const title = String(await response.text()).slice(0, 8192).match(/^# (.+)$/m)?.[1] || '';
       // Control and line-separator characters are dropped: the headline is one line of plain text.
@@ -9087,7 +9225,7 @@ const Diagnostics = {
   snapshot() {
     const gp = World.gp, c = Settings.profile, pet = Loot.pet(), social = gp?.social, matching = gp?.partyMatching;
     return {
-      action: this.main(), partyStatus: this.party(), petStatus: this.pet(), townStatus: this.town(), townDetail: this.townDetail(), townReason: this.townReason(),
+      action: this.main(), partyStatus: this.party(), teamStatus: Settings.profile.team?.enabled ? Team.status() : '', petStatus: this.pet(), townStatus: this.town(), townDetail: this.townDetail(), townReason: this.townReason(),
       navigationReady: !!Navigation.scene, navigationError: String(Navigation.error || '').slice(0, 80),
       buffGearStatus: BuffGear.cfg().buffSwap ? String(BuffGear.status()).slice(0, 600) : '', buffGearActive: !!BuffGear.run, buffGearRestoring: !!BuffGear.run?.restoring, buffGearMovePending: !!BuffGear.run?.pending, buffGearRecovery: !!BuffGear.recovery,
       alchemyActive: !!Alchemy.run, alchemyPending: !!Alchemy.pending, alchemyAttempts: this.number(Alchemy.result?.attempts),
@@ -10213,6 +10351,8 @@ const UI = {
       this.sections('townTrip', 'townWhen', 'townCycle', 'townAmmo');
     } else if (this.current === 'Party') {
       this.sections('partyMembers', 'partyHeal', 'partyBuffs', 'partyParty', 'partyTrace');
+    } else if (this.current === 'Team') {
+      this.sections('teamRelay');
     } else if (this.current === 'Items') {
       this.drawItems();
     } else if (this.current === 'Setup') {
@@ -10247,6 +10387,7 @@ const UI = {
       { name: 'Party/Autores', icon: 'action\\icon_cha_party', pages: ['Party'], sections: [
         ['partyMembers', 'Current party'], ['partyParty', 'Party settings'], ['partyHeal']] },
       { name: 'Player buffing', icon: 'action\\icon_cha_party', pages: ['Party'], sections: [['partyBuffs', 'Player buffing']] },
+      { name: 'Team', icon: 'action\\icon_cha_party', pages: ['Team'], sections: [['teamRelay', 'Team relay']] },
       { name: 'Auto alchemy', icon: 'action\\icon_cha_alchemy', pages: ['Alchemy'], draw() { Alchemy.draw(); } },
       { name: 'Extra', icon: 'action\\icon_cha_helper', pages: ['Settings'], sections: [
         ['settingsStats'], ['settingsMastery'], ['settingsStatPoints'], ['settingsProfiles'], ['settingsShare'], ['settingsReports'], ['settingsActivity']] },
@@ -10293,7 +10434,7 @@ const UI = {
     const icons = { Items: 'action\\cos_cmd_inventory', Party: 'action\\icon_cha_party', Combat: 'action\\icon_cha_auto_attack', Loot: 'action\\icon_cha_autoget', Supplies: 'action\\icon_cha_recovery', Town: 'item\\etc\\mall_return_scroll',
       Alchemy: 'action\\icon_cha_alchemy', Wardrobe: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper', Setup: 'action\\icon_cha_camp' };
     const entries = this.classic ? this.classicTabs().map(t => ({ name: t.name, icon: t.icon, open: () => { this.ctab = t.name; this.draw(); } }))
-      : ['Setup', 'Map', 'Combat', 'Party', 'Loot', 'Items', 'Supplies', 'Town', 'Alchemy', 'Wardrobe', 'Settings'].map(name => ({ name, icon: icons[name], open: () => { this.current = name; this.draw(); } }));
+      : ['Setup', 'Map', 'Combat', 'Party', 'Team', 'Loot', 'Items', 'Supplies', 'Town', 'Alchemy', 'Wardrobe', 'Settings'].map(name => ({ name, icon: icons[name], open: () => { this.current = name; this.draw(); } }));
     // Page icons are the game's own action-bar icons; they show only in the wide and classic windows' page lists.
     for (const entry of entries) {
       const tab = this.button(entry.name, entry.open);
@@ -10658,6 +10799,20 @@ const UI = {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       Trace.draw(host);
   },
+  section_teamRelay(host) {
+    const team = () => Settings.profile.team;
+    this.teamNote = el('p', '', 'muted');
+    this.teamPeers = el('div');
+    host.append(this.group('Team relay',
+      this.check('Connect to a team relay', () => team().enabled, v => { team().enabled = v; Team.reset(); this.draw(); }),
+      this.text('Relay address (wss://…)', () => team().url, v => { team().url = v; Team.tick(); }),
+      this.text('Room key', () => team().token, v => { team().token = v; Team.tick(); }),
+      this.teamNote,
+      el('p', 'A private channel between your own characters over a WebSocket relay you control. Characters that enter the same room key see each other\'s presence here; nothing is sent to anyone else, and the bot never depends on it: with the relay off or unreachable everything else works exactly as before. The address must start with wss://. See docs/TEAM.md in the repository for the plan and the reference relay under relay/.', 'muted')));
+    const peers = this.group('Connected characters');
+    peers.append(this.teamPeers, el('p', 'Each character announces itself every 5 seconds and is dropped from this list after 15 seconds of silence.', 'muted'));
+    host.append(peers);
+  },
   section_settingsStats(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       Stats.draw(host);
@@ -10874,6 +11029,11 @@ const UI = {
       if (Settings.profile.party.joinMain && Party.joinMessage) notes.push(Party.joinMessage);
       if (Settings.profile.party.autoRes) notes.push(Resurrect.message);
       this.partyNote.textContent = notes.join(' ');
+    }
+    if (this.is('Team') && this.teamNote) {
+      this.teamNote.textContent = Team.status();
+      const rows = Team.peerRows();
+      this.teamPeers.replaceChildren(...(rows.length ? rows.map(text => el('div', text)) : [el('div', 'No other character in the room yet.', 'muted')]));
     }
     if (!this.status) return;
     if (this.is('Supplies') && this.petPotionNote) this.petPotionNote.textContent = PetPotion.message;
@@ -11742,7 +11902,7 @@ function boot() {
     const key = name ? 'profile:' + name : 'profile:default';
     if (key !== Settings.profileKey) { Town.lastScrollPoint = null; Town.deathPoint = null; stopAll(); Settings.useCharacter(name); }
   });
-  bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); Trace.reset(); BuffGear.reset(); Town.lastScrollPoint = null; Town.deathPoint = null; SpeedScroll.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
+  bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); Trace.reset(); BuffGear.reset(); Team.reset(); Town.lastScrollPoint = null; Town.deathPoint = null; SpeedScroll.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
   bus.on('phase', phase => {
     if (phase !== 'world') {
       BuffGear.interrupt('World transition interrupted buff swaps.');
@@ -11780,7 +11940,7 @@ function boot() {
   }, true);
   Ticker.start(() => Controller.tick(), 100);
   setInterval(() => { Wardrobe.tick(); UI.update(); }, 500);
-  W.SROLean = { version: VERSION, stats: Stats, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, buffGear: BuffGear, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect,
+  W.SROLean = { version: VERSION, stats: Stats, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, buffGear: BuffGear, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect, team: Team,
     restock: Restock, town: Town, walkBack: WalkBack, antiStuck: AntiStuck, chase: Chase, trap: Trap, autoMastery: AutoMastery, statPoints: StatPoints, share: ProfileShare, trace: Trace, setup: Setup, reconnect: Reconnect, petPotion: PetPotion, navigation: Navigation, route: Route, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, activity: Activity, map: LeanMap, support: Support, items: ItemRules, stop: stopAll, log: Log };
   Log.info('NIX ready. F8 starts/stops; F7 folds; the × minimises; Shift+F7 hides/shows the window.');
 }

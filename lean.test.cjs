@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Route, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Route, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Team, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -4246,7 +4246,7 @@ test('session XP keeps unresolved level transitions bounded and marked partial',
 
 async function updateTests() {
   async function check(name, fn) { await fn(); passed++; console.log('PASS ' + name); }
-  const sha = 'a'.repeat(40), base = 'https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + sha + '/bot.lean.';
+  const sha = 'a'.repeat(40), base = 'https://raw.githubusercontent.com/duan78/opensro-bot-lean/' + sha + '/bot.lean.';
   function updater(f, version = '9.9.9') {
     const calls = [];
     f.win.fetch = async (url, options) => {
@@ -4258,14 +4258,14 @@ async function updateTests() {
   }
   await check('updates compare numeric version components and ignore malformed versions', async () => {
     const f = fixture();
-    for (const v of ['9.9.9', '1.3.0', '2.0.0']) assert.equal(f.Updates.newer(v), true);
-    for (const v of ['1.2.9', '1.2.36', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
+    for (const v of ['9.9.9', '1.3.1', '2.0.0']) assert.equal(f.Updates.newer(v), true);
+    for (const v of ['1.2.9', '1.2.36', '1.3.0', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
   });
   await check('updates pin metadata and user-initiated installer to the same trusted commit', async () => {
     const f = fixture(), calls = updater(f); f.UI.updateButton = {};
     await f.Updates.check();
     assert.equal(calls.length, 3); assert.equal(calls[1].url, base + 'meta.js');
-    assert.equal(calls[2].url, 'https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + sha + '/notes/9.9.9.md', 'the headline comes from the same commit');
+    assert.equal(calls[2].url, 'https://raw.githubusercontent.com/duan78/opensro-bot-lean/' + sha + '/notes/9.9.9.md', 'the headline comes from the same commit');
     assert.equal(calls[0].options.credentials, 'omit'); assert.equal(calls[0].options.cache, 'no-store');
     assert.equal(f.UI.updateButton.hidden, false); assert.equal(f.UI.updateButton.textContent, 'Update 9.9.9');
     let opened; f.win.open = (...args) => { opened = args; };
@@ -4501,4 +4501,87 @@ test('a plain "Disconnected from the server." that nothing recovers ends in a pa
   assert.ok(g.f.Reconnect.retryAt > Date.now() + 25 * 60000, 'paused until the oldest reload is 30 minutes old'); g.f.Reconnect.retryAt = Date.now() - 1; g.f.storage.set('sro-lean-reload', JSON.stringify({ times: [Date.now() - 31 * 60000, Date.now() - 32 * 60000, Date.now() - 33 * 60000] }));
   for (let i = 0; i < 200 && g.reloads() === 0; i++) { g.f.advance(10000); g.f.Controller.tick(); }
   assert.equal(g.reloads(), 1, 'once the limit window has passed the bot tries again');
+});
+
+// ---- Team relay (phase 1: presence) ----
+function teamFixture(url = 'wss://relay.example', token = 'room-key') {
+  const f = fixture(), sockets = [];
+  class FakeSocket {
+    constructor(address) { this.url = address; this.readyState = 0; this.sent = []; sockets.push(this); }
+    send(text) { this.sent.push(JSON.parse(text)); }
+    close() { if (this.readyState < 2) { this.readyState = 3; this.onclose && this.onclose({ code: 1000 }); } }
+    open() { this.readyState = 1; this.onopen && this.onopen(); }
+    receive(msg) { this.onmessage && this.onmessage({ data: JSON.stringify(msg) }); }
+    drop() { if (this.readyState < 2) { this.readyState = 3; this.onclose && this.onclose({}); } }
+  }
+  f.win.WebSocket = FakeSocket;
+  f.World.charName = 'RelayOne';
+  f.Settings.profile.team = { enabled: true, url, token };
+  return Object.assign(f, { teamSockets: sockets });
+}
+
+test('the team relay connects, announces itself and tracks the peers the relay reports', () => {
+  const f = teamFixture();
+  f.Team.tick();
+  assert.equal(f.teamSockets.length, 1);
+  const s = f.teamSockets[0];
+  s.open();
+  assert.equal(s.sent[0].type, 'hello'); assert.equal(s.sent[0].token, 'room-key'); assert.equal(s.sent[0].name, 'RelayOne');
+  assert.ok(f.Team.status().includes('Connected as RelayOne'));
+  s.receive({ type: 'welcome', you: 'RelayOne', peers: [{ name: 'AltTwo', state: { hunting: true, level: 42 } }] });
+  assert.ok(f.Team.peerRows().some(r => r.includes('AltTwo') && r.includes('hunting')));
+  s.receive({ type: 'peer', name: 'AltTwo', state: { hunting: false, level: 42 } });
+  assert.ok(f.Team.peerRows().every(r => !r.includes('hunting')), 'the fresher beat wins');
+  s.receive({ type: 'peer', name: 'RelayOne', state: { hunting: true } });
+  assert.ok(f.Team.peerRows().every(r => !r.includes('RelayOne')), 'echoes of own name are ignored');
+});
+
+test('the team relay beats every five seconds and forgets a silent peer after fifteen', () => {
+  const f = teamFixture();
+  f.Team.tick(); const s = f.teamSockets[0]; s.open();
+  s.sent.length = 0;
+  f.Team.tick(); assert.equal(s.sent.length, 0, 'no beat before five seconds');
+  f.advance(5000); f.Team.tick();
+  assert.equal(s.sent.at(-1).type, 'beat'); assert.equal(s.sent.at(-1).name, 'RelayOne'); assert.equal(s.sent.at(-1).state.hunting, false);
+  s.receive({ type: 'peer', name: 'AltTwo', state: {} });
+  f.advance(15001); f.Team.tick();
+  assert.ok(f.Team.peerRows().every(r => !r.includes('AltTwo')), 'a silent peer expires');
+});
+
+test('a remote relay address must use wss, and the bus retries with growing backoff after drops', () => {
+  const f = teamFixture('ws://relay.example');
+  f.Team.tick(); assert.equal(f.teamSockets.length, 0); assert.ok(f.Team.status().includes('wss://'));
+  f.Settings.profile.team.url = 'wss://relay.example';
+  f.Team.tick(); f.teamSockets[0].open(); f.teamSockets[0].drop();
+  assert.equal(f.Team.state, 'retrying');
+  f.advance(5000); f.Team.tick(); assert.equal(f.teamSockets.length, 2, 'first retry after five seconds');
+  f.teamSockets[1].drop();
+  f.advance(5000); f.Team.tick(); assert.equal(f.teamSockets.length, 2, 'the second consecutive failure waits ten seconds');
+  f.advance(5000); f.Team.tick(); assert.equal(f.teamSockets.length, 3);
+  f.teamSockets[2].open();
+  assert.equal(f.Team.attempts, 0, 'a successful connection resets the backoff');
+});
+
+test('a relay error is reported without touching the bot, and the switch closes every socket', () => {
+  const f = teamFixture();
+  f.Team.tick(); const s = f.teamSockets[0]; s.open();
+  s.receive({ type: 'error', message: 'first message must be a v1 hello' });
+  assert.ok(f.Team.status().includes('hello'));
+  assert.equal(s.readyState, 3, 'the socket is closed after a relay error');
+  f.Hunt.start(); assert.equal(f.Hunt.running, true, 'hunting starts with the relay down');
+  f.Settings.profile.team.enabled = false; f.Team.tick();
+  assert.ok(f.teamSockets.every(x => x.readyState === 3), 'everything is closed once switched off');
+  assert.equal(f.Team.status(), 'Team relay off.');
+});
+
+test('a changed room key reconnects into the new room, and the bus waits for the character name', () => {
+  const f = teamFixture();
+  f.Team.tick(); const s = f.teamSockets[0]; s.open();
+  f.Settings.profile.team.token = 'second-key';
+  f.Team.tick();
+  assert.equal(s.readyState, 3, 'the old connection is closed');
+  const next = f.teamSockets.at(-1); next.open();
+  assert.equal(next.sent[0].token, 'second-key');
+  const g = teamFixture(); g.World.charName = '';
+  g.Team.tick(); assert.equal(g.teamSockets.length, 0); assert.ok(g.Team.status().includes('character name'));
 });
