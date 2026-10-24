@@ -101,6 +101,7 @@ const TeamArbiter = {
   huntAtUnique(name) {
     const record = TeamKnowledge.uniques.get(name), pose = World.pose();
     if (!record?.pos || !Number.isInteger(record.pos.regionId)) { UI.toast('No position is known for ' + name + ' yet.', 'warn'); return false; }
+    this.converge = null; // a manual move cancels any automatic converge so its restore cannot clobber it
     Settings.profile.hunt.center = { regionId: record.pos.regionId, x: Math.round(record.pos.x), y: Number(pose?.y) || 0, z: Math.round(record.pos.z) };
     Settings.saveProfile(); bus.emit('center');
     UI.toast('Hunting spot moved to ' + name + "'s last known position.");

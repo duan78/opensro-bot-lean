@@ -101,7 +101,13 @@ const TeamKnowledge = {
           UI.toast(ev.name + ' spotted by ' + from + '.', 'warn', 6000);
           if (Settings.profile.hunt.pickup.soxSound) Sound.play('unique');
         }
-      } else if (ev.state === 'dead') this.dead(ev.name, ev.pos);
+      } else if (ev.state === 'dead') {
+        // A remote death is recorded quietly: re-announcing it would echo between clients forever.
+        const record = this.uniques.get(ev.name) || { name: ev.name, at: 0 };
+        record.deadAt = Date.now(); record.at = record.deadAt; if (ev.pos) record.pos = ev.pos;
+        this.uniques.set(ev.name, record); this.dirty = true;
+        UI.toast(ev.name + ' is dead (' + from + '); respawn window ' + this.hoursFor(ev.name) + ' h.', 'info', 6000);
+      }
     } else if (ev?.kind === 'hostile' && ev.name) {
       const known = this.players.get(ev.name) || { hostile: 0, hits: 0, at: Date.now() };
       known.hostile++; known.at = Date.now();
@@ -124,7 +130,8 @@ const TeamKnowledge = {
     for (const [key, row] of Object.entries(value.players || {})) mergeRow(this.players, key, row);
     for (const [key, count] of Object.entries(value.drops || {})) if (Number.isFinite(count)) this.drops.set(key, Math.max(this.drops.get(key) || 0, count));
     if (Number.isFinite(value.gold)) this.gold = Math.max(this.gold, value.gold);
-    this.dirty = false;
+    // Local changes that were still waiting for their own put stay waiting: a peer's store
+    // write must never cancel a sync this client owes the room.
   },
   tick() {
     if (!Team.online()) return;

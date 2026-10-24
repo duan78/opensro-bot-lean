@@ -4258,8 +4258,8 @@ async function updateTests() {
   }
   await check('updates compare numeric version components and ignore malformed versions', async () => {
     const f = fixture();
-    for (const v of ['9.9.9', '1.4.2', '2.0.0']) assert.equal(f.Updates.newer(v), true);
-    for (const v of ['1.2.9', '1.2.36', '1.3.0', '1.4.0', '1.4.1', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
+    for (const v of ['9.9.9', '1.4.3', '2.0.0']) assert.equal(f.Updates.newer(v), true);
+    for (const v of ['1.2.9', '1.2.36', '1.3.0', '1.4.0', '1.4.1', '1.4.2', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
   });
   await check('updates pin metadata and user-initiated installer to the same trusted commit', async () => {
     const f = fixture(), calls = updater(f); f.UI.updateButton = {};
@@ -4741,4 +4741,26 @@ test('public knowledge is stored to and hydrated from the relay public pool', ()
   assert.ok(puts.some(m => m.scope === 'public'), 'with the public lane on, the public store is written too');
   f.socket.receive({ type: 'kv-value', key: 'knowledge', value: { uniques: { Nebs: { name: 'Nebs', at: Date.now(), deadAt: Date.now() } } } });
   assert.ok(f.TeamKnowledge.uniques.get('Nebs')?.deadAt, 'a public store read hydrates the tracker');
+});
+
+test('a remote unique death is recorded but never re-announced, so no echo loops between clients', () => {
+  const f = connectedTeam();
+  f.TeamKnowledge.uniques.set('Tiger Girl', { name: 'Tiger Girl', at: Date.now() - 60000, appearAt: Date.now() - 60000 });
+  const before = f.socket.sent.filter(m => m.type === 'msg' && m.payload.kind === 'event').length;
+  f.socket.receive({ type: 'msg', from: 'AltTwo', payload: { kind: 'event', event: { kind: 'unique', name: 'Tiger Girl', state: 'dead', pos: { regionId: 1, x: 2, z: 2 } } } });
+  assert.ok(f.TeamKnowledge.uniques.get('Tiger Girl')?.deadAt > 0, 'the death is recorded');
+  const after = f.socket.sent.filter(m => m.type === 'msg' && m.payload.kind === 'event').length;
+  assert.equal(after, before, 'recording a remote death must not announce anything back');
+});
+
+test('a peer\'s store write does not cancel the sync this client still owes the room', () => {
+  const f = connectedTeam();
+  f.TeamKnowledge.saw({ name: 'Latecomer', gid: 900, regionId: 1, x: 3, z: 3, level: 30 }, 'me');
+  assert.ok(f.TeamKnowledge.dirty, 'a local sighting is pending');
+  f.socket.receive({ type: 'kv-value', key: 'knowledge', value: { players: { Earlier: { name: 'Earlier', at: Date.now() } } } });
+  assert.ok(f.TeamKnowledge.dirty, 'hydration keeps the pending local change');
+  f.TeamKnowledge.syncedAt = -Infinity; f.advance(31000); f.TeamKnowledge.tick();
+  const put = f.socket.sent.filter(m => m.type === 'kv-put' && m.scope === 'room').at(-1);
+  assert.ok(put.value.players.Latecomer, 'the pending sighting is in the put');
+  assert.ok(put.value.players.Earlier, 'the hydrated record is in the put too');
 });

@@ -69,7 +69,7 @@ const TeamIntel = {
         const known = this.world.get(row.gid);
         if (known && known.src === 'me') continue; // own eyes are fresher than any report
         if (known && known.at > t - 1000) continue;
-        this.world.set(row.gid, { kind: row.name && !row.cls ? 'player' : row.cls ? 'monster' : 'monster',
+        this.world.set(row.gid, { kind: row.cls ? 'monster' : 'player',
           gid: row.gid, name: row.name, cls: row.cls, level: row.level ?? null, hpPct: row.hpPct ?? null,
           unique: !!row.unique, regionId: row.regionId, x: row.x, z: row.z, src: from, at: t });
         TeamKnowledge.saw(row, from);
