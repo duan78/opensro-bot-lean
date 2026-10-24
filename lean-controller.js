@@ -173,7 +173,7 @@ const Controller = {
   tick() {
     try {
       this.guard('Reconnect', () => Reconnect.tick());
-      this.guard('Team', () => { Team.tick(); TeamIntel.tick(); TeamKnowledge.tick(); });
+      this.guard('Team', () => { Team.tick(); TeamIntel.tick(); TeamKnowledge.tick(); TeamArbiter.tick(); });
       Restock.sample();
       Alchemy.tick();
       if (BuffGear.run) {

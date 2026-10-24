@@ -997,6 +997,7 @@ const UI = {
       this.select('This character\'s role', [['none', 'No role'], ['tank', 'Tank'], ['healer', 'Healer'], ['support', 'Support'], ['dps', 'Damage'], ['scout', 'Scout']], () => team().role, v => team().role = v),
       this.check('Assist: fight what a teammate fights', () => team().assist, v => team().assist = v),
       this.check('Recall to town together', () => team().townSync, v => team().townSync = v),
+      this.check('Go to a unique that appears (the saved spot comes back)', () => team().converge, v => team().converge = v),
       this.teamNote,
       el('p', 'A private channel between your own characters over a WebSocket relay you control. Characters that enter the same room key see each other\'s presence here; nothing is sent to anyone else, and the bot never depends on it: with the relay off or unreachable everything else works exactly as before. The address must start with wss://. Assist joins the fight a teammate (or party member) is already in; town sync starts your town trip when a teammate starts theirs. The room\'s console page on the relay can stop everyone or call a group town trip.', 'muted')));
     const share = this.group('Sharing');

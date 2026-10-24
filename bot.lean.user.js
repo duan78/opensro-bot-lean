@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.4.0
+// @version      1.4.1
 // @updateURL    https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking, walk-back and an optional team relay in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.4.0';
+const VERSION = '1.4.1';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -198,7 +198,7 @@ const DEFAULT_PROFILE = {
   mastery: { enabled: false, ids: [], gap: 0, skills: false, scope: 'rotation', reserve: 0, order: 'masteries' },
   party: { autoAcceptMatching: false, autoRecruit: false, joinMain: false, mainName: '', autoRes: false, acceptRes: false, resRadius: 300, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true,
     support: { enabled: false, whileStopped: false, range: 30, heal: { id: 0, group: 0, pct: 60, self: false }, group: { id: 0, group: 0, pct: 60, count: 2 }, buffs: [] } },
-  team: { enabled: false, url: '', token: '', role: 'none', assist: false, townSync: false, share: { public: false, monsters: true, players: true, uniques: true } },
+  team: { enabled: false, url: '', token: '', role: 'none', assist: false, townSync: false, converge: false, share: { public: false, monsters: true, players: true, uniques: true } },
   wardrobe: { on: true, phantom: true, realAnim: true, hideAvatars: false,
     eq: {}, av: {}, pet: { atk: 0, pick: 0, mount: 0 }, presets: {}, undo: null },
   macro: {
@@ -5003,6 +5003,7 @@ const TeamKnowledge = {
     UI.toast(name + ' appeared' + (pos ? '' : ' (somewhere on this server)'), 'warn', 6000);
     if (Settings.profile.hunt.pickup.soxSound) Sound.play('unique');
     this.announce({ kind: 'unique', name, state: 'appear', pos: pos || record.pos || null });
+    TeamArbiter.event('local', { kind: 'unique', name, state: 'appear', pos: pos || record.pos || null });
   },
   dead(name, pos) {
     const record = this.uniques.get(name) || { name, at: 0 };
@@ -5011,6 +5012,7 @@ const TeamKnowledge = {
     this.dirty = true;
     UI.toast(name + ' is dead; respawn window ' + this.hoursFor(name) + ' h.', 'info', 6000);
     this.announce({ kind: 'unique', name, state: 'dead', pos: pos || record.pos || null });
+    TeamArbiter.event('local', { kind: 'unique', name, state: 'dead', pos: pos || record.pos || null });
   },
   killed(e, killer) {
     if (e?.kind === 'monster' && e.rarity === 3 && e.name) this.dead(e.name, { regionId: e.regionId, x: Math.round(e.x), z: Math.round(e.z) });
@@ -5090,7 +5092,10 @@ const TeamKnowledge = {
     if (!Team.online()) return;
     const t = Date.now();
     if (this.dirty && t - this.syncedAt > KNOWLEDGE_SYNC_MS) {
-      if (Team.send({ type: 'kv-put', key: 'knowledge', scope: 'room', value: this.doc() })) { this.dirty = false; this.syncedAt = t; }
+      if (Team.send({ type: 'kv-put', key: 'knowledge', scope: 'room', value: this.doc() })) {
+        this.dirty = false; this.syncedAt = t;
+        if (this.share().public && this.share().uniques) Team.send({ type: 'kv-put', key: 'knowledge', scope: 'public', value: this.doc() });
+      }
     } else if (!this.dirty) this.syncedAt = t; // a fresh sync keeps the next change prompt
   },
   // One line per unique for the Team page: state and, when waiting, the predicted window.
@@ -5116,7 +5121,11 @@ const TeamKnowledge = {
 };
 bus.on('notice', n => TeamKnowledge.onNotice(n));
 bus.on('loot', e => TeamKnowledge.onLoot(e));
-Team.on('welcome', () => { if (Team.online()) Team.send({ type: 'kv-get', key: 'knowledge', scope: 'room' }); });
+Team.on('welcome', () => {
+  if (!Team.online()) return;
+  Team.send({ type: 'kv-get', key: 'knowledge', scope: 'room' });
+  if (Settings.profile.team?.share?.public && Settings.profile.team.share.uniques) Team.send({ type: 'kv-get', key: 'knowledge', scope: 'public' });
+});
 Team.on('kv-value', m => TeamKnowledge.hydrate(m?.value));
 
 
@@ -5295,7 +5304,7 @@ const Controller = {
   tick() {
     try {
       this.guard('Reconnect', () => Reconnect.tick());
-      this.guard('Team', () => { Team.tick(); TeamIntel.tick(); TeamKnowledge.tick(); });
+      this.guard('Team', () => { Team.tick(); TeamIntel.tick(); TeamKnowledge.tick(); TeamArbiter.tick(); });
       Restock.sample();
       Alchemy.tick();
       if (BuffGear.run) {
@@ -5367,7 +5376,7 @@ const Controller = {
 // The room's console (served by the relay) can stop everyone or call a group town trip. Every rule
 // is local and advisory: each bot still acts only through its own command layer.
 const TeamArbiter = {
-  resClaimAt: -Infinity, resClaimBy: '', townFollowAt: -Infinity, spotWarnAt: -Infinity,
+  resClaimAt: -Infinity, resClaimBy: '', townFollowAt: -Infinity, spotWarnAt: -Infinity, converge: null,
   cfg() { return Settings.profile.team; },
   reset() { this.resClaimAt = -Infinity; this.townFollowAt = -Infinity; },
   // ---- assist: fight what a teammate fights ----
@@ -5401,7 +5410,35 @@ const TeamArbiter = {
     } else if (ev.kind === 'res-claim' && ev.target === World.charName) {
       this.resClaimAt = now(); this.resClaimBy = from;
       UI.toast(from + ' is coming to resurrect you.', 'info', 5000);
-    } else if (ev.kind === 'cmd') this.command(ev);
+    } else if (ev.kind === 'unique') this.uniqueEvent(ev);
+    else if (ev.kind === 'cmd') this.command(ev);
+  },
+  // ---- unique converge (opt-in): hunt at the unique's position until it dies or 20 minutes pass ----
+  uniqueEvent(ev) {
+    if (ev.state === 'dead') {
+      if (this.converge?.name === ev.name) this.restoreSpot(ev.name + ' is dead; back to the saved hunting spot.');
+      return;
+    }
+    if (ev.state !== 'appear' || !this.cfg().converge || this.converge) return;
+    const pos = ev.pos || TeamKnowledge.uniques.get(ev.name)?.pos;
+    if (!pos || !Number.isInteger(pos.regionId)) return;
+    const H = Settings.profile.hunt;
+    if (!Hunt.running || !H.center || Town.trip || !World.inWorld() || World.isDead()) return;
+    this.converge = { name: ev.name, prev: { ...H.center }, at: now() };
+    H.center = { regionId: pos.regionId, x: Math.round(pos.x), y: H.center.y || 0, z: Math.round(pos.z) };
+    Settings.saveProfile(); bus.emit('center');
+    UI.toast('Going to ' + ev.name + "'s position; the saved spot comes back after.", 'warn', 6000);
+  },
+  restoreSpot(message) {
+    const c = this.converge;
+    if (!c) return;
+    this.converge = null;
+    Settings.profile.hunt.center = c.prev;
+    Settings.saveProfile(); bus.emit('center');
+    if (message) UI.toast(message, 'info', 5000);
+  },
+  tick() {
+    if (this.converge && now() - this.converge.at > 20 * 60000) this.restoreSpot('Unique hunt timed out; back to the saved hunting spot.');
   },
   command(ev) {
     const action = String(ev.action || '');
@@ -9367,7 +9404,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.4.0", "title": "Team edition complete (phases 2-6)", "items": ["Live shared world: each character publishes the interesting monsters it sees (champion and up, party mobs, uniques with an HP estimate), the other players in view, and who attacks what (observed from every cast around); the map draws it all as a dimmed team layer, own view always winning.", "Unique tracker: the game's own server-wide announcements plus shared sightings build a history per unique with respawn windows (the timer restarts at death; 3-6 h per unique), toasts, a sound, map pins, and a Hunt here button that moves your hunting spot to the last known position.", "Player knowledge: every player the team sees is remembered with position and level; a player attacking a teammate outside a party is marked hostile (red on the map, flagged in the panel).", "Team drops: the room shares pickup counters.", "Team decisions: assist (fight what a teammate or party member fights), spot claims (a warning when two characters start hunting on top of each other), synchronized town trips (optional; a teammate's town trip starts yours), and resurrection claims (the dead member waits up to 60 s for the peer walking over instead of reviving itself).", "The room key holders always see everything; an optional public pool (per-relay, per-category checkboxes) shares monsters, players and unique events with every room on your relay — never your own position or inventory.", "The reference relay grows a room key-value store (the team's shared memory, persisted across restarts) and a console page (/?key=room key) showing the fleet with Stop everyone and Town trip buttons."], "note": "All of it is tested in simulation and against a local relay only; a live check with real characters is still to do."}, {"version": "1.3.0", "title": "Team relay (phase 1: presence)", "items": ["New Team page: connect several characters through your own WebSocket relay; while it runs, each character sees the others' presence (name, hunting, alive, level) in the panel.", "A reference relay server (rooms by room key, presence forwarding, no game logic) is included under relay/ in the repository.", "Presence is private to one room key; nothing is shared beyond it. The bot never depends on the relay: off or unreachable, everything else works exactly as before.", "Update checks now come from this fork's repository (duan78/opensro-bot-lean) instead of the original."], "note": "Presence, heartbeats and reconnection are tested in simulation only; a live relay check is still to do."}, {"version": "1.2.128", "title": "Town trips no longer stop on an item the merchant won't buy", "items": ["A town trip could stop at the weapon merchant with \"Inventory rejected: 2\". The bot had tried to sell an item the game does not allow merchants to buy (quest and event items, for example), and one refusal ended the whole trip.", "Items the game marks unsellable are now never offered, even with a Sell rule. They stay in the pet or bag.", "If the merchant still refuses an item, the bot keeps it, logs a warning and sells the rest, then carries on with the trip.", "Written from the code and simulated game state; not yet seen on a live server."]}, {"version": "1.2.127", "title": "Bag selling no longer stops on a full bag", "items": ["With **Sell items from the character bag too** on, a town trip with a completely full bag stopped before it ever reached the merchant that sells: at arrival (\"free a character bag slot\"), or at the potion merchant (no room for potions).", "Now, with that switch on, the trip goes to the repair merchant first (sell, ammunition, repair), then the potion merchant, then the world statue. A full bag is emptied before potions are bought. With the switch off, the order is unchanged.", "Written from the code and simulated game state; not yet seen on a live server."]}, {"version": "1.2.126", "title": "Sell from the character bag on town trips", "items": ["New switch in Scroll town cycle: **Sell items from the character bag too**. When on, the town trip sells unprotected items from your own bag at the repair merchant, after the pet loot, by the same rules as pet loot. Off by default.", "Never sold from the bag: potions, scrolls, supplies, Keep names, buff-set gear, the alchemy weapon, and anything with a Store, Keep or Drop rule. A Sell rule always sells.", "Tested in simulation only; not yet confirmed on the live server."]}, {"version": "1.2.125", "title": "Keep reconnecting through a long outage", "items": ["Overnight the bot could end up stopped with the game's \"Disconnected from the server.\" box on screen. Two gaps: that plain box (no \"session ended\" text) only ever repeated the same enter-character attempts, which fail once the server has dropped the login; and the limit of 3 page reloads per 30 minutes was permanent, so a server that was down for hours used up the reloads and the bot never tried again.", "Now, when the resume and three fresh entries have failed, the bot reloads the page just like after \"session ended\": the game restores the login from its own session cookie, the bot enters the character and hunting resumes.", "The reload limit is a pause: once the oldest reload is 30 minutes old, the bot tries again, for up to the 12 hours it keeps reconnecting."], "note": "Written from the code and simulated game state; not yet seen on a live server."}, {"version": "1.2.124", "title": "After a disconnect in town, do the town services and reverse", "items": ["After reconnecting, the bot walked from town to the hunting spot in short legs. From town that route often does not exist (\"no walkable route to the hunting spot\"), so it gave up and the character stayed in town.", "Now, when the character is back in a town far from the hunting spot and the town cycle's \"Revive in town and reverse to last scroll point\" is on, the bot runs the same trip as after a death: town services (potions, repairs, storage), then the reverse scroll to the last scroll point, then hunting. This covers a disconnect in town, while loading town, or a death while disconnected.", "Without that setting, or when the character is not in a known town, it still walks back as before."], "note": "Written from the code and simulated game state; not yet seen on a live server."}, {"version": "1.2.123", "title": "Alt accounts keep applying to the main's party", "items": ["With two alt accounts joining the same main, one could get in while the other sat on \"Waiting for the party board…\" forever. The main answers one application at a time, so the second application could be dropped, and the alt never tried again.", "An application that has not been answered after 30 seconds is now sent again, for as long as the alt is outside the main's party. The check already ran on every tick; only this wait was open-ended."], "note": "Found by reading the code with two alts in mind; not yet confirmed on a live server. If an alt still fails to join, its status line under Party says why."}];
+const RELEASE_NOTES = [{"version": "1.4.1", "title": "Team edition rounded out", "items": ["Optional unique converge: when a unique appears and its position is known, a hunting character moves its hunting spot there (toasts say so); the saved spot comes back when the unique dies or after 20 minutes. Off by default.", "The public pool grows a memory: with public sharing on, the unique tracker also reads and writes the relay's public store, so every room keeps the spawn history.", "Bug reports now include a team summary line (shared entities, combat edges, tracked uniques, known players).", "The repository README describes this fork's team edition."], "note": "Still simulation-tested only; no live run with real characters yet."}, {"version": "1.4.0", "title": "Team edition complete (phases 2-6)", "items": ["Live shared world: each character publishes the interesting monsters it sees (champion and up, party mobs, uniques with an HP estimate), the other players in view, and who attacks what (observed from every cast around); the map draws it all as a dimmed team layer, own view always winning.", "Unique tracker: the game's own server-wide announcements plus shared sightings build a history per unique with respawn windows (the timer restarts at death; 3-6 h per unique), toasts, a sound, map pins, and a Hunt here button that moves your hunting spot to the last known position.", "Player knowledge: every player the team sees is remembered with position and level; a player attacking a teammate outside a party is marked hostile (red on the map, flagged in the panel).", "Team drops: the room shares pickup counters.", "Team decisions: assist (fight what a teammate or party member fights), spot claims (a warning when two characters start hunting on top of each other), synchronized town trips (optional; a teammate's town trip starts yours), and resurrection claims (the dead member waits up to 60 s for the peer walking over instead of reviving itself).", "The room key holders always see everything; an optional public pool (per-relay, per-category checkboxes) shares monsters, players and unique events with every room on your relay — never your own position or inventory.", "The reference relay grows a room key-value store (the team's shared memory, persisted across restarts) and a console page (/?key=room key) showing the fleet with Stop everyone and Town trip buttons."], "note": "All of it is tested in simulation and against a local relay only; a live check with real characters is still to do."}, {"version": "1.3.0", "title": "Team relay (phase 1: presence)", "items": ["New Team page: connect several characters through your own WebSocket relay; while it runs, each character sees the others' presence (name, hunting, alive, level) in the panel.", "A reference relay server (rooms by room key, presence forwarding, no game logic) is included under relay/ in the repository.", "Presence is private to one room key; nothing is shared beyond it. The bot never depends on the relay: off or unreachable, everything else works exactly as before.", "Update checks now come from this fork's repository (duan78/opensro-bot-lean) instead of the original."], "note": "Presence, heartbeats and reconnection are tested in simulation only; a live relay check is still to do."}, {"version": "1.2.128", "title": "Town trips no longer stop on an item the merchant won't buy", "items": ["A town trip could stop at the weapon merchant with \"Inventory rejected: 2\". The bot had tried to sell an item the game does not allow merchants to buy (quest and event items, for example), and one refusal ended the whole trip.", "Items the game marks unsellable are now never offered, even with a Sell rule. They stay in the pet or bag.", "If the merchant still refuses an item, the bot keeps it, logs a warning and sells the rest, then carries on with the trip.", "Written from the code and simulated game state; not yet seen on a live server."]}, {"version": "1.2.127", "title": "Bag selling no longer stops on a full bag", "items": ["With **Sell items from the character bag too** on, a town trip with a completely full bag stopped before it ever reached the merchant that sells: at arrival (\"free a character bag slot\"), or at the potion merchant (no room for potions).", "Now, with that switch on, the trip goes to the repair merchant first (sell, ammunition, repair), then the potion merchant, then the world statue. A full bag is emptied before potions are bought. With the switch off, the order is unchanged.", "Written from the code and simulated game state; not yet seen on a live server."]}, {"version": "1.2.126", "title": "Sell from the character bag on town trips", "items": ["New switch in Scroll town cycle: **Sell items from the character bag too**. When on, the town trip sells unprotected items from your own bag at the repair merchant, after the pet loot, by the same rules as pet loot. Off by default.", "Never sold from the bag: potions, scrolls, supplies, Keep names, buff-set gear, the alchemy weapon, and anything with a Store, Keep or Drop rule. A Sell rule always sells.", "Tested in simulation only; not yet confirmed on the live server."]}, {"version": "1.2.125", "title": "Keep reconnecting through a long outage", "items": ["Overnight the bot could end up stopped with the game's \"Disconnected from the server.\" box on screen. Two gaps: that plain box (no \"session ended\" text) only ever repeated the same enter-character attempts, which fail once the server has dropped the login; and the limit of 3 page reloads per 30 minutes was permanent, so a server that was down for hours used up the reloads and the bot never tried again.", "Now, when the resume and three fresh entries have failed, the bot reloads the page just like after \"session ended\": the game restores the login from its own session cookie, the bot enters the character and hunting resumes.", "The reload limit is a pause: once the oldest reload is 30 minutes old, the bot tries again, for up to the 12 hours it keeps reconnecting."], "note": "Written from the code and simulated game state; not yet seen on a live server."}, {"version": "1.2.124", "title": "After a disconnect in town, do the town services and reverse", "items": ["After reconnecting, the bot walked from town to the hunting spot in short legs. From town that route often does not exist (\"no walkable route to the hunting spot\"), so it gave up and the character stayed in town.", "Now, when the character is back in a town far from the hunting spot and the town cycle's \"Revive in town and reverse to last scroll point\" is on, the bot runs the same trip as after a death: town services (potions, repairs, storage), then the reverse scroll to the last scroll point, then hunting. This covers a disconnect in town, while loading town, or a death while disconnected.", "Without that setting, or when the character is not in a known town, it still walks back as before."], "note": "Written from the code and simulated game state; not yet seen on a live server."}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -9630,7 +9667,8 @@ const Diagnostics = {
   snapshot() {
     const gp = World.gp, c = Settings.profile, pet = Loot.pet(), social = gp?.social, matching = gp?.partyMatching;
     return {
-      action: this.main(), partyStatus: this.party(), teamStatus: Settings.profile.team?.enabled ? Team.status() : '', petStatus: this.pet(), townStatus: this.town(), townDetail: this.townDetail(), townReason: this.townReason(),
+      action: this.main(), partyStatus: this.party(), teamStatus: Settings.profile.team?.enabled ? Team.status() : '',
+      teamDetail: Settings.profile.team?.enabled ? TeamIntel.rows().length + ' shared entities, ' + TeamIntel.edges.size + ' combat edges, ' + TeamKnowledge.uniques.size + ' tracked uniques, ' + TeamKnowledge.players.size + ' known players' : '', petStatus: this.pet(), townStatus: this.town(), townDetail: this.townDetail(), townReason: this.townReason(),
       navigationReady: !!Navigation.scene, navigationError: String(Navigation.error || '').slice(0, 80),
       buffGearStatus: BuffGear.cfg().buffSwap ? String(BuffGear.status()).slice(0, 600) : '', buffGearActive: !!BuffGear.run, buffGearRestoring: !!BuffGear.run?.restoring, buffGearMovePending: !!BuffGear.run?.pending, buffGearRecovery: !!BuffGear.recovery,
       alchemyActive: !!Alchemy.run, alchemyPending: !!Alchemy.pending, alchemyAttempts: this.number(Alchemy.result?.attempts),
@@ -11250,6 +11288,7 @@ const UI = {
       this.select('This character\'s role', [['none', 'No role'], ['tank', 'Tank'], ['healer', 'Healer'], ['support', 'Support'], ['dps', 'Damage'], ['scout', 'Scout']], () => team().role, v => team().role = v),
       this.check('Assist: fight what a teammate fights', () => team().assist, v => team().assist = v),
       this.check('Recall to town together', () => team().townSync, v => team().townSync = v),
+      this.check('Go to a unique that appears (the saved spot comes back)', () => team().converge, v => team().converge = v),
       this.teamNote,
       el('p', 'A private channel between your own characters over a WebSocket relay you control. Characters that enter the same room key see each other\'s presence here; nothing is sent to anyone else, and the bot never depends on it: with the relay off or unreachable everything else works exactly as before. The address must start with wss://. Assist joins the fight a teammate (or party member) is already in; town sync starts your town trip when a teammate starts theirs. The room\'s console page on the relay can stop everyone or call a group town trip.', 'muted')));
     const share = this.group('Sharing');

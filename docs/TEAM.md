@@ -78,12 +78,13 @@ What 1.4.0 delivers per phase, honestly:
   (optional follow), deterministic resurrection claims (the dead member waits up to 60 s), and
   the fleet console (relay page `/?key=…` with Stop everyone / Town trip buttons). A shared
   trip window negotiated by a coordinator is future work.
-- **Phase 6 (missions)** — partial by choice: unique converge is manual (tracker button moves
-  the hunting spot) plus toasts and sound; automatic party composition and job caravans need
-  live verification of trade mechanics and are deferred until the rest is field-tested.
-- **Public pool** — the per-category checkboxes are live (monsters, players, uniques) with the
-  public scope fanned out by the relay to every room. The public *store* (knowledge KV shared
-  across rooms) is not wired yet; public is events-only so far.
+- **Phase 6 (missions)** — unique converge is shipped opt-in (a unique with a known position
+  moves the hunting character's spot there until it dies or 20 minutes pass; the saved spot is
+  restored after); automatic party composition and job caravans need live verification of
+  trade mechanics and are deferred until the rest is field-tested.
+- **Public pool** — the per-category checkboxes (monsters, players, uniques) fan live events to
+  every room, and with uniques ticked the tracker also reads and writes the relay's public
+  store, so the spawn history is shared across rooms.
 
 **The team is defined by the relay, not by the game party.** Fleet → squads (each with a
 mission) → characters with roles (tank, healer, buffer, dps, puller, scout, mule,

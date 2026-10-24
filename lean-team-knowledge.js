@@ -41,6 +41,7 @@ const TeamKnowledge = {
     UI.toast(name + ' appeared' + (pos ? '' : ' (somewhere on this server)'), 'warn', 6000);
     if (Settings.profile.hunt.pickup.soxSound) Sound.play('unique');
     this.announce({ kind: 'unique', name, state: 'appear', pos: pos || record.pos || null });
+    TeamArbiter.event('local', { kind: 'unique', name, state: 'appear', pos: pos || record.pos || null });
   },
   dead(name, pos) {
     const record = this.uniques.get(name) || { name, at: 0 };
@@ -49,6 +50,7 @@ const TeamKnowledge = {
     this.dirty = true;
     UI.toast(name + ' is dead; respawn window ' + this.hoursFor(name) + ' h.', 'info', 6000);
     this.announce({ kind: 'unique', name, state: 'dead', pos: pos || record.pos || null });
+    TeamArbiter.event('local', { kind: 'unique', name, state: 'dead', pos: pos || record.pos || null });
   },
   killed(e, killer) {
     if (e?.kind === 'monster' && e.rarity === 3 && e.name) this.dead(e.name, { regionId: e.regionId, x: Math.round(e.x), z: Math.round(e.z) });
@@ -128,7 +130,10 @@ const TeamKnowledge = {
     if (!Team.online()) return;
     const t = Date.now();
     if (this.dirty && t - this.syncedAt > KNOWLEDGE_SYNC_MS) {
-      if (Team.send({ type: 'kv-put', key: 'knowledge', scope: 'room', value: this.doc() })) { this.dirty = false; this.syncedAt = t; }
+      if (Team.send({ type: 'kv-put', key: 'knowledge', scope: 'room', value: this.doc() })) {
+        this.dirty = false; this.syncedAt = t;
+        if (this.share().public && this.share().uniques) Team.send({ type: 'kv-put', key: 'knowledge', scope: 'public', value: this.doc() });
+      }
     } else if (!this.dirty) this.syncedAt = t; // a fresh sync keeps the next change prompt
   },
   // One line per unique for the Team page: state and, when waiting, the predicted window.
@@ -154,5 +159,9 @@ const TeamKnowledge = {
 };
 bus.on('notice', n => TeamKnowledge.onNotice(n));
 bus.on('loot', e => TeamKnowledge.onLoot(e));
-Team.on('welcome', () => { if (Team.online()) Team.send({ type: 'kv-get', key: 'knowledge', scope: 'room' }); });
+Team.on('welcome', () => {
+  if (!Team.online()) return;
+  Team.send({ type: 'kv-get', key: 'knowledge', scope: 'room' });
+  if (Settings.profile.team?.share?.public && Settings.profile.team.share.uniques) Team.send({ type: 'kv-get', key: 'knowledge', scope: 'public' });
+});
 Team.on('kv-value', m => TeamKnowledge.hydrate(m?.value));

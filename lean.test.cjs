@@ -4258,8 +4258,8 @@ async function updateTests() {
   }
   await check('updates compare numeric version components and ignore malformed versions', async () => {
     const f = fixture();
-    for (const v of ['9.9.9', '1.4.1', '2.0.0']) assert.equal(f.Updates.newer(v), true);
-    for (const v of ['1.2.9', '1.2.36', '1.3.0', '1.4.0', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
+    for (const v of ['9.9.9', '1.4.2', '2.0.0']) assert.equal(f.Updates.newer(v), true);
+    for (const v of ['1.2.9', '1.2.36', '1.3.0', '1.4.0', '1.4.1', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
   });
   await check('updates pin metadata and user-initiated installer to the same trusted commit', async () => {
     const f = fixture(), calls = updater(f); f.UI.updateButton = {};
@@ -4708,4 +4708,37 @@ test('huntAtUnique moves the saved spot only when a position is known', () => {
   assert.equal(f.TeamArbiter.huntAtUnique('Tiger Girl'), true);
   const center = f.Settings.profile.hunt.center;
   assert.equal(JSON.stringify(center), JSON.stringify({ regionId: 1, x: 400, y: 0, z: 500 }));
+});
+
+test('optional converge moves the hunting spot to a known unique and restores it on death or timeout', () => {
+  const f = connectedTeam();
+  f.Settings.profile.team.converge = true;
+  f.Hunt.start();
+  const saved = { ...f.Settings.profile.hunt.center };
+  f.bus.emit('notice', { key: 'UIIT_MSG_APPEAR_TIGER_GIRL', args: [] });
+  assert.equal(JSON.stringify(f.Settings.profile.hunt.center), JSON.stringify(saved), 'an announcement without a position does not move the spot');
+  f.socket.receive({ type: 'msg', from: 'AltTwo', payload: { kind: 'event', event: { kind: 'unique', name: 'Tiger Girl', state: 'appear', pos: { regionId: 1, x: 700, z: 800 } } } });
+  assert.equal(f.Settings.profile.hunt.center.x, 700, 'a sighting with a position moves the spot');
+  assert.ok(f.TeamArbiter.converge, 'the previous spot is remembered');
+  f.socket.receive({ type: 'msg', from: 'AltTwo', payload: { kind: 'event', event: { kind: 'unique', name: 'Isyutaru', state: 'appear', pos: { regionId: 1, x: 10, z: 10 } } } });
+  assert.equal(f.Settings.profile.hunt.center.x, 700, 'a second unique while converging is ignored');
+  f.bus.emit('notice', { key: 'UIIT_MSG_DEAD_TIGER_GIRL', args: ['Killer'] });
+  assert.equal(JSON.stringify(f.Settings.profile.hunt.center), JSON.stringify(saved), 'the death restores the saved spot');
+  assert.equal(f.TeamArbiter.converge, null);
+  f.socket.receive({ type: 'msg', from: 'AltTwo', payload: { kind: 'event', event: { kind: 'unique', name: 'Isyutaru', state: 'appear', pos: { regionId: 1, x: 30, z: 30 } } } });
+  f.advance(21 * 60000); f.TeamArbiter.tick();
+  assert.equal(JSON.stringify(f.Settings.profile.hunt.center), JSON.stringify(saved), 'a converge that finds nothing times out');
+});
+
+test('public knowledge is stored to and hydrated from the relay public pool', () => {
+  const f = connectedTeam();
+  f.Settings.profile.team.share.public = true;
+  f.socket.receive({ type: 'msg', from: 'AltTwo', payload: { kind: 'event', event: { kind: 'unique', name: 'Medusa', state: 'appear', pos: { regionId: 1, x: 5, z: 5 } } } });
+  f.TeamKnowledge.syncedAt = -Infinity;
+  f.advance(31000); f.TeamKnowledge.tick();
+  const puts = f.socket.sent.filter(m => m.type === 'kv-put' && m.key === 'knowledge');
+  assert.ok(puts.some(m => m.scope === 'room'), 'the room store is written');
+  assert.ok(puts.some(m => m.scope === 'public'), 'with the public lane on, the public store is written too');
+  f.socket.receive({ type: 'kv-value', key: 'knowledge', value: { uniques: { Nebs: { name: 'Nebs', at: Date.now(), deadAt: Date.now() } } } });
+  assert.ok(f.TeamKnowledge.uniques.get('Nebs')?.deadAt, 'a public store read hydrates the tracker');
 });

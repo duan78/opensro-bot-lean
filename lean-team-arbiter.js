@@ -7,7 +7,7 @@
 // The room's console (served by the relay) can stop everyone or call a group town trip. Every rule
 // is local and advisory: each bot still acts only through its own command layer.
 const TeamArbiter = {
-  resClaimAt: -Infinity, resClaimBy: '', townFollowAt: -Infinity, spotWarnAt: -Infinity,
+  resClaimAt: -Infinity, resClaimBy: '', townFollowAt: -Infinity, spotWarnAt: -Infinity, converge: null,
   cfg() { return Settings.profile.team; },
   reset() { this.resClaimAt = -Infinity; this.townFollowAt = -Infinity; },
   // ---- assist: fight what a teammate fights ----
@@ -41,7 +41,35 @@ const TeamArbiter = {
     } else if (ev.kind === 'res-claim' && ev.target === World.charName) {
       this.resClaimAt = now(); this.resClaimBy = from;
       UI.toast(from + ' is coming to resurrect you.', 'info', 5000);
-    } else if (ev.kind === 'cmd') this.command(ev);
+    } else if (ev.kind === 'unique') this.uniqueEvent(ev);
+    else if (ev.kind === 'cmd') this.command(ev);
+  },
+  // ---- unique converge (opt-in): hunt at the unique's position until it dies or 20 minutes pass ----
+  uniqueEvent(ev) {
+    if (ev.state === 'dead') {
+      if (this.converge?.name === ev.name) this.restoreSpot(ev.name + ' is dead; back to the saved hunting spot.');
+      return;
+    }
+    if (ev.state !== 'appear' || !this.cfg().converge || this.converge) return;
+    const pos = ev.pos || TeamKnowledge.uniques.get(ev.name)?.pos;
+    if (!pos || !Number.isInteger(pos.regionId)) return;
+    const H = Settings.profile.hunt;
+    if (!Hunt.running || !H.center || Town.trip || !World.inWorld() || World.isDead()) return;
+    this.converge = { name: ev.name, prev: { ...H.center }, at: now() };
+    H.center = { regionId: pos.regionId, x: Math.round(pos.x), y: H.center.y || 0, z: Math.round(pos.z) };
+    Settings.saveProfile(); bus.emit('center');
+    UI.toast('Going to ' + ev.name + "'s position; the saved spot comes back after.", 'warn', 6000);
+  },
+  restoreSpot(message) {
+    const c = this.converge;
+    if (!c) return;
+    this.converge = null;
+    Settings.profile.hunt.center = c.prev;
+    Settings.saveProfile(); bus.emit('center');
+    if (message) UI.toast(message, 'info', 5000);
+  },
+  tick() {
+    if (this.converge && now() - this.converge.at > 20 * 60000) this.restoreSpot('Unique hunt timed out; back to the saved hunting spot.');
   },
   command(ev) {
     const action = String(ev.action || '');
