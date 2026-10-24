@@ -18,6 +18,20 @@ node smoke-test.cjs   # optional: one-shot check of the protocol against a tempo
 
 Node 18 or newer. The data file lands at `relay-data.json` (override with `DATA_FILE=`).
 
+## Choose your hosting
+
+Three supported paths — pick what the administrator prefers; the bot is identical for all of
+them (same protocol, same `wss://` address in the Team page):
+
+| Path | What you get | Where |
+| --- | --- | --- |
+| **Cloudflare Workers** | Zero administration, TLS automatic, free tier with WebSocket hibernation, store in Durable Objects | `relay/cloudflare/` — see its README (`wrangler deploy`) |
+| **fly.io** | The Node relay as-is in a tiny VM with TLS, ~$2-3/month | `relay/` — `fly launch && fly deploy` (uses `Dockerfile` + `fly.toml`) |
+| **Your own VPS** | The Node relay behind Caddy/nginx TLS, or a systemd service | this file + `relay/opensro-team-relay.service` |
+
+Whatever you choose, verify it with the smoke test: `node smoke-test.cjs` locally, or
+`WS_URL=wss://your-relay/ws node smoke-test.cjs` against the deployment.
+
 ## TLS is required
 
 The game page is served over HTTPS, so browsers refuse plain `ws://` to anything that is not

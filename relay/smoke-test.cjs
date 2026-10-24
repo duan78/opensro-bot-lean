@@ -1,11 +1,17 @@
-// One-shot protocol check for the reference relay: hello/welcome, beat forwarding, the room
-// key-value round trip and public-scoped events. Run: node smoke-test.cjs
+// One-shot protocol check for the team relay: hello/welcome, beat forwarding, the room key-value
+// round trip and public-scoped events. Against a local temporary instance:
+//   node smoke-test.cjs
+// Against a deployed relay (Node or the Cloudflare Worker):
+//   WS_URL=wss://your-relay/ws node smoke-test.cjs
 const WebSocket = require('ws');
 const { spawn } = require('child_process');
-const srv = spawn(process.execPath, ['server.js'], { env: { ...process.env, PORT: process.env.PORT || '4799', DATA_FILE: './smoke-data.json' }, stdio: ['ignore', 'pipe', 'pipe'] });
+const WS_URL = process.env.WS_URL || null;
+const srv = WS_URL ? null : spawn(process.execPath, ['server.js'], { env: { ...process.env, PORT: process.env.PORT || '4799', DATA_FILE: './smoke-data.json' }, stdio: ['ignore', 'pipe', 'pipe'] });
+const base = WS_URL || 'ws://127.0.0.1:' + (process.env.PORT || '4799');
+const address = base + (base.includes('?') ? '&' : '?') + 'key=k1';
 setTimeout(() => {
-  const a = new WebSocket('ws://127.0.0.1:' + (process.env.PORT || '4799'));
-  const b = new WebSocket('ws://127.0.0.1:' + (process.env.PORT || '4799'));
+  const a = new WebSocket(address);
+  const b = new WebSocket(address);
   const got = [];
   const check = () => {
     const okHello = got.find(m => m.type === 'welcome' && m.you === 'A');
@@ -13,7 +19,7 @@ setTimeout(() => {
     const okKv = got.find(m => m.type === 'kv-value' && m.value && m.value.uniques && m.value.uniques.Tiger);
     const okPub = got.find(m => m.type === 'msg' && m.from === 'A' && m.payload.kind === 'event');
     console.log('welcome:', !!okHello, 'beat-forward:', !!okJoin, 'kv-roundtrip:', !!okKv, 'public-event:', !!okPub);
-    srv.kill();
+    if (srv) srv.kill();
     process.exit(okHello && okJoin && okKv && okPub ? 0 : 1);
   };
   a.on('message', d => got.push(JSON.parse(d)));

@@ -40,8 +40,11 @@ const Team = {
     try { this.socket.send(JSON.stringify(msg)); return true; } catch { return false; }
   },
   connect(url, token) {
+    // The room key rides in the URL for hosts that route by it (Cloudflare Workers); the Node
+    // relay ignores the query, so one address format works everywhere.
+    const address = url + (url.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(token);
     let s = null;
-    try { s = new W.WebSocket(url); } catch (e) {
+    try { s = new W.WebSocket(address); } catch (e) {
       this.message = 'Relay address refused: ' + (e?.message || e).slice?.(0, 100);
       this.scheduleRetry();
       return;

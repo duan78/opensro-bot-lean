@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Route, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Team, TeamIntel, TeamKnowledge, TeamArbiter, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound};\n})();';
+  'globalThis.bot = {Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Route, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Team, TeamIntel, TeamKnowledge, TeamArbiter, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound, Stall};\n})();';
 function fixture() {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -4258,8 +4258,8 @@ async function updateTests() {
   }
   await check('updates compare numeric version components and ignore malformed versions', async () => {
     const f = fixture();
-    for (const v of ['9.9.9', '1.4.3', '2.0.0']) assert.equal(f.Updates.newer(v), true);
-    for (const v of ['1.2.9', '1.2.36', '1.3.0', '1.4.0', '1.4.1', '1.4.2', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
+    for (const v of ['9.9.9', '1.4.4', '2.0.0']) assert.equal(f.Updates.newer(v), true);
+    for (const v of ['1.2.9', '1.2.36', '1.3.0', '1.4.0', '1.4.1', '1.4.2', '1.4.3', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
   });
   await check('updates pin metadata and user-initiated installer to the same trusted commit', async () => {
     const f = fixture(), calls = updater(f); f.UI.updateButton = {};
@@ -4526,6 +4526,7 @@ test('the team relay connects, announces itself and tracks the peers the relay r
   assert.equal(f.teamSockets.length, 1);
   const s = f.teamSockets[0];
   s.open();
+  assert.equal(s.url, 'wss://relay.example?key=room-key', 'the room key rides in the URL for hosts that route by it');
   assert.equal(s.sent[0].type, 'hello'); assert.equal(s.sent[0].token, 'room-key'); assert.equal(s.sent[0].name, 'RelayOne');
   assert.ok(f.Team.status().includes('Connected as RelayOne'));
   s.receive({ type: 'welcome', you: 'RelayOne', peers: [{ name: 'AltTwo', state: { hunting: true, level: 42 } }] });
@@ -4763,4 +4764,131 @@ test('a peer\'s store write does not cancel the sync this client still owes the 
   const put = f.socket.sent.filter(m => m.type === 'kv-put' && m.scope === 'room').at(-1);
   assert.ok(put.value.players.Latecomer, 'the pending sighting is in the put');
   assert.ok(put.value.players.Earlier, 'the hydrated record is in the put too');
+});
+
+// ---- Auto stall ----
+// Drives the stall session the way the game would: each command the bot sends changes World.gp.stall
+// like the worker's own reducer does (stall-name → naming, stall-create → owner, stall-add → an offer,
+// stall-open → open, stall-close → the state disappears again).
+function stallFixture() {
+  const f = fixture();
+  const town = f.Town.towns[0], spot = town.services.storage;
+  f.World.gp.pose = { regionId: spot.regionId, x: spot.x, y: 0, z: spot.z };
+  f.Items.data.set(62, { name: 'Lucky Powder', code: 'ITEM_ETC_ARCHEMY_LUCKY_POWDER_08' });
+  f.Items.data.set(63, { name: 'Element', code: 'ITEM_ETC_ARCHEMY_ELEMENT_08' });
+  f.Stall.init();
+  return f;
+}
+function stallBag(f) {
+  f.World.gp.inventory.push({ slot: 13, refObjId: 62, quantity: 20, typeFlags: 0x156c, name: 'Lucky Powder', tooltip: { fields: { canSell: 1 } } });
+  f.World.gp.inventory.push({ slot: 14, refObjId: 63, quantity: 4, typeFlags: 0x56c, name: 'Element', tooltip: { fields: { canSell: 1 } } });
+}
+// Applies the game's answer to the last command; refuse one add bagSlot by simply not answering it.
+function stallRespond(f, { ignoreAdd = -1 } = {}) {
+  const c = f.commands.at(-1), stall = f.World.gp.stall;
+  if (!c || c.__done) return;
+  c.__done = true;
+  if (c.kind === 'stall-name') f.World.gp.stall = { phase: 'naming', namingSequence: 1, owner: 0, title: '', greeting: '', savedGreeting: '', open: false, mode: 0, networkRegistered: false, offers: [], visitors: [], network: { open: false, rows: [], pages: 0, page: 0, category: 0, buying: null } };
+  else if (c.kind === 'stall-create') { stall.phase = 'owner'; stall.owner = f.World.gp.localGid; stall.title = c.title; }
+  else if (c.kind === 'stall-add') { if (c.bagSlot !== ignoreAdd) stall.offers.push({ slot: c.slot, bagSlot: c.bagSlot, quantity: c.quantity, price: c.price, item: { refObjId: c.bagSlot === 13 ? 62 : 63, name: c.bagSlot === 13 ? 'Lucky Powder' : 'Element', quantity: c.quantity } }); }
+  else if (c.kind === 'stall-open') stall.open = true;
+  else if (c.kind === 'stall-close') f.World.gp.stall = undefined;
+}
+function stallDrive(f, ticks, options) {
+  for (let i = 0; i < ticks && f.Stall.run; i++) { f.advance(400); f.Controller.tick(); stallRespond(f, options); }
+}
+test('the stall refuses to start outside town, while hunting, with nothing priced or with a stall already open', () => {
+  const f = stallFixture(); stallBag(f);
+  f.World.gp.pose = { regionId: 1, x: 100, y: 0, z: 100 };
+  f.Stall.start(); assert.equal(f.Stall.run, null); assert.ok(f.notices.at(-1).includes('town'));
+  const spot = f.Town.towns[0].services.storage;
+  f.World.gp.pose = { regionId: spot.regionId, x: spot.x, y: 0, z: spot.z };
+  f.Stall.start(); assert.equal(f.Stall.run, null); assert.ok(f.notices.at(-1).includes('priced'));
+  f.Settings.profile.stall.prices = { 62: 150 };
+  f.Hunt.running = true; f.Stall.start(); assert.equal(f.Stall.run, null); assert.ok(f.notices.at(-1).includes('hunting'));
+  f.Hunt.running = false;
+  f.World.gp.stall = { phase: 'owner', owner: 99, offers: [], visitors: [] };
+  f.Stall.start(); assert.equal(f.Stall.run, null); assert.ok(f.notices.at(-1).includes('stall'));
+  f.World.gp.stall = undefined;
+  f.Stall.start(); assert.ok(f.Stall.run, 'clean state starts the session');
+});
+test('the stall names, creates, registers each priced stack at its price and opens for business', () => {
+  const f = stallFixture(); stallBag(f);
+  f.Settings.profile.stall.title = 'Powders';
+  f.Settings.profile.stall.prices = { 62: 150, 63: 4000 };
+  f.Stall.start();
+  stallDrive(f, 40);
+  assert.equal(f.Stall.run?.phase, 'selling', 'the session is selling; status: ' + f.Stall.message);
+  assert.equal(f.World.gp.stall.open, true);
+  assert.deepEqual(f.World.gp.stall.offers.map(o => [o.slot, o.bagSlot, o.quantity, o.price]), [[1, 13, 20, 150], [2, 14, 4, 4000]]);
+  assert.deepEqual(f.commands.map(c => c.kind), ['stall-name', 'stall-create', 'stall-add', 'stall-add', 'stall-open']);
+  assert.equal(f.Stall.message.includes('2 offers'), true, f.Stall.message);
+});
+test('a sale counts only when the offer disappears and gold rises; the stall then closes when empty', () => {
+  const f = stallFixture(); stallBag(f);
+  f.Settings.profile.stall.prices = { 62: 150 };
+  f.World.gp.progression.gold = '100000';
+  f.Stall.start(); stallDrive(f, 30);
+  assert.equal(f.Stall.run.phase, 'selling');
+  // The offer vanishes but no gold arrives: not a confirmed sale.
+  f.World.gp.stall.offers = [];
+  f.advance(400); f.Controller.tick();
+  assert.equal(f.Stall.run.sold, 0, 'no gold gain, no sale claim');
+  assert.equal(f.Stall.run.phase, 'close', 'everything gone closes the stall');
+  stallDrive(f, 10);
+  assert.equal(f.World.gp.stall, undefined);
+  assert.equal(f.Stall.run, null);
+  assert.ok(f.Stall.message.includes('Sold 0'), f.Stall.message);
+});
+test('a confirmed sale is reported with its gold value', () => {
+  const f = stallFixture(); stallBag(f);
+  f.Settings.profile.stall.prices = { 62: 150 };
+  f.World.gp.progression.gold = '100000';
+  f.Stall.start(); stallDrive(f, 30);
+  f.World.gp.stall.offers = [];
+  f.World.gp.progression.gold = '103000'; // 20 × 150
+  f.advance(400); f.Controller.tick(); stallRespond(f);
+  assert.equal(f.Stall.run.sold, 20);
+  assert.equal(f.Stall.run.earned, 3000n);
+  assert.ok(f.Stall.message.includes('Sold 20 × Lucky Powder'), f.Stall.message);
+  stallDrive(f, 20);
+  assert.equal(f.Stall.run, null);
+  assert.ok(f.Stall.message.includes('Sold 20 items for 3,000 gold.'), f.Stall.message);
+});
+test('an unconfirmed stall-add is skipped and never resent; the rest of the stall still opens', () => {
+  const f = stallFixture(); stallBag(f);
+  f.Settings.profile.stall.prices = { 62: 150, 63: 4000 };
+  f.Stall.start();
+  stallDrive(f, 100, { ignoreAdd: 13 });
+  assert.equal(f.Stall.run?.phase, 'selling', 'status: ' + f.Stall.message);
+  assert.equal(f.commands.filter(c => c.kind === 'stall-add' && c.bagSlot === 13).length, 1, 'the unanswered add is never resent');
+  assert.deepEqual(f.World.gp.stall.offers.map(o => o.bagSlot), [14], 'only the answered item is offered');
+});
+test('stop all closes a stall this page opened', () => {
+  const f = stallFixture(); stallBag(f);
+  f.Settings.profile.stall.prices = { 62: 150 };
+  f.Stall.start(); stallDrive(f, 30);
+  assert.equal(f.Stall.run.phase, 'selling');
+  f.stopAll();
+  assert.equal(f.Stall.run, null);
+  assert.equal(f.commands.at(-1).kind, 'stall-close');
+});
+test('a world reset drops the stall session without sending anything', () => {
+  const f = stallFixture(); stallBag(f);
+  f.Settings.profile.stall.prices = { 62: 150 };
+  f.Stall.start(); stallDrive(f, 30);
+  const sent = f.commands.length;
+  f.bus.emit('reset');
+  assert.equal(f.Stall.run, null);
+  assert.equal(f.commands.length, sent, 'no close command after the world is gone');
+});
+test('a price change mid-session stops the stall instead of mixing old offers', () => {
+  const f = stallFixture(); stallBag(f);
+  f.Settings.profile.stall.prices = { 62: 150 };
+  f.Stall.start(); stallDrive(f, 30);
+  assert.equal(f.Stall.run.phase, 'selling');
+  f.Settings.profile.stall.prices = { 62: 200 };
+  f.advance(400); f.Controller.tick(); stallRespond(f);
+  assert.equal(f.Stall.run, null);
+  assert.equal(f.commands.at(-1).kind, 'stall-close');
 });
