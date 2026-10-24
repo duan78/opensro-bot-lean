@@ -1,8 +1,8 @@
-# NIX — team edition
+# NIX
 
-OpenSRO bot: hunting, potions, pet loot and automatic town trips, plus an optional **team layer**: your characters share what they see through your own WebSocket relay (live monster and player intel on the map, a unique tracker with respawn windows, shared drops) and coordinate (assist, synchronized town trips, deterministic resurrection, a fleet console). Upstream lean bot by 100; team edition in this fork.
+OpenSRO bot: hunting, potions, pet loot and automatic town trips, plus an optional **team layer**: your characters share what they see through your own WebSocket relay (live monster and player intel on the map, a unique tracker with respawn windows, shared drops) and coordinate (assist, synchronized town trips, deterministic resurrection, a fleet console). See [the team plan](docs/TEAM.md) and [relay/](relay/).
 
-**[Install](https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.user.js)** with Tampermonkey (disable any other OpenSRO bot), then reload the game. It checks for updates itself.
+**[Install](https://raw.githubusercontent.com/nixxane/opensro-bot-lean/main/bot.lean.user.js)** with Tampermonkey (disable any other OpenSRO bot), then reload the game. It checks for updates itself.
 
 ## Start
 

@@ -4246,7 +4246,7 @@ test('session XP keeps unresolved level transitions bounded and marked partial',
 
 async function updateTests() {
   async function check(name, fn) { await fn(); passed++; console.log('PASS ' + name); }
-  const sha = 'a'.repeat(40), base = 'https://raw.githubusercontent.com/duan78/opensro-bot-lean/' + sha + '/bot.lean.';
+  const sha = 'a'.repeat(40), base = 'https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + sha + '/bot.lean.';
   function updater(f, version = '9.9.9') {
     const calls = [];
     f.win.fetch = async (url, options) => {
@@ -4265,7 +4265,7 @@ async function updateTests() {
     const f = fixture(), calls = updater(f); f.UI.updateButton = {};
     await f.Updates.check();
     assert.equal(calls.length, 3); assert.equal(calls[1].url, base + 'meta.js');
-    assert.equal(calls[2].url, 'https://raw.githubusercontent.com/duan78/opensro-bot-lean/' + sha + '/notes/9.9.9.md', 'the headline comes from the same commit');
+    assert.equal(calls[2].url, 'https://raw.githubusercontent.com/nixxane/opensro-bot-lean/' + sha + '/notes/9.9.9.md', 'the headline comes from the same commit');
     assert.equal(calls[0].options.credentials, 'omit'); assert.equal(calls[0].options.cache, 'no-store');
     assert.equal(f.UI.updateButton.hidden, false); assert.equal(f.UI.updateButton.textContent, 'Update 9.9.9');
     let opened; f.win.open = (...args) => { opened = args; };

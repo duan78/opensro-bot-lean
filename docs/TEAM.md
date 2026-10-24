@@ -1,6 +1,6 @@
 # Team edition — the multi-character plan
 
-This fork (`duan78/opensro-bot-lean`) extends the lean bot with a **team layer**: a private,
+This extension adds a **team layer** to the lean bot: a private,
 player-operated relay that lets several characters share what they see and coordinate. The base
 bot stays untouched in behaviour until the Team page is configured; with the relay off or
 unreachable, everything works exactly as before.
@@ -126,13 +126,11 @@ Everything so far is verified by reading the game source and by mocked tests —
 live-server confirmation. Each phase's notes must say what was only simulated. The relay URL
 and room key are the player's own infrastructure; the bot never connects anywhere else.
 
-## Fork maintenance
+## Maintenance
 
-- Update URLs (`build-lean.py`, `lean-update.js`) point at `duan78/opensro-bot-lean`, so
-  Tampermonkey updates pull the fork's builds, never the upstream lean bot over this one.
-- Upstream (`nixxane/opensro-bot-lean`) remains the source for the base modules; rebase
-  regularly, keep team code in `lean-team*.js` and the small integration points (settings
-  key, one guard call in the controller, UI page, boot export) minimal so merges stay clean.
+- Update URLs (`build-lean.py`, `lean-update.js`) keep pointing at this repository's builds.
+- Team code lives in `lean-team*.js` with small integration points (settings key, one guard
+  call in the controller, UI page, boot export) so merges stay clean.
 - `relay/` is the one place with a `package.json` (the userscript itself stays bundler-free,
   plain JavaScript); the reference relay uses `ws` and nothing else.
 
