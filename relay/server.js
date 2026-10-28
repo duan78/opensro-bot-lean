@@ -27,9 +27,11 @@ function broadcast(room, msg, exceptWs) {
   }
 }
 
-function leave(roomKey, room, name) {
+// Only the socket that owns the entry may take it out: a same-name reconnect closes the old
+// socket, and its async close event must not delete the new connection's entry.
+function leave(roomKey, room, name, ws) {
   const entry = room.get(name);
-  if (!entry || rooms.get(roomKey) !== room) return;
+  if (!entry || entry.ws !== ws || rooms.get(roomKey) !== room) return;
   room.delete(name);
   if (!room.size) rooms.delete(roomKey);
   else broadcast(room, { type: 'leave', name });
@@ -67,10 +69,12 @@ function admit(ws, hello) {
       broadcast(room, { type: 'peer', name, state: entry.state }, ws);
     }
   });
-  ws.on('close', () => leave(roomKey, room, name));
+  ws.on('close', () => leave(roomKey, room, name, ws));
 }
 
-const wss = new WebSocketServer({ port: PORT });
+// Bound to localhost by default so a bare start never exposes plaintext room keys on a VPS;
+// set HOST=0.0.0.0 only when something in front of it does TLS and access control.
+const wss = new WebSocketServer({ host: process.env.HOST || '127.0.0.1', port: PORT });
 wss.on('connection', ws => {
   ws.on('error', () => {});
   const helloTimer = setTimeout(() => {
@@ -97,10 +101,10 @@ setInterval(() => {
   const cutoff = Date.now() - BEAT_TIMEOUT_MS;
   for (const [roomKey, room] of rooms) {
     for (const [name, entry] of room) {
-      if (entry.at < cutoff) leave(roomKey, room, name);
+      if (entry.at < cutoff) leave(roomKey, room, name, entry.ws);
       else entry.ws.ping();
     }
   }
 }, SWEEP_MS);
 
-console.log('team relay listening on port ' + PORT + ' (rooms appear as characters connect)');
+console.log('team relay listening on ' + (process.env.HOST || '127.0.0.1') + ':' + PORT + ' (rooms appear as characters connect)');

@@ -34,8 +34,7 @@ const Team = {
   connect(url) {
     let s = null;
     try { s = new W.WebSocket(url); } catch (e) {
-      this.message = 'Relay address refused: ' + (e?.message || e).slice?.(0, 100);
-      this.scheduleRetry();
+      this.scheduleRetry('Relay address refused: ' + (e?.message || e).slice?.(0, 100));
       return;
     }
     this.socket = s;
@@ -43,12 +42,8 @@ const Team = {
     this.message = 'Connecting to the team relay…';
     s.onopen = () => {
       if (this.socket !== s) return;
-      this.attempts = 0;
-      this.state = 'online';
-      this.message = 'Connected as ' + this.name + '.';
       this.sentAt = now();
       this.send({ v: 1, type: 'hello', token: String(this.cfg().token || ''), name: this.name, state: this.payload() });
-      UI.toast('Team relay connected.', 'info', 3000);
     };
     s.onmessage = e => { if (this.socket === s) this.receive(e?.data); };
     // The browser always fires close after an error, so retries are owned by close alone.
@@ -69,9 +64,15 @@ const Team = {
     if (!msg || typeof msg !== 'object') return;
     switch (msg.type) {
       case 'welcome':
+        // The room accepted us: only now are we really online, and only now does the backoff
+        // reset — an open socket whose hello the relay keeps rejecting must not retry every 5 s.
+        this.attempts = 0;
+        this.state = 'online';
+        this.message = 'Connected as ' + this.name + '.';
         this.peers = new Map((Array.isArray(msg.peers) ? msg.peers : [])
           .filter(p => p?.name && p.name !== this.name)
           .map(p => [p.name, { state: p.state || {}, at: now() }]));
+        UI.toast('Team relay connected.', 'info', 3000);
         break;
       case 'peer':
         if (msg.name && msg.name !== this.name) this.peers.set(msg.name, { state: msg.state || {}, at: now() });
@@ -102,8 +103,10 @@ const Team = {
     for (const [name, peer] of this.peers) if (t - peer.at > TEAM_PEER_TTL_MS) this.peers.delete(name);
     if (!c.enabled) return;
     const url = String(c.url || '').trim();
-    // The game page is HTTPS: a remote relay must use wss, or the browser blocks the socket silently.
-    if (!/^wss:\/\//i.test(url)) { this.state = 'off'; this.message = 'The relay address must start with wss://.'; return; }
+    // The game page is HTTPS: a remote relay must use wss. Plain ws survives only to localhost,
+    // exactly the sockets the browser itself still allows, so local tests work as documented.
+    const local = /^ws:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(url);
+    if (!/^wss:\/\//i.test(url) && !local) { this.state = 'off'; this.message = 'The relay address must start with wss://.'; return; }
     if (typeof W.WebSocket !== 'function') { this.state = 'off'; this.message = 'This browser has no WebSocket.'; return; }
     const name = String(World.charName || World.gp?.social?.localName || '');
     if (!name) { this.state = 'waiting'; this.message = 'Waiting for the character name…'; return; }
@@ -116,6 +119,12 @@ const Team = {
   status() {
     if (!this.cfg().enabled) return 'Team relay off.';
     if (this.state === 'online') return 'Connected as ' + this.name + '; ' + this.peers.size + (this.peers.size === 1 ? ' peer' : ' peers') + ' in the room.';
+    return this.message;
+  },
+  // The diagnostics line: same information, without the character name (reports omit names).
+  diag() {
+    if (!this.cfg().enabled) return '';
+    if (this.state === 'online') return 'online, ' + this.peers.size + (this.peers.size === 1 ? ' peer' : ' peers') + ' in the room';
     return this.message;
   },
   peerRows() {

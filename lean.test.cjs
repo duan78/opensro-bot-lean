@@ -6361,8 +6361,11 @@ test('the team relay connects, announces itself and tracks the peers the relay r
   const s = f.teamSockets[0];
   s.open();
   assert.equal(s.sent[0].type, 'hello'); assert.equal(s.sent[0].token, 'room-key'); assert.equal(s.sent[0].name, 'RelayOne');
-  assert.ok(f.Team.status().includes('Connected as RelayOne'));
+  assert.ok(f.Team.status().includes('Connecting'), 'an open socket is not online until the relay welcomes it');
+  assert.ok(!f.notices.some(n => n.includes('Team relay connected')), 'no connected toast before the welcome');
   s.receive({ type: 'welcome', you: 'RelayOne', peers: [{ name: 'AltTwo', state: { hunting: true, level: 42 } }] });
+  assert.ok(f.Team.status().includes('Connected as RelayOne'));
+  assert.ok(f.notices.some(n => n.includes('Team relay connected')), 'the welcome announces the connection');
   assert.ok(f.Team.peerRows().some(r => r.includes('AltTwo') && r.includes('hunting')));
   s.receive({ type: 'peer', name: 'AltTwo', state: { hunting: false, level: 42 } });
   assert.ok(f.Team.peerRows().every(r => !r.includes('hunting')), 'the fresher beat wins');
@@ -6382,18 +6385,22 @@ test('the team relay beats every five seconds and forgets a silent peer after fi
   assert.ok(f.Team.peerRows().every(r => !r.includes('AltTwo')), 'a silent peer expires');
 });
 
-test('a remote relay address must use wss, and the bus retries with growing backoff after drops', () => {
+test('a remote relay address must use wss (plain ws only to localhost), and rejected hellos retry with backoff', () => {
   const f = teamFixture('ws://relay.example');
   f.Team.tick(); assert.equal(f.teamSockets.length, 0); assert.ok(f.Team.status().includes('wss://'));
+  f.Settings.profile.team.url = 'ws://127.0.0.1:4701';
+  f.Team.tick(); assert.equal(f.teamSockets.length, 1, 'plain ws to localhost is allowed, like the browser itself does');
   f.Settings.profile.team.url = 'wss://relay.example';
-  f.Team.tick(); f.teamSockets[0].open(); f.teamSockets[0].drop();
+  f.Team.tick(); f.teamSockets.at(-1).open(); f.teamSockets.at(-1).drop();
   assert.equal(f.Team.state, 'retrying');
-  f.advance(5000); f.Team.tick(); assert.equal(f.teamSockets.length, 2, 'first retry after five seconds');
-  f.teamSockets[1].drop();
-  f.advance(5000); f.Team.tick(); assert.equal(f.teamSockets.length, 2, 'the second consecutive failure waits ten seconds');
-  f.advance(5000); f.Team.tick(); assert.equal(f.teamSockets.length, 3);
-  f.teamSockets[2].open();
-  assert.equal(f.Team.attempts, 0, 'a successful connection resets the backoff');
+  f.advance(5000); f.Team.tick(); assert.equal(f.teamSockets.length, 3, 'first retry after five seconds');
+  // An open socket whose hello the relay keeps rejecting must not reset the backoff or look connected.
+  f.teamSockets.at(-1).open(); f.teamSockets.at(-1).receive({ type: 'error', message: 'hello needs a token and a name' });
+  assert.equal(f.Team.attempts, 2); assert.ok(!f.notices.some(n => n.includes('Team relay connected')));
+  f.advance(10000); f.Team.tick(); assert.equal(f.teamSockets.length, 4, 'the rejected hello waits the longer backoff');
+  f.teamSockets.at(-1).open();
+  f.teamSockets.at(-1).receive({ type: 'welcome', you: 'RelayOne', peers: [] });
+  assert.equal(f.Team.attempts, 0, 'the welcome, not the socket opening, resets the backoff');
 });
 
 test('a relay error is reported without touching the bot, and the switch closes every socket', () => {
@@ -6420,10 +6427,14 @@ test('a changed room key reconnects into the new room, and the bus waits for the
   g.Team.tick(); assert.equal(g.teamSockets.length, 0); assert.ok(g.Team.status().includes('character name'));
 });
 
-// ---- Team edition phases 2-6 ----
-function connectedTeam() {
+test('a settings share never carries the relay address or room key, and the diagnostics line omits the name', () => {
   const f = teamFixture();
-  f.Team.tick(); const s = f.teamSockets[0]; s.open();
-  f.World.gp.progression.level = 40;
-  return Object.assign(f, { socket: s });
-}
+  Object.assign(f.Settings.profile.team, { enabled: true, url: 'wss://relay.example', token: 'room-key' });
+  const stripped = f.ProfileShare.strip(f.Settings.profile);
+  assert.equal(stripped.team.enabled, false); assert.equal(stripped.team.url, ''); assert.equal(stripped.team.token, '', 'a share code strips the room key');
+  assert.ok(f.ProfileShare.personal(f.Settings.profile).team.token === 'room-key', 'the importer keeps their own team settings');
+  assert.equal(f.Diagnostics.snapshot().teamStatus.includes('RelayOne'), false, 'reports omit the character name');
+  f.Team.tick(); f.teamSockets[0].open();
+  f.teamSockets[0].receive({ type: 'welcome', you: 'RelayOne', peers: [{ name: 'AltTwo', state: {} }] });
+  assert.equal(f.Diagnostics.snapshot().teamStatus, 'online, 1 peer in the room');
+});

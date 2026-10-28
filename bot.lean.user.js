@@ -8951,8 +8951,7 @@ const Team = {
   connect(url) {
     let s = null;
     try { s = new W.WebSocket(url); } catch (e) {
-      this.message = 'Relay address refused: ' + (e?.message || e).slice?.(0, 100);
-      this.scheduleRetry();
+      this.scheduleRetry('Relay address refused: ' + (e?.message || e).slice?.(0, 100));
       return;
     }
     this.socket = s;
@@ -8960,12 +8959,8 @@ const Team = {
     this.message = 'Connecting to the team relay…';
     s.onopen = () => {
       if (this.socket !== s) return;
-      this.attempts = 0;
-      this.state = 'online';
-      this.message = 'Connected as ' + this.name + '.';
       this.sentAt = now();
       this.send({ v: 1, type: 'hello', token: String(this.cfg().token || ''), name: this.name, state: this.payload() });
-      UI.toast('Team relay connected.', 'info', 3000);
     };
     s.onmessage = e => { if (this.socket === s) this.receive(e?.data); };
     // The browser always fires close after an error, so retries are owned by close alone.
@@ -8986,9 +8981,15 @@ const Team = {
     if (!msg || typeof msg !== 'object') return;
     switch (msg.type) {
       case 'welcome':
+        // The room accepted us: only now are we really online, and only now does the backoff
+        // reset — an open socket whose hello the relay keeps rejecting must not retry every 5 s.
+        this.attempts = 0;
+        this.state = 'online';
+        this.message = 'Connected as ' + this.name + '.';
         this.peers = new Map((Array.isArray(msg.peers) ? msg.peers : [])
           .filter(p => p?.name && p.name !== this.name)
           .map(p => [p.name, { state: p.state || {}, at: now() }]));
+        UI.toast('Team relay connected.', 'info', 3000);
         break;
       case 'peer':
         if (msg.name && msg.name !== this.name) this.peers.set(msg.name, { state: msg.state || {}, at: now() });
@@ -9019,8 +9020,10 @@ const Team = {
     for (const [name, peer] of this.peers) if (t - peer.at > TEAM_PEER_TTL_MS) this.peers.delete(name);
     if (!c.enabled) return;
     const url = String(c.url || '').trim();
-    // The game page is HTTPS: a remote relay must use wss, or the browser blocks the socket silently.
-    if (!/^wss:\/\//i.test(url)) { this.state = 'off'; this.message = 'The relay address must start with wss://.'; return; }
+    // The game page is HTTPS: a remote relay must use wss. Plain ws survives only to localhost,
+    // exactly the sockets the browser itself still allows, so local tests work as documented.
+    const local = /^ws:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(url);
+    if (!/^wss:\/\//i.test(url) && !local) { this.state = 'off'; this.message = 'The relay address must start with wss://.'; return; }
     if (typeof W.WebSocket !== 'function') { this.state = 'off'; this.message = 'This browser has no WebSocket.'; return; }
     const name = String(World.charName || World.gp?.social?.localName || '');
     if (!name) { this.state = 'waiting'; this.message = 'Waiting for the character name…'; return; }
@@ -9033,6 +9036,12 @@ const Team = {
   status() {
     if (!this.cfg().enabled) return 'Team relay off.';
     if (this.state === 'online') return 'Connected as ' + this.name + '; ' + this.peers.size + (this.peers.size === 1 ? ' peer' : ' peers') + ' in the room.';
+    return this.message;
+  },
+  // The diagnostics line: same information, without the character name (reports omit names).
+  diag() {
+    if (!this.cfg().enabled) return '';
+    if (this.state === 'online') return 'online, ' + this.peers.size + (this.peers.size === 1 ? ' peer' : ' peers') + ' in the room';
     return this.message;
   },
   peerRows() {
@@ -11234,15 +11243,17 @@ const ProfileShare = {
   isMap(v) { return !!v && typeof v === 'object' && !Array.isArray(v); },
   clone(v) { return JSON.parse(JSON.stringify(v)); },
   // The fields that mean nothing on another character; an import keeps the importer's own.
+  // The team relay's room key is access control, so it is personal too: a share code must
+  // never publish it, and an import must never connect the importer to someone else's relay.
   personal(p) {
     const r = p.potion.restock, t = r.town;
     return this.clone({ center: p.hunt.center, vendor: r.vendor, route: r.route, offers: r.offers,
-      town: { arrival: t.arrival, storage: t.storage, vendor: t.vendor, smith: t.smith, gate: t.gate }, buffSets: p.macro.buffSets, gear: p.items.gear, wardrobe: p.wardrobe, follow: p.trace.name, pullPoints: p.lure.points });
+      town: { arrival: t.arrival, storage: t.storage, vendor: t.vendor, smith: t.smith, gate: t.gate }, buffSets: p.macro.buffSets, gear: p.items.gear, wardrobe: p.wardrobe, follow: p.trace.name, pullPoints: p.lure.points, team: p.team });
   },
   restore(p, own) {
     const r = p.potion.restock, t = r.town;
     p.hunt.center = own.center; r.vendor = own.vendor; r.route = own.route; r.offers = own.offers;
-    Object.assign(t, own.town); p.macro.buffSets = own.buffSets; p.items.gear = own.gear; p.wardrobe = own.wardrobe; p.trace.name = own.follow; p.lure.points = own.pullPoints;
+    Object.assign(t, own.town); p.macro.buffSets = own.buffSets; p.items.gear = own.gear; p.wardrobe = own.wardrobe; p.trace.name = own.follow; p.lure.points = own.pullPoints; p.team = own.team;
     // A buff assigned to a weapon set means nothing without the sets; one assigned to the primary or secondary weapon or
     // the shield uses the importer's own.
     for (const b of p.macro.buffs) if (b && !BUFF_GEAR_KINDS.includes(b.gearSet) && !p.macro.buffSets.some(s => s.id === Number(b.gearSet))) b.gearSet = 0;
@@ -13978,7 +13989,7 @@ const Diagnostics = {
   snapshot() {
     const gp = World.gp, c = Settings.profile, pet = Loot.pet(), social = gp?.social, matching = gp?.partyMatching;
     return {
-      action: this.main(), partyStatus: this.party(), teamStatus: Settings.profile.team?.enabled ? Team.status() : '', petStatus: this.pet(), townStatus: this.town(), townDetail: this.townDetail(), townReason: this.townReason(),
+      action: this.main(), partyStatus: this.party(), teamStatus: Team.diag(), petStatus: this.pet(), townStatus: this.town(), townDetail: this.townDetail(), townReason: this.townReason(),
       navigationReady: !!Navigation.scene, navigationError: String(Navigation.error || '').slice(0, 80),
       buffGearStatus: BuffGear.cfg().buffSwap ? String(BuffGear.status()).slice(0, 600) : '', buffGearActive: !!BuffGear.run, buffGearRestoring: !!BuffGear.run?.restoring, buffGearMovePending: !!BuffGear.run?.pending, buffGearRecovery: !!BuffGear.recovery,
       alchemyActive: !!Alchemy.run, alchemyPending: !!Alchemy.pending, alchemyAttempts: this.number(Alchemy.result?.attempts),

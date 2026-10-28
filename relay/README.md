@@ -14,7 +14,8 @@ npm start          # listens on port 4701; PORT=1234 npm start to change
 node smoke-test.cjs   # optional: one-shot check of the protocol against a temporary instance
 ```
 
-Node 18 or newer.
+Node 18 or newer. The relay binds to **127.0.0.1 only** by default; `HOST=0.0.0.0 npm start`
+exposes it directly (only when something in front does TLS and access control).
 
 ## TLS is required
 
@@ -29,7 +30,8 @@ relay.example.com {
 ```
 
 For quick local tests from the same machine you can point a bot at `ws://127.0.0.1:4701`
-(browsers still allow plain WebSocket to localhost); anything remote needs `wss://`.
+(the bot accepts plain WebSocket to localhost, matching the browser rule); anything remote
+needs `wss://`.
 
 ## Security notes
 
