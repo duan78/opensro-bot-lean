@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.5.0
+// @version      1.5.1
 // @updateURL    https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking, walk-back and an optional team relay in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.5.0';
+const VERSION = '1.5.1';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -186,7 +186,7 @@ const DISCORD_URL = 'https://discord.gg/Y5H5ZyfQ7u';
 const NOTES_URL = 'https://nixxane.github.io/opensro-bot-lean-site/#patch-notes';
 const CLASS_KEYS = ['normal', 'champion', 'giant', 'party', 'elite', 'unique'];
 const DEFAULT_PROFILE = {
-  items: { rules: {}, balance: false, gear: { primaryWeapon: null, primaryShield: null, secondaryWeapon: null, secondaryShield: null } },
+  items: { rules: {}, balance: false, gear: { primaryWeapon: null, secondaryWeapon: null, shield: null } },
   stall: { title: '', greeting: '', network: true, closeWhenEmpty: true, prices: {} },
   alchemy: { target: 3, limit: 20, elixir: 0, powder: false, use: { luck: false, steady: false, immortal: false, astral: false }, stones: { luck: 1, steady: 1, immortal: 1, astral: 1 }, stoneLimit: 0,
     // The plus from which each helper is used: a failure from +5 up can destroy the item (Steady and Immortal matter from there),
@@ -286,6 +286,10 @@ function botProfile(input) {
   if (oldStones && !input.alchemy?.use) for (const key of Object.keys(result.alchemy.use)) {
     const n = Number(oldStones[key]) || 0; result.alchemy.use[key] = n > 0; result.alchemy.stones[key] = Math.min(6, Math.max(1, n));
   }
+  // A character wears one shield: the old primary and secondary shield become that one, the primary first.
+  const gear = result.items.gear, oldGear = input.items?.gear;
+  if (oldGear && typeof oldGear === 'object' && !('shield' in oldGear)) gear.shield = [oldGear.primaryShield, oldGear.secondaryShield].find(k => typeof k === 'string' && k) || null;
+  delete gear.primaryShield; delete gear.secondaryShield;
   return result;
 }
 const Settings = {
@@ -7840,10 +7844,11 @@ const Stall = {
   stall() { const s = World.gp?.stall; return s && s.phase !== 'none' ? s : null; },
   offers() { return this.stall()?.phase === 'owner' ? this.stall().offers || [] : []; },
   // Bag items with a price that are not already offered or skipped. A price is explicit intent, so the general
-  // loot protections do not apply; stackables offer their whole stack, equipment one piece.
+  // loot protections do not apply, except for the weapons and shield chosen under Combat, which are never sold;
+  // stackables offer their whole stack, equipment one piece.
   candidates(r = this.run) {
     const offered = new Set(this.offers().map(o => o.bagSlot)), skip = r ? r.skip : new Set();
-    return World.items().filter(i => !offered.has(i.slot) && !skip.has(i.slot) && this.price(i.refObjId) > 0);
+    return World.items().filter(i => !offered.has(i.slot) && !skip.has(i.slot) && this.price(i.refObjId) > 0 && !ItemRules.guarded(i));
   },
   // ownStall: the session's own stall is expected mid-run; only a fresh start refuses any open stall.
   blocked(ownStall = false) {
@@ -8294,8 +8299,11 @@ bus.on('notice', n => Travel.notice(n));
 
 
 // Confirm every native inventory move before casting or restoring combat gear.
+// A buff's gear choice: a saved set's id, 0 for the automatic choice, or one of the weapons and shield chosen under Combat.
+const BUFF_GEAR_KINDS = ['primary', 'secondary', 'shield'];
+const BUFF_COMBAT_HOLD_MS = 5 * 60000;
 const BuffGear = {
-  run: null, recovery: null, autoRestore: false, message: 'Buff weapon swapping off.', skipped: new Map(), waiting: '', started: false, bad: new Set(),
+  run: null, recovery: null, autoRestore: false, message: 'Buff weapon swapping off.', skipped: new Map(), waiting: '', started: false, bad: new Set(), combatHold: 0,
   cfg() { return Settings.profile.macro; },
   items() { return World.gp?.inventory || []; },
   at(slot) { return this.items().find(i => i.slot === slot) || null; },
@@ -8339,7 +8347,7 @@ const BuffGear = {
   },
   // A shield skill is due while no shield is worn, or a two-handed weapon is.
   shieldMissing(id) { return this.shieldSkill(id) && !this.shield(this.at(7)); },
-  // The bag shield to wear for a shield skill: the primary / secondary shield picked on the Items page first.
+  // The bag shield to wear for a shield skill: the shield chosen under Combat first.
   pickShield() {
     const gp = World.gp, list = this.items().filter(i => i.slot >= (gp.equipmentSlotCount || 13) && this.shield(i) && (i.durability ?? 1) > 0 && !this.bad.has(this.key(i)));
     list.sort((a, b) => (ItemRules.guarded(b) ? 1 : 0) - (ItemRules.guarded(a) ? 1 : 0) || (b.plus ?? 0) - (a.plus ?? 0) || a.slot - b.slot);
@@ -8353,12 +8361,57 @@ const BuffGear = {
     const gp = World.gp, level = gp?.progression?.level;
     const list = this.items().filter(i => i.slot >= (gp.equipmentSlotCount || 13) && this.weapon(i) && kinds.includes(this.kind(i)) &&
       (i.durability ?? 1) > 0 && !this.bad.has(this.key(i)) && !(level >= 0 && Town.requiredLevel(i) > level));
-    // The secondary weapon chosen on the Items page comes first, then the highest plus.
-    const chosen = i => ItemRules.guarded(i) ? 1 : 0;
+    // The secondary weapon chosen under Combat comes first, then the primary, then the highest plus.
+    const g = ItemRules.cfg().gear || {}, chosen = i => { const k = this.key(i); return k === g.secondaryWeapon ? 2 : k === g.primaryWeapon ? 1 : 0; };
     list.sort((a, b) => chosen(b) - chosen(a) || (b.plus ?? 0) - (a.plus ?? 0) || a.slot - b.slot);
     return list[0] || null;
   },
   setup() { return { weapon: this.key(this.at(6)), shield: this.key(this.at(7)), auto: true }; },
+  // Arrows (kind 1) or bolts (kind 2): ETC items of type 4, known by their type word, codename or this server's item number.
+  isAmmo(i, kind = 0) {
+    if (!i) return false;
+    const tf = i.typeFlags, code = i.codename || Items.data.get(i.refObjId)?.code || '';
+    const found = Number.isInteger(tf) && (tf & 2044) === 620 ? tf >>> 11 : /^ITEM_ETC_AMMO_ARROW/.test(code) || i.refObjId === 62 ? 1 : /^ITEM_ETC_AMMO_BOLT/.test(code) || i.refObjId === 10376 ? 2 : 0;
+    return (found === 1 || found === 2) && (!kind || found === kind) && (i.quantity ?? 1) > 0;
+  },
+  // What a bow (arrows) or a crossbow (bolts) shoots: the worn stack when it fits, otherwise the biggest fitting stack in the bag.
+  ammoFor(weapon) {
+    const kind = this.kind(weapon) === 6 ? 1 : this.kind(weapon) === 12 ? 2 : 0, off = this.at(7), equipped = World.gp?.equipmentSlotCount || 13;
+    if (!kind) return null;
+    if (this.isAmmo(off, kind)) return this.key(off);
+    const stack = this.items().filter(i => i.slot >= equipped && this.isAmmo(i, kind)).sort((a, b) => (b.quantity ?? 1) - (a.quantity ?? 1) || a.slot - b.slot)[0];
+    return stack ? this.key(stack) : null;
+  },
+  // What may sit in the off-hand slot of a set: a shield, or arrows or bolts.
+  offhand(i) { return this.shield(i) || this.isAmmo(i); },
+  // The chosen shield when it is carried and the game has not refused it.
+  chosenShield() { const k = ItemRules.cfg().gear?.shield; return this.shield(this.findAny(k)) && !this.bad.has(k) ? k : null; },
+  // The combat gear: the primary weapon chosen under Combat, with the chosen shield when it is one-handed (or the worn
+  // shield without one), and with arrows or bolts when it is a bow or crossbow. Null without a usable primary weapon.
+  combat() {
+    const k = ItemRules.cfg().gear?.primaryWeapon, weapon = this.findAny(k), off = this.at(7);
+    if (!this.weapon(weapon) || this.bad.has(k)) return null;
+    const shield = this.oneHanded(this.kind(weapon)) ? this.chosenShield() || (this.shield(off) ? this.key(off) : null) : this.ammoFor(weapon);
+    return { id: 'gear:primary', name: 'your primary weapon', auto: true, primary: true, weapon: k, shield };
+  },
+  // What the character goes back to after buffs: the combat gear, or what is worn when no primary weapon is chosen.
+  home() { return this.combat() || this.setup(); },
+  // The home gear, or the primary weapon's set built at another moment: its off-hand may hold arrows or bolts.
+  homeLike(set, home) { return set === home || !!(set.primary && home?.primary); },
+  // The gear a buff assigned to the primary weapon, the secondary weapon or the shield wears, or why there is none.
+  gearFor(kind, home) {
+    const g = ItemRules.cfg().gear || {};
+    if (kind === 'primary') return home.primary ? home : g.primaryWeapon ? 'Your primary weapon is not carried, or the game would not equip it.' : 'Choose a primary weapon under Combat and carry it.';
+    if (kind === 'secondary') {
+      const weapon = this.findAny(g.secondaryWeapon);
+      if (!this.weapon(weapon)) return 'Choose a secondary weapon under Combat and carry it.';
+      return { id: 'gear:secondary', name: 'your secondary weapon', auto: true, weapon: g.secondaryWeapon, shield: this.oneHanded(this.kind(weapon)) ? this.chosenShield() : this.ammoFor(weapon) };
+    }
+    if (!this.chosenShield()) return 'Choose a shield under Combat and carry it.';
+    const weapon = [this.findAny(g.primaryWeapon), this.findAny(g.secondaryWeapon), this.at(6)].find(w => this.weapon(w) && this.oneHanded(this.kind(w)));
+    if (!weapon) return 'A shield needs a one-handed primary or secondary weapon.';
+    return { id: 'gear:shield', name: 'your shield', auto: true, weapon: this.key(weapon), shield: g.shield };
+  },
   matches(set) { return set.weapon === this.key(this.at(6)) && set.shield === this.key(this.at(7)); },
   signature() { return JSON.stringify([this.cfg().buffSwap, this.cfg().buffAuto, this.cfg().buffSets, this.cfg().buffs]); },
   init() {
@@ -8383,7 +8436,7 @@ const BuffGear = {
     Settings.saveProfile(); UI.draw();
   },
   reset() {
-    this.run = this.recovery = null; this.skipped.clear(); this.bad.clear();
+    this.run = this.recovery = null; this.skipped.clear(); this.bad.clear(); this.combatHold = 0;
     this.message = 'Buff gear reset. Check equipped weapons after reconnecting.';
   },
   // Dying or changing world mid-swap is not a failure: remember the combat gear and put it back on once alive again.
@@ -8417,7 +8470,7 @@ const BuffGear = {
     this.run = this.create(this.recovery, []); this.run.restoring = true; this.recovery = null; this.autoRestore = false;
   },
   create(home, queue) {
-    return { home, queue, restoring: false, pending: null, cast: null, effects: [],
+    return { home, worn: this.setup(), queue, restoring: false, pending: null, cast: null, effects: [],
       at: now(), manualAt: Manual.lastAt, character: World.charName, profile: Settings.profile, signature: this.signature() };
   },
   due(b, auto) {
@@ -8431,64 +8484,113 @@ const BuffGear = {
     const gap = Math.max(4000, Math.min((info?.durationMs || 20000) * .85, 600000));
     return now() - (Combat.buffCastAt.get(b.group) ?? -Infinity) >= gap ? id : 0;
   },
-  begin() {
-    if (!this.cfg().buffSwap || this.recovery || !Hunt.running || !World.inWorld() || World.isDead() ||
+  // Anything an equipment change must not interrupt.
+  blocked() {
+    return !!(this.recovery || !World.inWorld() || World.isDead() ||
         Combat.busy() || World.isSitting() || World.local()?.mountedOn || World.gp?.inventoryPending ||
         World.gp?.pendingMoves || World.gp?.returnScroll || now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000 ||
         Town.trip || WalkBack.active || Restock.trip || Restock.recording || Resurrect.trip || now() < Resurrect.holdUntil ||
         Restock.activeShop() || World.gp?.storage || World.gp?.exchange?.open || World.gp?.exchange?.requesting || World.gp?.stall?.phase && World.gp.stall.phase !== 'none' ||
-        Alchemy.run || Alchemy.pending || Loot.active && !Loot.active.petGid || Loot.pressed()) return false;
-    const queue = [];
-    for (const set of this.cfg().buffSets) {
+        Alchemy.run || Alchemy.pending || Loot.active && !Loot.active.petGid || Loot.pressed());
+  },
+  // The bag weapon (and shield) for a skill the worn weapon cannot cast, or why there is none.
+  autoSet(id, home) {
+    const wantShield = this.shieldMissing(id);
+    let kinds = this.need(id), weapon;
+    if (wantShield) {
+      // A shield only goes with a one-handed weapon: keep the worn one if it is, otherwise wear a one-handed bag weapon.
+      const worn = this.at(6);
+      kinds = kinds ? kinds.filter(k => this.oneHanded(k)) : [];
+      weapon = this.weapon(worn) && this.oneHanded(this.kind(worn)) && (!kinds.length || this.need(id)?.includes(this.kind(worn))) ? worn : this.pick(kinds.length ? kinds : [10, 15, 2, 3, 7, 13]);
+      if (!this.pickShield()) return `${World.skillName(id)} needs a shield, and none you can use is in your bag.`;
+    } else weapon = this.pick(kinds);
+    if (!weapon) return `${World.skillName(id)} needs a ${this.kindName(kinds)}, and none you can use is in your bag.`;
+    const key = this.key(weapon) + (wantShield ? ':shield' : '');
+    const shield = wantShield ? this.key(this.pickShield()) : this.oneHanded(this.kind(weapon)) && this.shield(this.at(7)) ? home.shield : null;
+    return { id: 'auto:' + key, name: weapon.name || Items.name(weapon.refObjId), auto: true, weapon: this.key(weapon), shield };
+  },
+  // Why a swap to these sets and back home cannot start, or '' when it can.
+  problem(home, sets) {
+    if (!home.primary && !this.weapon(this.at(6))) return 'Equip your combat weapon before hunting.';
+    for (const set of [home, ...sets]) {
+      const name = set === home ? 'your combat gear' : set.auto ? set.name : 'the saved set "' + set.name + '"';
+      if (!this.lookup(set, set.weapon)) return `Cannot find ${name}: its weapon is not in your bag or equipped (or two copies look identical). Save the buff set again.`;
+      if (!this.weapon(this.lookup(set, set.weapon))) return `${name} is not a weapon any more. Save the buff set again.`;
+      if (set.shield && (!this.lookup(set, set.shield) || !this.homeLike(set, home) && !this.offhand(this.lookup(set, set.shield)))) return `Cannot find the shield of ${name} (or two copies look identical). Save the buff set again.`;
+    }
+    // A weapon swaps places with its bag copy, so it needs no space. Only taking the off-hand item off (shield, arrows) needs one free bag slot.
+    let offhand = this.key(this.at(7)), stash = false;
+    for (const set of [...sets, home]) { if (offhand && offhand !== set.shield) stash = true; offhand = set.shield; }
+    return stash && World.freeBagSlots() < 1 ? 'Buff swaps need one free bag slot to take off your shield.' : '';
+  },
+  begin() {
+    if (!Hunt.running || this.blocked()) return false;
+    const queue = [], swap = this.cfg().buffSwap, home = this.home();
+    let note = '';
+    if (swap) for (const set of this.cfg().buffSets) {
       const buffs = this.cfg().buffs.filter(b => Number(b.gearSet) === set.id).map(b => ({ b, id: this.due(b) })).filter(b => b.id);
       if (buffs.length) queue.push({ set, buffs });
     }
+    // Buffs assigned to the primary or secondary weapon or the shield chosen under Combat.
+    if (swap) for (const kind of BUFF_GEAR_KINDS) {
+      const buffs = this.cfg().buffs.filter(b => b.gearSet === kind).map(b => ({ b, id: this.due(b) })).filter(b => b.id);
+      if (!buffs.length) continue;
+      const set = this.gearFor(kind, home);
+      if (typeof set === 'string') note = set; else queue.push({ set, buffs });
+    }
     // Buffs without an assigned set wear whichever bag weapon their skill requires; buffs sharing a weapon share one swap.
     const wait = text => { this.waiting = text; return false; };
-    const home = this.setup();
-    let note = '';
     if (this.auto()) {
       const byWeapon = new Map();
       for (const b of this.cfg().buffs) {
         if (!this.owns(b)) continue;
         const id = this.due(b, true);
         if (!id) continue;
-        const wantShield = this.shieldMissing(id);
-        let kinds = this.need(id), weapon;
-        if (wantShield) {
-          // A shield only goes with a one-handed weapon: keep the worn one if it is, otherwise wear a one-handed bag weapon.
-          const worn = this.at(6);
-          kinds = kinds ? kinds.filter(k => this.oneHanded(k)) : [];
-          weapon = this.weapon(worn) && this.oneHanded(this.kind(worn)) && (!kinds.length || this.need(id)?.includes(this.kind(worn))) ? worn : this.pick(kinds.length ? kinds : [10, 15, 2, 3, 7, 13]);
-          if (!this.pickShield()) { note = `${World.skillName(id)} needs a shield, and none you can use is in your bag.`; continue; }
-        } else weapon = this.pick(kinds);
-        if (!weapon) { note = `${World.skillName(id)} needs a ${this.kindName(kinds)}, and none you can use is in your bag.`; continue; }
-        const key = this.key(weapon) + (wantShield ? ':shield' : '');
-        if (!byWeapon.has(key)) {
-          const shield = wantShield ? this.key(this.pickShield()) : this.oneHanded(this.kind(weapon)) && this.shield(this.at(7)) ? home.shield : null;
-          byWeapon.set(key, { set: { id: 'auto:' + key, name: weapon.name || Items.name(weapon.refObjId), auto: true, weapon: this.key(weapon), shield }, buffs: [] });
-        }
-        byWeapon.get(key).buffs.push({ b, id });
+        const set = this.autoSet(id, home);
+        if (typeof set === 'string') { note = set; continue; }
+        if (!byWeapon.has(set.id)) byWeapon.set(set.id, { set, buffs: [] });
+        byWeapon.get(set.id).buffs.push({ b, id });
       }
       queue.push(...byWeapon.values());
     }
-    if (!queue.length) { this.waiting = note; return false; }
+    if (!queue.length) { this.waiting = note; return this.wearCombat(home); }
     // A buff is due, so say why the swap cannot start instead of waiting silently.
-    if (!this.weapon(this.at(6))) return wait('Equip your combat weapon before hunting.');
-    for (const set of [home, ...queue.map(q => q.set)]) {
-      const name = set === home ? 'your combat gear' : set.auto ? set.name : 'the saved set "' + set.name + '"';
-      if (!this.lookup(set, set.weapon)) return wait(`Cannot find ${name}: its weapon is not in your bag or equipped (or two copies look identical). Save the buff set again.`);
-      if (!this.weapon(this.lookup(set, set.weapon))) return wait(`${name} is not a weapon any more. Save the buff set again.`);
-      if (set.shield && (!this.lookup(set, set.shield) || set !== home && !this.shield(this.lookup(set, set.shield)))) return wait(`Cannot find the shield of ${name} (or two copies look identical). Save the buff set again.`);
-    }
-    // A weapon swaps places with its bag copy, so it needs no space. Only taking the off-hand item off (shield, arrows) needs one free bag slot.
-    let offhand = this.key(this.at(7)), stash = false;
-    for (const set of [...queue.map(q => q.set), home]) { if (offhand && offhand !== set.shield) stash = true; offhand = set.shield; }
-    if (stash && World.freeBagSlots() < 1) return wait('Buff swaps need one free bag slot to take off your shield.');
+    const why = this.problem(home, queue.map(q => q.set));
+    if (why) return wait(why);
     this.waiting = note;
     if (!Cmd.move(World.pose())) return false;
     Loot.suspend(); Hunt.state = 'buff'; this.run = this.create(home, queue);
     this.message = 'Pausing combat for buff gear.';
+    return true;
+  },
+  // While hunting with a primary weapon chosen, put the combat gear back on when something else is worn (after a
+  // reconnect or a manual change): the primary weapon, and with a one-handed one the shield.
+  wearCombat(home) {
+    if (!home.primary || this.matches(home) || now() < this.combatHold) return false;
+    if (this.at(7) && this.key(this.at(7)) !== home.shield && World.freeBagSlots() < 1) { this.waiting = 'Wearing your combat gear needs one free bag slot to take off the off-hand item.'; return false; }
+    if (!Cmd.move(World.pose())) return false;
+    Loot.suspend(); Hunt.state = 'buff'; this.run = this.create(home, []); this.run.restoring = true; this.run.combat = true;
+    this.message = 'Wearing your combat gear.';
+    return true;
+  },
+  // The gear a party buff needs, null when what is worn will do, or why it cannot be cast. It follows Swap weapons for
+  // buffs, and for the automatic choice Wear the weapon each buff needs.
+  forParty(b, id) {
+    if (!this.cfg().buffSwap) return null;
+    const home = this.home(), set = BUFF_GEAR_KINDS.includes(b.gear) ? this.gearFor(b.gear, home)
+      : this.cfg().buffAuto && (this.mismatch(id) || this.shieldMissing(id)) ? this.autoSet(id, home) : null;
+    return set && typeof set !== 'string' && this.matches(set) ? null : set;
+  },
+  // Party support: wear the gear, cast the buff at the member, then go back to the combat gear. Also while hunting is stopped.
+  // entry: { party: true, id, due() (still wanted), cast() (sent), shows() (on the member), ended() (gone with the weapon) }.
+  startParty(set, entry) {
+    if (this.run || this.blocked()) return false;
+    const home = this.home(), why = this.problem(home, [set]);
+    if (why) { this.waiting = why; return false; }
+    if (!Cmd.move(World.pose())) return false;
+    Loot.suspend(); if (Hunt.running) Hunt.state = 'buff';
+    this.run = this.create(home, [{ set, buffs: [entry] }]); this.run.party = true;
+    this.message = 'Equipping ' + set.name + ' for a party buff.';
     return true;
   },
   move(source, destination) {
@@ -8501,7 +8603,7 @@ const BuffGear = {
   equip(set) {
     if (this.matches(set)) return true;
     const weapon = this.lookup(set, set.weapon), shield = this.lookup(set, set.shield);
-    if (!weapon || !this.weapon(weapon) || set.shield && (!shield || set !== this.run.home && !this.shield(shield))) { this.fail('Required equipment missing or ambiguous.'); return false; }
+    if (!weapon || !this.weapon(weapon) || set.shield && (!shield || !this.homeLike(set, this.run.home) && !this.offhand(shield))) { this.fail('Required equipment missing or ambiguous.'); return false; }
     if (this.at(7) && this.key(this.at(7)) !== set.shield) {
       const gp = World.gp;
       let empty = -1;
@@ -8520,7 +8622,7 @@ const BuffGear = {
     if (!World.inWorld() || World.isDead()) { this.interrupt('World change or death interrupted buff swaps.', true); return false; }
     if (Manual.lastAt !== r.manualAt) { this.fail('Manual control interrupted buff swaps.'); return true; }
     if (now() - r.at > 120000) { this.fail('Buff gear cycle timed out.'); return true; }
-    if (!Hunt.running || r.signature !== this.signature()) this.cancel();
+    if (!Hunt.running && !r.party || r.signature !== this.signature()) this.cancel();
     if (r.pending) {
       const p = r.pending;
       if (!gp.inventoryPending && this.key(this.at(p.destination)) === p.from && this.key(this.at(p.source)) === p.to) r.pending = null;
@@ -8528,7 +8630,24 @@ const BuffGear = {
         const item = this.at(p.source) || this.at(p.destination), what = item ? item.name || Items.name(item.refObjId) : 'an item';
         // Nothing moved and nothing is pending: the game refused it (level, class). Skip that weapon, put gear back, carry on.
         const refused = !gp.inventoryPending && now() - p.at > 2000 && this.key(this.at(p.source)) === p.from && this.key(this.at(p.destination)) === p.to;
-        if (refused && !r.restoring && r.queue[0]?.set.auto && p.destination === 6) {
+        // The chosen primary weapon or shield the game will not equip: never try it again (until it is picked again),
+        // and put back what was worn before, including an off-hand item already taken off.
+        const chosen = p.destination === 6 && p.from === r.home.weapon || p.destination === 7 && p.from === r.home.shield;
+        if (refused && r.restoring && r.home.primary && chosen) {
+          this.bad.add(p.from); r.pending = null;
+          // A refused shield: the primary stays, with the shield worn before if there was one. A refused primary: what was worn.
+          r.home = p.destination === 7 ? { ...r.home, shield: this.shield(this.findAny(r.worn.shield)) ? r.worn.shield : null } : r.worn;
+          if (r.combat) { r.combat = false; this.combatHold = now() + BUFF_COMBAT_HOLD_MS; }
+          r.refused = `The game would not equip ${what}; it is not tried again until you pick it again.`; this.message = r.refused;
+          Log.warn(this.message); return true;
+        }
+        // Any other combat gear change the game does not take is left alone for five minutes instead of stopping hunting.
+        if (r.combat && (refused || now() - p.at > 15000)) {
+          this.combatHold = now() + BUFF_COMBAT_HOLD_MS; this.run = null;
+          this.message = `The game would not move ${what}; your combat gear stays as it is for five minutes.`;
+          Log.warn(this.message); return true;
+        }
+        if (refused && !r.restoring && r.queue[0]?.set.auto && (p.destination === 6 || p.destination === 7 && p.from === r.queue[0].set.shield)) {
           this.bad.add(p.from); r.pending = null; r.queue.shift();
           r.refused = `The game would not equip ${what}; another weapon is tried next time.`; this.message = r.refused + ' Restoring combat gear.';
           return true;
@@ -8541,10 +8660,10 @@ const BuffGear = {
       }
     }
     if (r.cast) {
-      const p = r.cast, remaining = World.buffRemaining(p.id);
+      const p = r.cast, remaining = p.party ? (p.entry.shows() ? 1 : 0) : World.buffRemaining(p.id);
       if (remaining > 0) { p.accepted = true; p.visible = true; }
       if (now() < p.until || World.isCasting()) return true;
-      if (!p.accepted) { if (now() - p.at > 10000) { this.skipped.set(p.group, { signature: r.signature, until: now() + 120000, why: 'the cast was not confirmed, trying again in two minutes' }); this.cancel(); this.message = 'Buff cast unconfirmed; restoring combat gear.'; r.cast = null; } return true; }
+      if (!p.accepted) { if (now() - p.at > 10000) { if (!p.party) this.skipped.set(p.group, { signature: r.signature, until: now() + 120000, why: 'the cast was not confirmed, trying again in two minutes' }); this.cancel(); this.message = 'Buff cast unconfirmed; restoring combat gear.'; r.cast = null; } return true; }
       r.effects.push(p); r.cast = null;
     }
     if (Combat.busy() || gp.inventoryPending || World.isSitting() || World.local()?.mountedOn || Loot.pressed()) return true;
@@ -8554,7 +8673,8 @@ const BuffGear = {
       if (!this.equip(r.home)) return true;
       if (!r.restoredAt) { r.restoredAt = now(); return true; }
       if (now() - r.restoredAt < 1000) return true;
-      for (const p of r.effects) if (p.visible && World.buffRemaining(p.id) <= 0) {
+      for (const p of r.effects) if (p.visible && (p.party ? !p.entry.shows() : World.buffRemaining(p.id) <= 0)) {
+        if (p.party) { p.entry.ended(); continue; }
         this.skipped.set(p.group, { signature: r.signature, until: Infinity, why: 'it ended when the weapon changed back, so it stays with your combat weapon until buff settings change' });
         this.message = 'A buff ended after changing weapons; skipped until buff settings change.';
       }
@@ -8566,17 +8686,19 @@ const BuffGear = {
     if (!this.equip(q.set)) return true;
     const entry = q.buffs[0];
     if (!entry) { r.queue.shift(); return true; }
-    if (!this.due(entry.b, q.set.auto)) { q.buffs.shift(); return true; }
-    if (Combat.cast(entry.id, World.skill(entry.id)?.targetRequired ? World.localGid() : 0)) {
-      Combat.buffCastAt.set(entry.b.group, now()); q.buffs.shift();
-      r.cast = { id: entry.id, group: entry.b.group, at: now(), until: now() + Math.max(1000, World.skill(entry.id)?.actionMs || 6000) + 500, accepted: false, visible: false };
+    if (entry.party ? !entry.due() : !this.due(entry.b, q.set.auto)) { q.buffs.shift(); return true; }
+    if (entry.party ? entry.cast() : Combat.cast(entry.id, World.skill(entry.id)?.targetRequired ? World.localGid() : 0)) {
+      if (!entry.party) Combat.buffCastAt.set(entry.b.group, now());
+      q.buffs.shift();
+      r.cast = { id: entry.id, group: entry.party ? null : entry.b.group, party: !!entry.party, entry: entry.party ? entry : null, at: now(), until: now() + Math.max(1000, World.skill(entry.id)?.actionMs || 6000) + 500, accepted: false, visible: false };
       this.message = 'Casting buff; waiting before changing weapons.';
     }
     return true;
   },
-  // The buffs assigned to a saved set that are on, with how long each has left.
+  // The buffs assigned to a saved set or to the gear chosen under Combat that are on, with how long each has left.
   assigned() {
-    return this.cfg().buffs.filter(b => b.enabled && Number(b.gearSet) && this.cfg().buffSets.some(s => s.id === Number(b.gearSet))).map(b => {
+    const sets = this.cfg().buffSets;
+    return this.cfg().buffs.filter(b => b.enabled && (BUFF_GEAR_KINDS.includes(b.gearSet) || Number(b.gearSet) && sets.some(s => s.id === Number(b.gearSet)))).map(b => {
       const id = Combat.resolve(b);
       return { name: World.skillName(id || b.id), left: id ? World.buffRemaining(id) : 0, learned: !!id && World.learned(id), skip: this.skipped.get(b.group) };
     });
@@ -8593,7 +8715,7 @@ const BuffGear = {
     if (this.run || this.recovery) return this.message;
     if (!this.cfg().buffSwap) return 'Buff weapon swapping off.';
     const sets = this.cfg().buffSets, list = this.assigned(), auto = this.autoList();
-    if (!auto.length && !sets.length) return 'Buff weapon swapping is on, but no buff set is saved yet. Equip the buff weapon and press Save equipped buff set.' + (this.cfg().buffAuto ? ' Buffs that need a different weapon than yours are swapped automatically; none do right now.' : '');
+    if (!auto.length && !list.length && !sets.length) return 'Buff weapon swapping is on, but no buff set is saved yet. Equip the buff weapon and press Save equipped buff set, or pick your primary or secondary weapon or shield in Gear for <skill>.' + (this.cfg().buffAuto ? ' Buffs that need a different weapon than yours are swapped automatically; none do right now.' : '');
     if (!auto.length && !list.length) return 'Buff weapon swapping is on, but no buff skill is assigned to a set yet. Use Gear for <skill> under your buffs.';
     const lines = [];
     for (const a of auto) {
@@ -8614,7 +8736,7 @@ const BuffGear = {
     const box = UI.group('Buff weapon sets');
     box.append(UI.check('Swap weapons for buffs', () => this.cfg().buffSwap, v => this.cfg().buffSwap = v),
       UI.check('Wear the weapon each buff needs (from your bag)', () => this.cfg().buffAuto, v => this.cfg().buffAuto = v),
-      el('p', 'With both on, a buff your weapon cannot cast is cast with a matching weapon from your bag, then your combat weapon and shield come back. Saved sets below are only for buffs you assign to one. Keep one bag slot free. Buffs tied to the removed weapon may end.', 'muted'));
+      el('p', 'With both on, a buff your weapon cannot cast is cast with a matching weapon from your bag, then your combat weapon and shield come back. A buff can also wear the primary or secondary weapon or the shield chosen above, or a saved set below. Keep one bag slot free. Buffs tied to the removed weapon may end.', 'muted'));
     const name = el('input'); name.type = 'text'; name.maxLength = 40; name.value = 'Buff set ' + (this.cfg().buffSets.length + 1);
     box.append(UI.field('New buff set name', name), UI.button('Save equipped buff set', () => this.save(name.value)));
     for (const set of this.cfg().buffSets) {
@@ -8653,6 +8775,7 @@ Combat.buffs = function (hunting) {
 const SUPPORT_TARGET_FRIEND = 16 | 32;
 const SUPPORT_CONFIRM_MS = 6000;  // a buff cast that shows no effect on the member by then is a miss
 const SUPPORT_BACKOFF_MS = 60000; // after two misses in a row that buff on that member waits a minute
+const SUPPORT_WEAPON_BACKOFF_MS = 10 * 60000; // a buff that ends when the weapon changes back waits ten minutes
 const Support = {
   holdUntil: 0, sent: new Map(), misses: new Map(), message: 'Party support off.',
   cfg() { return Settings.profile.party.support; },
@@ -8699,6 +8822,24 @@ const Support = {
   ready(id) {
     return id && !Combat.blocked?.(id) && Cmd.canCast(id) && Combat.mpOk(id, World.me());
   },
+  // Whether a party buff is still wanted on this member and castable: alive, in range and without it.
+  wants(b, name) {
+    const m = this.members().find(x => x.name === name), id = this.skillOf(b);
+    return !!(this.cfg().enabled && this.ready(id) && m && m.alive && m.inRange && !this.has(m.gid, id));
+  },
+  // Cast a party buff at the member by name (called by a weapon swap once the gear is on).
+  castBuff(b, name) {
+    const m = this.members().find(x => x.name === name), id = this.skillOf(b);
+    if (!m || !this.ready(id) || !this.cast(id, m, `${World.skillName(id)} on ${m.name}`)) return false;
+    this.sent.set(m.name + ':' + b.group, now());
+    return true;
+  },
+  // Whether the member shows the buff at all, and what to do when it ended with the swapped weapon.
+  shows(b, name) { const m = this.members().find(x => x.name === name); return !!m && this.has(m.gid, this.skillOf(b), 0); },
+  ended(b, name) {
+    this.misses.set(name + ':' + b.group, { n: 0, until: now() + SUPPORT_WEAPON_BACKOFF_MS });
+    Log.warn(`Party support: ${World.skillName(this.skillOf(b))} on ${name} ended when the weapon changed back; trying again in ten minutes.`);
+  },
   // Select the member and cast at them; a skill without a target is simply cast.
   cast(id, member, why) {
     const s = World.skill(id), t = now();
@@ -8734,8 +8875,10 @@ const Support = {
       const low = living.filter(m => m.hpPct < c.heal.pct).sort((a, b) => a.hpPct - b.hpPct)[0];
       if (low) return this.cast(healId, low, `heal ${low.self ? 'myself' : low.name} (${Math.round(low.hpPct)}%)`);
     }
-    // 3. Buffs a member does not have yet. A cast that never shows on the member counts as a miss.
+    // 3. Buffs a member does not have yet. A cast that never shows on the member counts as a miss. A buff that needs
+    // other gear (the weapon its skill needs, or the gear chosen for it) is cast in a weapon swap that comes back after.
     const t = now();
+    let note = '';
     for (const b of c.buffs) {
       const id = this.skillOf(b);
       if (!id || !this.ready(id)) continue;
@@ -8753,11 +8896,20 @@ const Support = {
           this.misses.set(key, miss);
           if (t < miss.until) continue;
         }
+        const gear = BuffGear.forParty(b, id);
+        if (typeof gear === 'string') { note = gear; break; }
+        if (gear) {
+          const entry = { party: true, id, due: () => this.wants(b, m.name), cast: () => this.castBuff(b, m.name), shows: () => this.shows(b, m.name), ended: () => this.ended(b, m.name) };
+          if (BuffGear.startParty(gear, entry)) { this.message = `${World.skillName(id)} on ${m.name}: changing weapons.`; return true; }
+          // Not now (fighting, a window open): the other buffs, which need no swap, still go out.
+          note = BuffGear.waiting || `${World.skillName(id)} on ${m.name}: waiting to change weapons.`;
+          break;
+        }
         if (this.cast(id, m, `${World.skillName(id)} on ${m.name}`)) { this.sent.set(key, t); return true; }
         return false;
       }
     }
-    this.message = party.some(m => m.alive && !m.inRange) ? 'Some party members are out of view or out of range.' : 'Party is healed and buffed.';
+    this.message = note || (party.some(m => m.alive && !m.inRange) ? 'Some party members are out of view or out of range.' : 'Party is healed and buffed.');
     return false;
   },
 };
@@ -9857,6 +10009,7 @@ const Controller = {
       AutoMastery.tick();
       StatPoints.tick();
       Potion.tick();
+      ItemRules.trackGear();
       if (!ItemRules.dropTick()) ItemRules.balanceTick();
       Loot.checkPetFull();
       if (Town.tick()) { this.mode = 'town service'; return; }
@@ -11536,7 +11689,7 @@ for (const [name, method] of [['Follow party member', 'tick']]) {
 
 
 // Sharing settings. A share code or file holds only what differs from the defaults and nothing personal: positions,
-// town and merchant points, walking routes, buff weapon sets and the wardrobe stay out. Importing never runs
+// town and merchant points, walking routes, buff weapon sets, the chosen weapons and shield, and the wardrobe stay out. Importing never runs
 // anything: the text is parsed as data, every field is checked against the defaults, and a preview lists the changes
 // before anything is applied. The previous settings are kept so one press undoes an import.
 const SHARE = { apps: ['nixxane-bot', 'sro-bot-lean'], format: 1, maxChars: 300000, maxNodes: 20000, plain: 'nixxane0:', packed: 'nixxane1:' };
@@ -11548,14 +11701,15 @@ const ProfileShare = {
   personal(p) {
     const r = p.potion.restock, t = r.town;
     return this.clone({ center: p.hunt.center, vendor: r.vendor, route: r.route, offers: r.offers,
-      town: { arrival: t.arrival, storage: t.storage, vendor: t.vendor, smith: t.smith, gate: t.gate }, buffSets: p.macro.buffSets, wardrobe: p.wardrobe, follow: p.trace.name, pullPoints: p.lure.points });
+      town: { arrival: t.arrival, storage: t.storage, vendor: t.vendor, smith: t.smith, gate: t.gate }, buffSets: p.macro.buffSets, gear: p.items.gear, wardrobe: p.wardrobe, follow: p.trace.name, pullPoints: p.lure.points });
   },
   restore(p, own) {
     const r = p.potion.restock, t = r.town;
     p.hunt.center = own.center; r.vendor = own.vendor; r.route = own.route; r.offers = own.offers;
-    Object.assign(t, own.town); p.macro.buffSets = own.buffSets; p.wardrobe = own.wardrobe; p.trace.name = own.follow; p.lure.points = own.pullPoints;
-    // A buff assigned to a weapon set means nothing without the sets.
-    for (const b of p.macro.buffs) if (b && !p.macro.buffSets.some(s => s.id === Number(b.gearSet))) b.gearSet = 0;
+    Object.assign(t, own.town); p.macro.buffSets = own.buffSets; p.items.gear = own.gear; p.wardrobe = own.wardrobe; p.trace.name = own.follow; p.lure.points = own.pullPoints;
+    // A buff assigned to a weapon set means nothing without the sets; one assigned to the primary or secondary weapon or
+    // the shield uses the importer's own.
+    for (const b of p.macro.buffs) if (b && !BUFF_GEAR_KINDS.includes(b.gearSet) && !p.macro.buffSets.some(s => s.id === Number(b.gearSet))) b.gearSet = 0;
     return p;
   },
   strip(p) {
@@ -14025,7 +14179,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.5.0", "title": "Upstream sync: travel, trade, lure, auto-start, and the released auto stall", "items": ["This fork merges upstream 1.2.128 → 1.2.169: teleport and ferry travel, the auto trade routes, the lure areas, auto-start, item balance, repair hammer, walk-back over teleports, and many fixes.", "The auto stall is now the upstream released version (1.2.169), which keeps this fork's original flow plus the maintainer's review fixes: a sale counts even when its gold arrives a tick later, potion and inventory refusals no longer close the stall, and a refused offer skips just that item.", "The team edition is unchanged and re-verified on the new base (545 tests): presence, live shared intel with the map layer, the unique tracker and shared knowledge, assist, town sync, resurrection claims, unique converge, the public pool, the relay console, and the three hosting options (Node, Cloudflare Workers, fly.io/VPS).", "Diagnostics now use the name-free team status line, matching the upstream review's finding."], "note": "Everything is re-verified in simulation on the merged base; nothing has run with real characters yet."}, {"version": "1.4.3", "title": "Relay hosting: the administrator's choice; auto stall", "items": ["The relay can now run in three places with the same protocol: Cloudflare Workers (new edition under relay/cloudflare: Durable Objects, WebSocket hibernation, storage that survives restarts, zero administration), fly.io (the Node relay as-is with a Dockerfile), or your own VPS (systemd unit included).", "The bot now sends the room key in the WebSocket URL (?key=…) for hosts that route by it; the Node relay ignores it, so all three hosts work with one address format.", "relay/smoke-test.cjs can verify a live deployment: WS_URL=wss://your-relay/ws node smoke-test.cjs.", "Auto stall: price items on a new page, stand in town, and the character opens its own street stall, offers them, and runs it; a sale is confirmed by the offer disappearing and gold rising, never by a dispatch. Hunting refuses to start while a stall session runs."], "note": "Both parts are tested in simulation (464 tests). The Workers edition follows the documented Durable Objects patterns but has only been syntax-checked and reviewed, not deployed — run its smoke test after wrangler deploy. Neither has run with real characters."}, {"version": "1.4.2", "title": "Coherence fixes for the team layer", "items": ["A unique's death reported by a teammate is recorded quietly; it used to be re-announced, which echoed between clients forever.", "A teammate's store write no longer cancels the sync this client still owes the room (a pending local sighting could be lost until the next change).", "Moving the hunting spot from the tracker cancels any automatic unique converge, so its later restore cannot overwrite the manual spot.", "Shared live intel is cleared when the character changes; the \"Hunt here\" button still works the same."], "note": "Found by re-reading the code with two clients in mind; tested in simulation, not yet with real characters."}, {"version": "1.4.1", "title": "Team edition rounded out", "items": ["Optional unique converge: when a unique appears and its position is known, a hunting character moves its hunting spot there (toasts say so); the saved spot comes back when the unique dies or after 20 minutes. Off by default.", "The public pool grows a memory: with public sharing on, the unique tracker also reads and writes the relay's public store, so every room keeps the spawn history.", "Bug reports now include a team summary line (shared entities, combat edges, tracked uniques, known players).", "The repository README describes this fork's team edition."], "note": "Still simulation-tested only; no live run with real characters yet."}, {"version": "1.4.0", "title": "Team edition complete (phases 2-6)", "items": ["Live shared world: each character publishes the interesting monsters it sees (champion and up, party mobs, uniques with an HP estimate), the other players in view, and who attacks what (observed from every cast around); the map draws it all as a dimmed team layer, own view always winning.", "Unique tracker: the game's own server-wide announcements plus shared sightings build a history per unique with respawn windows (the timer restarts at death; 3-6 h per unique), toasts, a sound, map pins, and a Hunt here button that moves your hunting spot to the last known position.", "Player knowledge: every player the team sees is remembered with position and level; a player attacking a teammate outside a party is marked hostile (red on the map, flagged in the panel).", "Team drops: the room shares pickup counters.", "Team decisions: assist (fight what a teammate or party member fights), spot claims (a warning when two characters start hunting on top of each other), synchronized town trips (optional; a teammate's town trip starts yours), and resurrection claims (the dead member waits up to 60 s for the peer walking over instead of reviving itself).", "The room key holders always see everything; an optional public pool (per-relay, per-category checkboxes) shares monsters, players and unique events with every room on your relay — never your own position or inventory.", "The reference relay grows a room key-value store (the team's shared memory, persisted across restarts) and a console page (/?key=room key) showing the fleet with Stop everyone and Town trip buttons."], "note": "All of it is tested in simulation and against a local relay only; a live check with real characters is still to do."}, {"version": "1.3.0", "title": "Team relay (phase 1: presence)", "items": ["New Team page: connect several characters through your own WebSocket relay; while it runs, each character sees the others' presence (name, hunting, alive, level) in the panel.", "A reference relay server (rooms by room key, presence forwarding, no game logic) is included under relay/ in the repository.", "Presence is private to one room key; nothing is shared beyond it. The bot never depends on the relay: off or unreachable, everything else works exactly as before.", "Update checks now come from this fork's repository (duan78/opensro-bot-lean) instead of the original."], "note": "Presence, heartbeats and reconnection are tested in simulation only; a live relay check is still to do."}, {"version": "1.2.169", "title": "Run your own street stall to sell bag items", "items": ["A new **Stall** page sells your bag items from your own street stall: give items a price, stand in town with hunting, travel and alchemy stopped, and press **Open stall**.", "Prices are per exact item, saved with your character, and a new entry starts at 100 gold; each offer sells the whole stack.", "Set a **Stall name** (defaults to your character name), a **Greeting**, whether to **List the stall on the stall network** (on by default) and whether to **Close when everything is sold** (on by default).", "The status line shows offers left, visitors and gold earned; a sale counts only when the offer disappears and the gold arrives, and a step the game does not confirm is skipped rather than sent again.", "**Stop stall**, **Stop all** or **F8** closes a stall the bot opened, and hunting cannot start while any stall is open."], "note": "Contributed by duan78 (#49). Tested in simulation only, not in a live game."}, {"version": "1.2.168", "title": "Sell bag items from your own street stall", "items": ["A new **Stall** page lets you sell bag items from your own street stall: give items a price, stand in town with hunting, travel and alchemy stopped, and press **Open stall**.", "Set a **Stall name** (defaults to your character name), a **Greeting**, whether to **List the stall on the stall network** (on by default) and whether to **Close when everything is sold** (on by default).", "Prices are per exact item and saved with your character, so the same drop sells at the same price next time. A new price starts at 100 gold, and each offer sells the whole stack.", "The status line shows offers left, visitors and gold earned. A sale counts only when the offer disappears and the gold arrives, and a step the game does not confirm is skipped rather than sent again.", "**Stop stall**, **Stop all** or **F8** closes a stall the bot opened, and hunting cannot start while any stall is open."], "note": "Tested in simulation only, not in a live game."}];
+const RELEASE_NOTES = [{"version": "1.5.1", "title": "Upstream sync: combat gear, party-buff weapon swaps, ammo wear", "items": ["Merges upstream 1.2.170-1.2.173: the chosen weapons and shield stay listed once worn and move to Combat; the primary weapon is worn as combat gear and party buffs can swap weapons and return to the primary; bows and crossbows wear arrows or bolts from the bag.", "The team edition is unchanged and re-verified on the new base (579 tests)."], "note": "Re-verified in simulation only; nothing has run with real characters."}, {"version": "1.5.0", "title": "Upstream sync: travel, trade, lure, auto-start, and the released auto stall", "items": ["This fork merges upstream 1.2.128 → 1.2.169: teleport and ferry travel, the auto trade routes, the lure areas, auto-start, item balance, repair hammer, walk-back over teleports, and many fixes.", "The auto stall is now the upstream released version (1.2.169), which keeps this fork's original flow plus the maintainer's review fixes: a sale counts even when its gold arrives a tick later, potion and inventory refusals no longer close the stall, and a refused offer skips just that item.", "The team edition is unchanged and re-verified on the new base (545 tests): presence, live shared intel with the map layer, the unique tracker and shared knowledge, assist, town sync, resurrection claims, unique converge, the public pool, the relay console, and the three hosting options (Node, Cloudflare Workers, fly.io/VPS).", "Diagnostics now use the name-free team status line, matching the upstream review's finding."], "note": "Everything is re-verified in simulation on the merged base; nothing has run with real characters yet."}, {"version": "1.4.3", "title": "Relay hosting: the administrator's choice; auto stall", "items": ["The relay can now run in three places with the same protocol: Cloudflare Workers (new edition under relay/cloudflare: Durable Objects, WebSocket hibernation, storage that survives restarts, zero administration), fly.io (the Node relay as-is with a Dockerfile), or your own VPS (systemd unit included).", "The bot now sends the room key in the WebSocket URL (?key=…) for hosts that route by it; the Node relay ignores it, so all three hosts work with one address format.", "relay/smoke-test.cjs can verify a live deployment: WS_URL=wss://your-relay/ws node smoke-test.cjs.", "Auto stall: price items on a new page, stand in town, and the character opens its own street stall, offers them, and runs it; a sale is confirmed by the offer disappearing and gold rising, never by a dispatch. Hunting refuses to start while a stall session runs."], "note": "Both parts are tested in simulation (464 tests). The Workers edition follows the documented Durable Objects patterns but has only been syntax-checked and reviewed, not deployed — run its smoke test after wrangler deploy. Neither has run with real characters."}, {"version": "1.4.2", "title": "Coherence fixes for the team layer", "items": ["A unique's death reported by a teammate is recorded quietly; it used to be re-announced, which echoed between clients forever.", "A teammate's store write no longer cancels the sync this client still owes the room (a pending local sighting could be lost until the next change).", "Moving the hunting spot from the tracker cancels any automatic unique converge, so its later restore cannot overwrite the manual spot.", "Shared live intel is cleared when the character changes; the \"Hunt here\" button still works the same."], "note": "Found by re-reading the code with two clients in mind; tested in simulation, not yet with real characters."}, {"version": "1.4.1", "title": "Team edition rounded out", "items": ["Optional unique converge: when a unique appears and its position is known, a hunting character moves its hunting spot there (toasts say so); the saved spot comes back when the unique dies or after 20 minutes. Off by default.", "The public pool grows a memory: with public sharing on, the unique tracker also reads and writes the relay's public store, so every room keeps the spawn history.", "Bug reports now include a team summary line (shared entities, combat edges, tracked uniques, known players).", "The repository README describes this fork's team edition."], "note": "Still simulation-tested only; no live run with real characters yet."}, {"version": "1.4.0", "title": "Team edition complete (phases 2-6)", "items": ["Live shared world: each character publishes the interesting monsters it sees (champion and up, party mobs, uniques with an HP estimate), the other players in view, and who attacks what (observed from every cast around); the map draws it all as a dimmed team layer, own view always winning.", "Unique tracker: the game's own server-wide announcements plus shared sightings build a history per unique with respawn windows (the timer restarts at death; 3-6 h per unique), toasts, a sound, map pins, and a Hunt here button that moves your hunting spot to the last known position.", "Player knowledge: every player the team sees is remembered with position and level; a player attacking a teammate outside a party is marked hostile (red on the map, flagged in the panel).", "Team drops: the room shares pickup counters.", "Team decisions: assist (fight what a teammate or party member fights), spot claims (a warning when two characters start hunting on top of each other), synchronized town trips (optional; a teammate's town trip starts yours), and resurrection claims (the dead member waits up to 60 s for the peer walking over instead of reviving itself).", "The room key holders always see everything; an optional public pool (per-relay, per-category checkboxes) shares monsters, players and unique events with every room on your relay — never your own position or inventory.", "The reference relay grows a room key-value store (the team's shared memory, persisted across restarts) and a console page (/?key=room key) showing the fleet with Stop everyone and Town trip buttons."], "note": "All of it is tested in simulation and against a local relay only; a live check with real characters is still to do."}, {"version": "1.3.0", "title": "Team relay (phase 1: presence)", "items": ["New Team page: connect several characters through your own WebSocket relay; while it runs, each character sees the others' presence (name, hunting, alive, level) in the panel.", "A reference relay server (rooms by room key, presence forwarding, no game logic) is included under relay/ in the repository.", "Presence is private to one room key; nothing is shared beyond it. The bot never depends on the relay: off or unreachable, everything else works exactly as before.", "Update checks now come from this fork's repository (duan78/opensro-bot-lean) instead of the original."], "note": "Presence, heartbeats and reconnection are tested in simulation only; a live relay check is still to do."}, {"version": "1.2.173", "title": "Bows and crossbows wear ammo from the bag", "items": ["A bow primary weapon now puts on arrows and a crossbow puts on bolts, taken from your bag. The worn stack is kept if it fits, otherwise the biggest matching stack is used, and the next one when a stack runs out.", "Ammunition of the wrong kind is taken off. If no matching ammunition is left, the weapon stays as it is and the bot does not keep retrying.", "A secondary bow or crossbow gets its ammunition the same way, and your primary weapon and its ammunition go back on after a buff swap.", "See **Combat → Buffs & imbue → Weapons and shield**."], "note": "Contributed by corevider (#55). Tested in simulation only, not in a live game; the arrow and bolt item types were not checked against live data."}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -14507,9 +14661,9 @@ const ITEM_WEAPON = { CH: { BLADE: 'Blade', SWORD: 'Sword', TBLADE: 'Glaive', SP
 const ITEM_ACCESSORY = { NECKLACE: 'Necklace', EARRING: 'Earring', RING: 'Ring' };
 const ITEM_DROP_CONFIRM_MS = 5000;
 const ITEM_BALANCE_CONFIRM_MS = 5000;
-const ITEM_GEAR_SLOTS = ['primaryWeapon', 'primaryShield', 'secondaryWeapon', 'secondaryShield'];
+const ITEM_GEAR_SLOTS = ['primaryWeapon', 'secondaryWeapon', 'shield'];
 const ItemRules = {
-  infos: new Map(), dropping: null, dropBan: new Map(), message: '', balancing: null, balanceBan: new Map(),
+  infos: new Map(), dropping: null, dropBan: new Map(), message: '', balancing: null, balanceBan: new Map(), gearSlots: {}, gearOwner: '',
   cfg() { return Settings.profile.items; },
   get(id) { return this.cfg().rules[id] || null; },
   // change: { pick: 'yes' | 'no' | null, act: 'store' | 'sell' | 'keep' | 'drop' | null }; null clears that part.
@@ -14524,19 +14678,55 @@ const ItemRules = {
     Settings.saveProfile();
   },
   count() { return Object.keys(this.cfg().rules).length; },
-  // The primary and secondary weapon / shield picked on the Items page, as BuffGear item keys. Identical copies share a key,
-  // so every copy is protected. Protected gear is never sold, stored, dropped or moved to the pet.
+  // The primary and secondary weapon and the shield picked under Combat, as BuffGear item keys. Identical copies share a
+  // key, so every copy is protected. Protected gear is never sold, stored, dropped or moved to the pet, whatever its rule.
   gearKeys() { const g = this.cfg().gear || {}; return ITEM_GEAR_SLOTS.map(k => g[k]).filter(Boolean); },
   guarded(item) { const keys = this.gearKeys(); return !!item && keys.length > 0 && keys.includes(BuffGear.key(item)); },
-  // Weapons and shields the character can choose from: worn first, then the bag.
+  // Weapons or shields the character can choose from: worn first, then the bag. Identical copies are listed once.
   gearChoices(shield) {
-    return World.items().filter(i => shield ? BuffGear.shield(i) : BuffGear.weapon(i))
+    const list = BuffGear.items().filter(i => shield ? BuffGear.shield(i) : BuffGear.weapon(i))
       .sort((a, b) => (a.slot > 7) - (b.slot > 7) || a.slot - b.slot);
+    return list.filter((i, n) => list.findIndex(j => BuffGear.key(j) === BuffGear.key(i)) === n);
+  },
+  // Select rows for one gear choice. The chosen item stays listed while it is not carried (warehouse, pet, trade).
+  gearOptions(slot) {
+    const equipped = World.gp?.equipmentSlotCount || 13, chosen = this.cfg().gear?.[slot];
+    const rows = this.gearChoices(slot === 'shield').map(i => [BuffGear.key(i),
+      `${Items.name(i.refObjId)}${i.plus ? ' +' + i.plus : ''} (${i.slot < equipped ? 'worn' : 'bag ' + (i.slot - equipped + 1)})`]);
+    if (chosen && !rows.some(([key]) => key === chosen)) rows.push([chosen, this.gearName(chosen) + ' (not in your bag)']);
+    return [['', 'None'], ...rows];
+  },
+  gearRef(key) { try { return JSON.parse(key)[0]; } catch { return 0; } },
+  gearName(key) {
+    try { const [ref, , plus] = JSON.parse(key); return Items.name(ref) + (plus ? ' +' + plus : ''); } catch { return 'Unknown item'; }
   },
   setGear(slot, key) {
     if (!ITEM_GEAR_SLOTS.includes(slot)) return;
     (this.cfg().gear ||= {})[slot] = key || null;
+    delete this.gearSlots[slot];
+    if (key) BuffGear.bad.delete(key); // picked again: the game may take it now (a level up)
     Settings.saveProfile();
+  },
+  // Chosen gear is followed by its slot: wearing it keeps its key, and when alchemy changes its plus or stones the item
+  // in the same slot with the same item number takes the choice (and its protection) over.
+  trackGear() {
+    const g = this.cfg().gear, gp = World.gp, owner = Settings.profileKey + '|' + World.charName;
+    if (owner !== this.gearOwner) { this.gearOwner = owner; this.gearSlots = {}; }
+    if (!g || !gp || gp.inventoryPending || !World.inWorld()) return;
+    const items = BuffGear.items();
+    for (const slot of ITEM_GEAR_SLOTS) {
+      const key = g[slot];
+      if (!key) continue;
+      const found = items.find(i => BuffGear.key(i) === key);
+      if (found) { this.gearSlots[slot] = found.slot; continue; }
+      const was = items.find(i => i.slot === this.gearSlots[slot]);
+      // An empty slot means the item left (destroyed, stored, traded): forget the slot, so a later drop there is not adopted.
+      if (!was) { delete this.gearSlots[slot]; continue; }
+      if (was.refObjId !== this.gearRef(key) || this.gearKeys().includes(BuffGear.key(was))) continue;
+      g[slot] = BuffGear.key(was);
+      Settings.saveProfile();
+      Log.info('Chosen gear changed (' + this.gearName(key) + ' is now ' + this.gearName(g[slot]) + '); still protected.');
+    }
   },
   // What the codename says about an item, for the filters and the table. Cached per item.
   info(id) {
@@ -15543,8 +15733,9 @@ const UI = {
       up.setAttribute('aria-label', 'Move up ' + World.skillName(id)); down.setAttribute('aria-label', 'Move down ' + World.skillName(id)); remove.setAttribute('aria-label', 'Delete ' + World.skillName(id));
       row.append(this.skillSlot(id, () => {}, World.skillName(id)), info, up, down, remove); parent.append(row);
       if (buff) parent.append(this.select('Gear for ' + World.skillName(id),
-        () => [[0, BuffGear.auto() ? 'Automatic: the weapon the skill needs' : 'Current combat gear'], ...Settings.profile.macro.buffSets.map(s => [s.id, s.name])],
-        () => entry.gearSet || 0, value => entry.gearSet = Number(value)));
+        () => [[0, BuffGear.auto() ? 'Automatic: the weapon the skill needs' : 'Current combat gear'], ['primary', 'Primary weapon'], ['secondary', 'Secondary weapon'],
+          ['shield', 'Shield (with a one-handed weapon)'], ...Settings.profile.macro.buffSets.map(s => [s.id, s.name])],
+        () => entry.gearSet || 0, value => entry.gearSet = BUFF_GEAR_KINDS.includes(value) ? value : Number(value)));
     });
     const search = el('input'); search.type = 'search'; search.placeholder = 'Find a skill…'; search.setAttribute('aria-label', buff ? 'Search buff skills' : 'Search attack skills');
     const title = el('div', null, 'picker-title'); title.append(el('span', buff ? 'Learned self buffs' : 'Learned attack skills'), search);
@@ -15599,9 +15790,9 @@ const UI = {
       this.pane.append(subtabs);
       if (this.combatTab === 'Hunt area') this.sections('combatHuntArea', 'combatMonsters', 'combatLure');
       if (this.combatTab === 'Skills') this.sections('combatRotation', 'combatOptions', 'combatBerserk');
-      if (this.combatTab === 'Buffs & imbue') this.sections('combatBuffs', 'combatImbue');
+      if (this.combatTab === 'Buffs & imbue') this.sections('combatGear', 'combatBuffs', 'combatImbue');
     } else if (this.current === 'Loot') {
-      this.sections('lootCollection', 'lootWho');
+      this.sections('lootCollection', 'lootWho', 'lootBalance');
     } else if (this.current === 'Supplies') {
       this.sections('suppliesPotions', 'suppliesRestock');
       this.pane.append(el('p', 'Town trips, what starts them, and arrows and bolts are on the Town page.', 'muted'));
@@ -15639,10 +15830,10 @@ const UI = {
     return [
       { name: 'Settings', icon: 'action\\icon_cha_helper', pages: ['Supplies', 'Loot', 'Town', 'Combat', 'Settings'], sections: [
         ['suppliesPotions', 'Autopotion settings'], ['suppliesRestock', 'Buy settings'], ['townWhen', 'Back town settings'],
-        ['lootCollection', 'Pick settings'], ['lootWho', 'Who picks up what'], ['combatMonsters', 'Attack preferences'],
+        ['lootCollection', 'Pick settings'], ['lootWho', 'Who picks up what'], ['lootBalance'], ['combatMonsters', 'Attack preferences'],
         ['combatBerserk', 'Berserk settings'], ['settingsBehaviour', 'Attack behaviour / Protection'], ['settingsObstacles'], ['settingsAntiStuck']] },
       { name: 'Skills', icon: 'action\\icon_cha_auto_attack', pages: ['Combat'], sections: [
-        ['combatRotation'], ['combatOptions'], ['combatBuffs'], ['combatImbue']] },
+        ['combatRotation'], ['combatOptions'], ['combatGear'], ['combatBuffs'], ['combatImbue']] },
       { name: 'Items/Storage', icon: 'action\\cos_cmd_inventory', pages: ['Items', 'Town'], draw() {
         this.drawItems(); this.sections('townTrip', 'townCycle', 'townAmmo'); } },
       { name: 'Training place', icon: 'action\\icon_cha_camp', pages: ['Combat', 'Party'], sections: [['combatHuntArea', 'Training place'], ['partyTrace'], ['combatLure']] },
@@ -15812,6 +16003,13 @@ const UI = {
         ...[['giant', 'Giants'], ['giantParty', 'Giant party'], ['titan', 'Titans'], ['unique', 'Uniques'], ['elite', 'Elites'], ['party', 'Party monsters'], ['champion', 'Champions'], ['normal', 'Normal monsters']]
           .map(([key, label]) => this.check(label, () => M().berserkClasses[key], v => M().berserkClasses[key] = v))));
   },
+  section_combatGear(host) {
+    const pick = (title, slot) => this.select(title, () => ItemRules.gearOptions(slot), () => ItemRules.cfg().gear?.[slot] || '', v => ItemRules.setGear(slot, v));
+    host.append(this.group('Weapons and shield',
+      pick('Primary weapon', 'primaryWeapon'), pick('Secondary weapon', 'secondaryWeapon'), pick('Shield', 'shield'),
+      el('p', 'Pick from what you wear or carry. The choice stays when you wear the item and when alchemy changes its plus or stones. Chosen gear is never sold, stored, dropped or moved to the pet, even with an item rule.', 'muted'),
+      el('p', 'While hunting, the primary weapon is your combat weapon: it is put back on after buff swaps and reconnects, with the shield when it is one-handed, and with arrows or bolts from your bag for a bow or crossbow. A buff can wear the primary or secondary weapon or the shield (Gear for <skill> below), and automatic swaps try the secondary weapon first.', 'muted')));
+  },
   section_combatBuffs(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       BuffGear.draw(host);
@@ -15849,6 +16047,11 @@ const UI = {
           v => { if (v === 'off') L()[key] = false; else { L()[key] = true; (L().by ||= {})[key] = v; } Loot.reset(); }));
       kinds.append(el('p', 'Each kind of drop is either left alone, taken by your pickup pet, or taken by the character. The pet collects while you fight and fills its own bag; the character walks to the item and uses your bag, so give it only the few kinds you want on you (for example potions or pills). The default collector decides for kinds you have not set yourself and for names under Always include.', 'muted'));
       host.append(kinds);
+  },
+  section_lootBalance(host) {
+    host.append(this.group('Bag and pet space',
+      this.check('Balance free slots with the pickup pet', () => ItemRules.cfg().balance, v => ItemRules.cfg().balance = v),
+      el('p', 'While hunting, items with a Sell or Store rule move to the bag or pet, whichever has more free slots. Supplies and the weapons and shield chosen under Combat never move.', 'muted')));
   },
   section_suppliesPotions(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
@@ -16028,8 +16231,11 @@ const UI = {
         const remove = this.button('×', () => { chosen().splice(i, 1); Settings.saveProfile(); this.draw(); });
         remove.className = 'mini'; remove.setAttribute('aria-label', 'Delete party buff ' + World.skillName(id));
         const row = el('div', null, 'skill-row'); row.append(this.skillSlot(id, () => {}, World.skillName(id)), info, remove);
-        buffs.append(row, this.text('Only these members: ' + World.skillName(id), () => b.only || '', v => b.only = v, 'everyone (or names, comma-separated)'));
+        buffs.append(row, this.text('Only these members: ' + World.skillName(id), () => b.only || '', v => b.only = v, 'everyone (or names, comma-separated)'),
+          this.select('Gear for ' + World.skillName(id), [[0, 'Automatic: the weapon the skill needs'], ['primary', 'Primary weapon'], ['secondary', 'Secondary weapon'], ['shield', 'Shield (with a one-handed weapon)']],
+            () => b.gear || 0, v => b.gear = BUFF_GEAR_KINDS.includes(v) ? v : 0));
       });
+      if (chosen().length) buffs.append(el('p', 'With Swap weapons for buffs on (Combat → Buffs & imbue), a party buff that needs another weapon, or the gear picked for it, is cast after changing weapons; then your primary weapon (or what you wore) comes back. Automatic also needs Wear the weapon each buff needs.', 'muted'));
       const grid = el('div', null, 'grid'); grid.setAttribute('aria-label', 'Party buff skill icons');
       for (const s of Support.friendlySkills()) {
         const group = s.group ?? s.id, selected = chosen().some(b => b.group === group);
@@ -16236,7 +16442,7 @@ const UI = {
     const nearby = el('input'); nearby.type = 'checkbox'; nearby.checked = !!f.nearby; nearby.setAttribute('aria-label', 'Only items on the ground now');
     nearby.addEventListener('change', () => { f.nearby = nearby.checked; refresh(); });
     const nearbyLabel = el('label', null, 'field'); nearbyLabel.append(el('span', 'Only items on the ground now'), nearby);
-    const filters = this.group('Choose items',
+    const filters = this.group('Filter items',
       choose('Item group', [['all', 'All items'], ['equipment', 'Equipment'], ['weapon', 'Weapons'], ['armour', 'Armour and shields'], ['accessory', 'Accessories'], ['potion', 'Potions'],
         ['pill', 'Pills'], ['alchemy', 'Alchemy'], ['ammo', 'Arrows and bolts'], ['scroll', 'Scrolls'], ['pet', 'Pet items'], ['quest', 'Quest items'], ['mall', 'Item mall'], ['other', 'Other']], 'group'),
       choose('Race', [['', 'Any'], ['CH', 'Chinese'], ['EU', 'European']], 'race'),
@@ -16248,15 +16454,7 @@ const UI = {
     table.setAttribute('role', 'table'); table.setAttribute('aria-label', 'Item rules');
     const rules = this.group('Item rules', summary, bulk, table, pager,
       el('p', 'Pick: always takes the item whatever the Loot switches say, never leaves it. A rule is for that exact item (each size or degree is its own item), so tick Only items on the ground now to find what is dropping and set the rule on those. Store puts it in the warehouse on town trips (also from your bag, except potions and scrolls the trip needs). Sell sells it from the pet at the repair merchant; your own bag is never sold. Keep never stores or sells it. Drop throws it away from your bag or the pet while hunting, and it is never picked up again. Right-click a row for the same choices.', 'muted'));
-    const gearOptions = shield => () => [['', 'None'], ...ItemRules.gearChoices(shield).map(i => [BuffGear.key(i), `${Items.name(i.refObjId)}${i.plus ? ' +' + i.plus : ''} (${i.slot < 8 ? 'worn' : 'bag ' + (i.slot - (World.gp?.equipmentSlotCount || 13) + 1)})`])];
-    const gearPick = (title, slot, shield) => this.select(title, gearOptions(shield), () => ItemRules.cfg().gear?.[slot] || '', v => ItemRules.setGear(slot, v));
-    const gear = this.group('Pet and gear',
-      this.check('Balance free slots with the pickup pet', () => ItemRules.cfg().balance, v => ItemRules.cfg().balance = v),
-      el('p', 'While hunting, items with a Sell or Store rule move to the bag or pet, whichever has more free slots. Gear picked below and supplies never move.', 'muted'),
-      gearPick('Primary weapon', 'primaryWeapon', false), gearPick('Primary shield', 'primaryShield', true),
-      gearPick('Secondary weapon', 'secondaryWeapon', false), gearPick('Secondary shield', 'secondaryShield', true),
-      el('p', 'Pick from worn gear or your bag. Chosen gear is never sold, stored, dropped or moved to the pet, and the secondary weapon is the one buff swaps wear first.', 'muted'));
-    this.pane.append(filters, gear, rules);
+    this.pane.append(filters, rules);
     const set = (ids, change, label) => { ItemRules.set(ids, change); this.toast(`${label}: ${ids.length} item${ids.length === 1 ? '' : 's'}.`); renderTable(); };
     // Bulk buttons ask for a second click when they change more than one item.
     const bulkActions = [['Pick always', { pick: 'yes' }], ['Pick never', { pick: 'no' }], ['Store', { act: 'store' }], ['Sell', { act: 'sell' }], ['Keep', { act: 'keep' }],

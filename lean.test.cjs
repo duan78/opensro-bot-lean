@@ -782,6 +782,42 @@ test('chosen primary and secondary gear is protected and balance moves rule item
   assert.equal(cmd.kind, 'cos-transfer'); assert.equal(cmd.toCos, true); assert.equal(cmd.source, 20, 'the rule item goes to the roomier pet');
   assert.ok(free >= 0);
 });
+test('the chosen weapons and shield stay listed when worn, carried elsewhere or changed by alchemy', () => {
+  const f = townFixture(), gp = f.World.gp, worn = gp.inventory[0];
+  f.Items.name = id => 'Item ' + id;
+  const spare = { slot: 20, refObjId: 901, typeFlags: 44 | (6 << 7), plus: 2, quantity: 1 }, copy = { ...spare, slot: 21 };
+  gp.inventory.push(spare, copy, { slot: 22, refObjId: 950, typeFlags: 12 | (4 << 7), quantity: 1 });
+  const rows = slot => Array.from(f.ItemRules.gearOptions(slot), ([, text]) => text);
+  assert.deepEqual(rows('primaryWeapon'), ['None', 'Item 900 (worn)', 'Item 901 +2 (bag 8)'], 'worn gear is listed, identical copies once');
+  assert.deepEqual(rows('shield'), ['None', 'Item 950 (bag 10)'], 'shields only');
+  const key = f.BuffGear.key(spare);
+  f.ItemRules.setGear('secondaryWeapon', key); f.ItemRules.trackGear();
+  spare.slot = 6; worn.slot = 20; f.ItemRules.trackGear();
+  assert.equal(f.ItemRules.cfg().gear.secondaryWeapon, key, 'wearing it keeps the choice');
+  assert.deepEqual(rows('secondaryWeapon'), ['None', 'Item 901 +2 (worn)', 'Item 900 (bag 8)']);
+  gp.inventory = gp.inventory.filter(i => i !== copy); spare.plus = 3; f.ItemRules.trackGear();
+  assert.equal(f.ItemRules.cfg().gear.secondaryWeapon, f.BuffGear.key(spare), 'a new plus in the same slot keeps the choice');
+  assert.equal(f.ItemRules.guarded(spare), true, 'and its protection');
+  assert.ok(f.Log.lines.some(l => /Item 901 \+2 is now Item 901 \+3/.test(l.text)));
+  gp.inventory = gp.inventory.filter(i => i !== spare); f.ItemRules.trackGear();
+  assert.equal(rows('secondaryWeapon').at(-1), 'Item 901 +3 (not in your bag)', 'an item that is not carried stays chosen');
+  gp.inventory.push({ slot: 6, refObjId: 902, typeFlags: 44 | (6 << 7), quantity: 1 }); f.ItemRules.trackGear();
+  assert.equal(f.ItemRules.cfg().gear.secondaryWeapon, f.BuffGear.key(spare), 'another item in that slot does not take the choice');
+  gp.inventory = gp.inventory.filter(i => i.slot !== 6); f.ItemRules.trackGear();
+  gp.inventory.push({ ...spare, slot: 6, plus: 0 }); f.ItemRules.trackGear();
+  assert.equal(f.ItemRules.cfg().gear.secondaryWeapon, f.BuffGear.key(spare), 'a drop landing in the emptied slot is not adopted');
+  f.BuffGear.bad.add(f.BuffGear.key(spare)); f.ItemRules.setGear('secondaryWeapon', f.BuffGear.key(spare));
+  assert.equal(f.BuffGear.bad.has(f.BuffGear.key(spare)), false, 'picking it again clears a refusal');
+});
+test('the stall never offers the weapons and shield chosen under Combat', () => {
+  const f = stallFixture(); stallBag(f);
+  const sword = { slot: 15, refObjId: 64, typeFlags: 44 | (6 << 7), quantity: 1, tooltip: { fields: { canSell: 1 } } };
+  f.World.gp.inventory.push(sword);
+  f.Settings.profile.stall.prices = { 62: 150, 64: 9000 };
+  assert.deepEqual(Array.from(f.Stall.candidates(), i => i.slot), [13, 15]);
+  f.ItemRules.setGear('primaryWeapon', f.BuffGear.key(sword));
+  assert.deepEqual(Array.from(f.Stall.candidates(), i => i.slot), [13], 'a price does not sell the chosen weapon');
+});
 test('item rules drop from the bag and the pet, one at a time, never worn gear', () => {
   const f = townFixture(), gp = f.World.gp;
   gp.inventory.push({ slot: 20, refObjId: 1003, typeFlags: 108, quantity: 1 });
@@ -1806,6 +1842,88 @@ test('party buffs honour the member list, back off after two misses and never wa
   f.advance(10000); f.Controller.tick(); assert.equal(casts(f).length, 0, 'out of range: nothing cast');
   assert.equal(f.commands.some(c => c.kind === 'move' && c.destination?.x === 600), false, 'and no walking to the member');
 });
+// Party buff Guard (2002) on Tank only, a worn blade (one-handed) and a harp in the bag.
+function partyGear() {
+  const f = fixture(), c = support(f), gp = f.World.gp;
+  const weapon = (slot, ref, sub) => ({ slot, refObjId: ref, typeFlags: (sub << 11) | (6 << 7) | 44, plus: 0, variance: '1', durability: 100 });
+  gp.inventory = [weapon(6, 100, 3), weapon(13, 300, 14)];
+  Object.assign(f.World.skill(2002), { admit: { weaponKinds: [14, 255] }, actionMs: 1000 });
+  f.Settings.profile.macro.buffSwap = true; f.BuffGear.init();
+  c.enabled = true; gp.social.members[1].status = 0x5a; c.buffs = [{ id: 2002, group: 901, only: 'tank' }];
+  const at = s => gp.inventory.find(i => i.slot === s)?.refObjId, worn = [];
+  const cast = f.Combat.cast.bind(f.Combat); f.Combat.cast = (id, ...a) => { worn.push([id, at(6)]); return cast(id, ...a); };
+  const drive = () => {
+    for (let n = 0; n < 80; n++) {
+      f.advance(300); f.Controller.tick();
+      const p = f.BuffGear.run?.pending;
+      if (p) { const from = gp.inventory.find(i => i.slot === p.source), to = gp.inventory.find(i => i.slot === p.destination); from.slot = p.destination; if (to) to.slot = p.source; }
+      if (f.BuffGear.run?.cast && !f.BuffGear.run.cast.accepted) f.bus.emit('cast', { caster: 1, skill: f.BuffGear.run.cast.id });
+      if (!f.BuffGear.run) return;
+    }
+    throw Error('the party buff swap did not finish');
+  };
+  return { f, c, gp, at, worn, drive };
+}
+test('a party buff that needs another weapon is cast after a swap, then the weapon comes back', () => {
+  const { f, at, worn, drive } = partyGear();
+  f.advance(1000); f.Controller.tick();
+  assert.ok(f.BuffGear.run?.party, 'the harp swap starts'); assert.match(f.Support.message, /Guard on Tank: changing weapons/);
+  drive();
+  assert.deepEqual(worn, [[2002, 300]], 'Guard is cast with the harp');
+  assert.deepEqual(casts(f), ['select 60', 'skill 2002 60']);
+  assert.equal(at(6), 100, 'the blade is back'); assert.equal(f.Hunt.running, true);
+  f.World.gp.attachedEffects = [{ gid: 60, skill: 2002, token: 1 }]; f.commands.length = 0;
+  f.advance(2000); f.Controller.tick(); assert.equal(f.BuffGear.run, null, 'Tank has it: no more swaps'); assert.deepEqual(casts(f), []);
+});
+test('a party buff can wear the secondary weapon while hunting is stopped, then the primary comes back', () => {
+  const { f, c, gp, at, worn, drive } = partyGear();
+  gp.inventory.push({ slot: 14, refObjId: 200, typeFlags: (15 << 11) | (6 << 7) | 44, plus: 0, variance: '1', durability: 100 });
+  f.World.skill(2002).admit = null; f.Hunt.running = false; c.whileStopped = true;
+  f.ItemRules.setGear('primaryWeapon', f.BuffGear.key(gp.inventory.find(i => i.refObjId === 100)));
+  f.ItemRules.setGear('secondaryWeapon', f.BuffGear.key(gp.inventory.find(i => i.refObjId === 200)));
+  c.buffs[0].gear = 'secondary';
+  f.advance(1000); f.Controller.tick(); drive();
+  assert.deepEqual(worn, [[2002, 200]], 'cast with the secondary staff');
+  assert.equal(at(6), 100, 'then the primary blade'); assert.equal(f.Hunt.running, false);
+});
+test('a party buff that cannot swap now does not hold back the others, and a primary bow keeps its arrows', () => {
+  let { f, c, gp, at, worn, drive } = partyGear();
+  c.buffs.push({ id: 2001, group: 900, only: 'tank' }); f.BuffGear.blocked = () => true;
+  f.advance(1000); f.Controller.tick();
+  assert.equal(f.BuffGear.run, null); assert.deepEqual(casts(f), ['select 60', 'skill 2001 60'], 'Heal goes out while Guard waits for its swap');
+  ({ f, c, gp, at, worn, drive } = partyGear());
+  gp.inventory.push({ slot: 7, refObjId: 500, typeFlags: 108 | (4 << 7) | (1 << 11), quantity: 500 }, { slot: 14, refObjId: 400, typeFlags: (6 << 11) | (6 << 7) | 44, plus: 0, variance: '1', durability: 100 });
+  f.World.skill(2002).admit = null; c.buffs[0].gear = 'primary';
+  f.ItemRules.setGear('primaryWeapon', f.BuffGear.key(gp.inventory.find(i => i.refObjId === 400)));
+  f.Hunt.running = false; c.whileStopped = true;
+  f.advance(1000); f.Controller.tick();
+  assert.ok(f.BuffGear.run?.party, 'the bow with its arrows passes the gear checks'); drive();
+  assert.deepEqual(worn, [[2002, 400]]); assert.deepEqual([at(6), at(7)], [400, 500]);
+});
+test('a party buff that ends when the weapon changes back waits ten minutes instead of swapping again', () => {
+  const { f, gp, at } = partyGear();
+  f.advance(1000); f.Controller.tick();
+  for (let n = 0; n < 80 && f.BuffGear.run; n++) {
+    f.advance(300); f.Controller.tick();
+    const p = f.BuffGear.run?.pending;
+    if (p) { const from = gp.inventory.find(i => i.slot === p.source), to = gp.inventory.find(i => i.slot === p.destination); from.slot = p.destination; if (to) to.slot = p.source; }
+    if (f.BuffGear.run?.cast) gp.attachedEffects = [{ gid: 60, skill: 2002, token: 1 }];
+    if (at(6) === 100) gp.attachedEffects = [];
+  }
+  assert.equal(f.BuffGear.run, null); assert.equal(at(6), 100);
+  assert.ok(f.Support.misses.get('Tank:901').until > f.World.simNow() + 9 * 60000, 'Guard on Tank waits ten minutes');
+  assert.ok(f.Log.lines.some(l => /ended when the weapon changed back; trying again in ten minutes/.test(l.text)));
+  f.advance(7000); f.Controller.tick(); assert.equal(f.BuffGear.run, null, 'no new swap right away');
+});
+test('party buffs keep the worn weapon with weapon swapping off, and say when no bag weapon fits', () => {
+  let { f, gp, worn } = partyGear();
+  f.Settings.profile.macro.buffSwap = false; f.advance(1000); f.Controller.tick();
+  assert.equal(f.BuffGear.run, null); assert.deepEqual(worn, [[2002, 100]], 'cast with what is worn, as before');
+  ({ f, gp, worn } = partyGear());
+  gp.inventory = gp.inventory.filter(i => i.slot !== 13); f.advance(1000); f.Controller.tick();
+  assert.equal(f.BuffGear.run, null); assert.deepEqual(worn, []);
+  assert.match(f.Support.message, /needs a harp, and none you can use is in your bag/);
+});
 test('party support group heal, self heal and the stopped switch', () => {
   const f = fixture(), c = support(f);
   c.enabled = true; c.group = { id: 2003, group: 902, pct: 60, count: 2 };
@@ -2264,6 +2382,16 @@ test('a share holds only what differs from the defaults and nothing personal', (
   assert.equal(p.macro.buffs[0].gearSet, 0, 'a weapon set assignment means nothing without the set');
   assert.ok(JSON.parse(f.ProfileShare.text(false)).profile.hunt.center, 'the full backup keeps the positions');
   const defaults = f.ProfileShare.text(true); assert.ok(defaults.length < 600, 'a share stays short');
+});
+test('the chosen weapons and shield are personal and the old two shields become one', () => {
+  const f = shareFixture(); f.Settings.profile.items.gear.primaryWeapon = 'my-weapon';
+  assert.equal(f.ProfileShare.text(true).includes('my-weapon'), false, 'not in a share');
+  f.Settings.profile.items.gear.shield = 'my-shield';
+  assert.equal(f.ProfileShare.build({ items: { gear: { shield: 'theirs' } } }).items.gear.shield, 'my-shield', 'an import keeps your own');
+  assert.deepEqual(plain(f.botProfile({ items: { gear: { primaryWeapon: 'a', primaryShield: null, secondaryShield: 's2' } } }).items.gear),
+    { primaryWeapon: 'a', secondaryWeapon: null, shield: 's2' });
+  assert.equal(f.botProfile({ items: { gear: { primaryShield: 's1', secondaryShield: 's2' } } }).items.gear.shield, 's1', 'the primary shield first');
+  assert.deepEqual(plain(f.botProfile({ items: { gear: { shield: 'x', primaryShield: 's1' } } }).items.gear), { primaryWeapon: null, secondaryWeapon: null, shield: 'x' });
 });
 test('importing previews the changes, keeps your own positions, applies once and can be undone', async () => {
   const sender = shareFixture(), code = await sender.ProfileShare.encode(sender.ProfileShare.text(true));
@@ -5337,6 +5465,122 @@ test('buff gear carries on when the game refuses a picked weapon, and restores g
   assert.equal(JSON.stringify(f.BuffGear.setup()),home);
   assert.match(f.BuffGear.message,/would not equip/);
 });
+test('the primary weapon is the combat gear: worn while hunting, with the shield when it is one-handed', () => {
+  const f = buffGearFixture(), gp = f.World.gp, at = s => gp.inventory.find(i => i.slot === s)?.refObjId;
+  const key = s => f.BuffGear.key(gp.inventory.find(i => i.slot === s));
+  f.Settings.profile.macro.buffs = [];
+  assert.equal(f.BuffGear.tick(), false, 'without a primary weapon what is worn stays');
+  f.ItemRules.setGear('primaryWeapon', key(13)); f.ItemRules.setGear('shield', key(14));
+  assert.equal(f.BuffGear.tick(), true, 'something else is worn'); f.drive();
+  assert.deepEqual([at(6), at(7)], [200, 201], 'the one-handed primary with the chosen shield');
+  assert.equal(f.Hunt.running, true);
+  let n = f.commands.length; f.BuffGear.tick(); assert.equal(f.commands.length, n, 'nothing more to wear');
+  f.ItemRules.setGear('primaryWeapon', f.BuffGear.key(gp.inventory.find(i => i.refObjId === 300)));
+  assert.equal(f.BuffGear.tick(), true); f.drive();
+  assert.deepEqual([at(6), at(7)], [300, undefined], 'a two-handed primary goes on without the shield');
+  f.Settings.profile.macro.buffSwap = false; f.ItemRules.setGear('primaryWeapon', f.BuffGear.key(gp.inventory.find(i => i.refObjId === 100)));
+  assert.equal(f.BuffGear.tick(), true, 'also with buff swapping off'); f.drive();
+  assert.equal(at(6), 100);
+  f.Hunt.running = false; f.ItemRules.setGear('primaryWeapon', f.BuffGear.key(gp.inventory.find(i => i.refObjId === 300)));
+  n = f.commands.length; assert.equal(f.BuffGear.tick(), false, 'only while hunting'); assert.equal(f.commands.length, n);
+});
+test('a primary weapon the game refuses is left alone without stopping hunting', () => {
+  const f = buffGearFixture(), gp = f.World.gp;
+  f.Settings.profile.macro.buffs = []; gp.inventory = gp.inventory.filter(i => i.slot !== 7);
+  const harp = f.BuffGear.key(gp.inventory.find(i => i.slot === 15));
+  f.ItemRules.setGear('primaryWeapon', harp);
+  f.BuffGear.tick(); f.BuffGear.tick();
+  assert.equal(f.BuffGear.run.pending.source, 15, 'the primary is sent to the weapon slot');
+  for (let n = 0; n < 20 && f.BuffGear.run; n++) { f.advance(300); f.BuffGear.tick(); }
+  assert.equal(f.BuffGear.run, null); assert.equal(f.Hunt.running, true, 'hunting goes on');
+  assert.match(f.BuffGear.message, /would not equip .*until you pick it again/);
+  assert.equal(f.BuffGear.bad.has(harp), true); assert.equal(f.BuffGear.combat(), null, 'what is worn is the combat gear again');
+  const n = f.commands.length; f.advance(1000); f.BuffGear.tick(); assert.equal(f.commands.length, n, 'no retry');
+});
+test('a bow or crossbow primary wears its own arrows or bolts from the bag, never the other kind', () => {
+  const f = buffGearFixture(), gp = f.World.gp, at = s => gp.inventory.find(i => i.slot === s)?.refObjId;
+  const ammo = (slot, ref, kind, quantity) => ({ slot, refObjId: ref, typeFlags: 108 | (4 << 7) | (kind << 11), quantity });
+  f.Settings.profile.macro.buffs = [];
+  gp.inventory = gp.inventory.filter(i => ![7, 14, 15].includes(i.slot));
+  gp.inventory.push({ slot: 14, refObjId: 400, typeFlags: (12 << 11) | (6 << 7) | 44, plus: 0, variance: '1', durability: 100 },
+    ammo(15, 62, 1, 900), ammo(16, 10376, 2, 40), ammo(17, 10377, 2, 700));
+  f.ItemRules.setGear('primaryWeapon', f.BuffGear.key(gp.inventory.find(i => i.refObjId === 400)));
+  assert.equal(f.BuffGear.tick(), true); f.drive();
+  assert.deepEqual([at(6), at(7)], [400, 10377], 'the crossbow with the biggest bolt stack, not the arrows');
+  gp.inventory = gp.inventory.filter(i => i.slot !== 7); f.BuffGear.tick(); f.drive();
+  assert.equal(at(7), 10376, 'used up: the next bolts go on');
+  gp.inventory = gp.inventory.filter(i => i.slot !== 7); const n = f.commands.length;
+  assert.equal(f.BuffGear.tick(), false, 'no bolts left: the crossbow stays as it is'); assert.equal(f.commands.length, n);
+  gp.inventory.push({ slot: 18, refObjId: 401, typeFlags: (6 << 11) | (6 << 7) | 44, plus: 0, variance: '1', durability: 100 }, ammo(7, 10376, 2, 30));
+  f.ItemRules.setGear('primaryWeapon', f.BuffGear.key(gp.inventory.find(i => i.refObjId === 401)));
+  f.BuffGear.tick(); f.drive();
+  assert.deepEqual([at(6), at(7)], [401, 62], 'a bow takes the arrows, and the worn bolts go to the bag');
+  assert.ok(gp.inventory.some(i => i.refObjId === 10376 && i.slot >= 13));
+});
+test('a buff on the secondary cleric rod puts the crossbow and its bolts back after', () => {
+  const f = buffGearFixture(), gp = f.World.gp, at = s => gp.inventory.find(i => i.slot === s)?.refObjId;
+  gp.inventory = gp.inventory.filter(i => ![6, 7, 14, 15].includes(i.slot));
+  gp.inventory.push({ slot: 6, refObjId: 400, typeFlags: (12 << 11) | (6 << 7) | 44, plus: 0, variance: '1', durability: 100 },
+    { slot: 7, refObjId: 10376, typeFlags: 108 | (4 << 7) | (2 << 11), quantity: 500 });
+  f.ItemRules.setGear('primaryWeapon', f.BuffGear.key(gp.inventory.find(i => i.slot === 6)));
+  f.ItemRules.setGear('secondaryWeapon', f.BuffGear.key(gp.inventory.find(i => i.slot === 13)));
+  f.Settings.profile.macro.buffs = [{ id: 20, group: 20, gearSet: 'secondary', enabled: true, mode: 'hunt' }];
+  const casts = [], cast = f.Combat.cast.bind(f.Combat);
+  f.Combat.cast = (id, ...a) => { casts.push([id, at(6), at(7)]); return cast(id, ...a); };
+  assert.equal(f.BuffGear.tick(), true); f.drive();
+  assert.deepEqual(casts, [[20, 200, undefined]], 'the rod is worn without the bolts');
+  assert.deepEqual([at(6), at(7)], [400, 10376], 'then the crossbow and its bolts');
+});
+test('a chosen shield the game refuses is skipped and the shield worn before goes back on', () => {
+  const f = buffGearFixture(), gp = f.World.gp, at = s => gp.inventory.find(i => i.slot === s)?.refObjId;
+  const key = s => f.BuffGear.key(gp.inventory.find(i => i.slot === s)), refusedShield = key(14);
+  f.Settings.profile.macro.buffs = [];
+  f.ItemRules.setGear('primaryWeapon', key(13)); f.ItemRules.setGear('shield', refusedShield);
+  f.BuffGear.tick();
+  for (let n = 0; n < 60 && f.BuffGear.run; n++) {
+    f.BuffGear.tick();
+    const p = f.BuffGear.run?.pending;
+    if (p && !(p.destination === 7 && p.from === refusedShield)) f.confirmMove(); else f.advance(300);
+  }
+  assert.equal(f.BuffGear.run, null); assert.equal(f.Hunt.running, true, 'hunting goes on');
+  assert.deepEqual([at(6), at(7)], [200, 101], 'the primary with the shield worn before, not an empty off-hand');
+  assert.equal(f.BuffGear.bad.has(refusedShield), true); assert.match(f.BuffGear.message, /would not equip/);
+  const n = f.commands.length; f.advance(1000); f.BuffGear.tick(); assert.equal(f.commands.length, n, 'settled: nothing more to wear');
+});
+test('a buff assigned to the secondary weapon or the shield wears it, then the primary comes back', () => {
+  const f = buffGearFixture(), gp = f.World.gp, at = s => gp.inventory.find(i => i.slot === s)?.refObjId;
+  const key = s => f.BuffGear.key(gp.inventory.find(i => i.slot === s));
+  f.ItemRules.setGear('primaryWeapon', key(13)); f.ItemRules.setGear('secondaryWeapon', key(15)); f.ItemRules.setGear('shield', key(14));
+  f.Settings.profile.macro.buffs = [{ id: 30, group: 30, gearSet: 'secondary', enabled: true, mode: 'hunt' }];
+  const casts = [], cast = f.Combat.cast.bind(f.Combat);
+  f.Combat.cast = (id, ...a) => { casts.push([id, at(6), at(7)]); return cast(id, ...a); };
+  assert.equal(f.BuffGear.tick(), true); f.drive();
+  assert.deepEqual(casts, [[30, 300, undefined]], 'cast with the secondary harp');
+  assert.deepEqual([at(6), at(7)], [200, 201], 'then the primary staff and the shield, not what was worn before');
+  assert.match(f.BuffGear.status(), /Bard buff: active/);
+  f.ItemRules.setGear('primaryWeapon', f.BuffGear.key(gp.inventory.find(i => i.refObjId === 300)));
+  f.ItemRules.setGear('secondaryWeapon', f.BuffGear.key(gp.inventory.find(i => i.refObjId === 200)));
+  f.drive();
+  assert.deepEqual([at(6), at(7)], [300, undefined]);
+  f.Settings.profile.macro.buffs = [{ id: 20, group: 20, gearSet: 'shield', enabled: true, mode: 'hunt' }]; casts.length = 0;
+  assert.equal(f.BuffGear.tick(), true); f.drive();
+  assert.deepEqual(casts, [[20, 200, 201]], 'the shield goes on with the one-handed secondary');
+  assert.deepEqual([at(6), at(7)], [300, undefined], 'and comes off with the two-handed primary');
+  f.ItemRules.setGear('shield', null); f.Settings.profile.macro.buffs[0].gearSet = 'shield'; f.Combat.buffCastAt.clear(); gp.buffSlots = [];
+  assert.equal(f.BuffGear.tick(), false); assert.match(f.BuffGear.waiting, /Choose a shield under Combat/);
+});
+test('automatic buff swaps try the secondary weapon, then the primary, then the highest plus', () => {
+  const f = autoGearFixture(), gp = f.World.gp;
+  const harp = gp.inventory.find(i => i.slot === 15), better = { ...harp, slot: 16, plus: 5 }, other = { ...harp, slot: 17, plus: 3 };
+  gp.inventory.push(better, other);
+  assert.equal(f.BuffGear.pick([14]).slot, 16, 'the highest plus without a choice');
+  f.ItemRules.setGear('primaryWeapon', f.BuffGear.key(other)); assert.equal(f.BuffGear.pick([14]).slot, 17, 'the primary');
+  f.ItemRules.setGear('secondaryWeapon', f.BuffGear.key(harp)); assert.equal(f.BuffGear.pick([14]).slot, 15, 'the secondary first');
+});
+test('a share keeps buffs assigned to the primary or secondary weapon or the shield', () => {
+  const f = shareFixture(); f.Settings.profile.macro.buffs = [{ id: 20, group: 20, gearSet: 'secondary', enabled: true }];
+  assert.equal(JSON.parse(f.ProfileShare.text(true)).profile.macro.buffs[0].gearSet, 'secondary');
+});
 test('buff gear failure names the move that was not confirmed',()=>{
   const f=buffGearFixture(); f.BuffGear.tick(); f.BuffGear.tick();
   f.World.gp.inventoryPending=true;
@@ -5642,8 +5886,8 @@ async function updateTests() {
   }
   await check('updates compare numeric version components and ignore malformed versions', async () => {
     const f = fixture();
-    for (const v of ['9.9.9', '1.5.1', '2.0.0']) assert.equal(f.Updates.newer(v), true);
-    for (const v of ['1.2.9', '1.2.36', '1.2.169', '1.3.0', '1.4.3', '1.5.0', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
+    for (const v of ['9.9.9', '1.5.2', '2.0.0']) assert.equal(f.Updates.newer(v), true);
+    for (const v of ['1.2.9', '1.2.36', '1.2.169', '1.2.173', '1.3.0', '1.4.3', '1.5.0', '1.5.1', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
   });
   await check('updates pin metadata and user-initiated installer to the same trusted commit', async () => {
     const f = fixture(), calls = updater(f); f.UI.updateButton = {};
