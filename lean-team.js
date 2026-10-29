@@ -132,6 +132,12 @@ const Team = {
     if (this.state === 'online') return 'Connected as ' + this.name + '; ' + this.peers.size + (this.peers.size === 1 ? ' peer' : ' peers') + ' in the room.';
     return this.message;
   },
+  // The diagnostics line: same information, without the character name (reports omit names).
+  diag() {
+    if (!this.cfg().enabled) return '';
+    if (this.state === 'online') return 'online, ' + this.peers.size + (this.peers.size === 1 ? ' peer' : ' peers') + ' in the room';
+    return this.message;
+  },
   peerRows() {
     const t = now();
     return [...this.peers.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([name, peer]) => {

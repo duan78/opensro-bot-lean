@@ -3,8 +3,10 @@ const startHunting = Hunt.start;
 Hunt.start = function (...args) {
   if (BuffGear.run || BuffGear.recovery) return UI.toast('Restore or review combat gear before hunting.', 'warn');
   if (Alchemy.run || Alchemy.pending) return UI.toast('Stop alchemy and wait for its result before hunting.', 'warn');
+  if (Trade.run) return UI.toast('Stop auto trade before hunting.', 'warn');
   if (Stall.run) return UI.toast('Stop the stall session before hunting.', 'warn');
   if (World.gp?.stall?.phase && World.gp.stall.phase !== 'none') return UI.toast('Close the stall before hunting.', 'warn');
+  Lure.reset();
   return startHunting.apply(this, args);
 };
 Hunt.lootAllowed = e => Loot.allowed(e);
@@ -52,7 +54,7 @@ Hunt.tick = function () {
     return;
   }
   if (this.deathAt) {
-    this.deathAt = 0; this.revived = false; this.targetGid = 0;
+    this.deathAt = 0; this.revived = false; this.targetGid = 0; Lure.reset();
     if (H.center && dist2D(World.pose(), H.center) > H.radius) { Controller.returnAfterRevive(); return; }
   }
   if (Restock.activeShop() || gp.storage || now() - Manual.lastAt < H.manualPauseS * 1000) {
@@ -86,10 +88,13 @@ Hunt.tick = function () {
     this.state = 'resting'; return;
   }
   if (Combat.buffs(true)) { this.state = 'buff'; return; }
+  if (Lure.on()) return Lure.tick();
   const target = this.threat(current) || current || this.teamTarget(current) || this.chooseTarget();
   if (target) { this.engage(target); return; }
   this.targetGid = 0; this.state = Loot.active?.petGid ? 'loot' : 'search';
   if (H.returnToCenter && H.center && dist2D(World.pose(), H.center) > Math.max(40, H.radius * 0.5) && now() - this.lastMoveAt > 2500) {
+    // Hunting from town (dead at login and woken in town): the town cycle's own trip (services, then reverse or walk).
+    if (!(dist2D(World.pose(), H.center) <= Math.max(H.radius * 1.5, 600)) && Controller.townReturn()) return;
     if (!Number.isFinite(dist2D(World.pose(), H.center))) return this.stop('hunt area is in another region');
     if (Cmd.move(H.center)) this.lastMoveAt = now();
     this.state = 'return';
@@ -97,8 +102,10 @@ Hunt.tick = function () {
 };
 
 function stopAll() {
+  AutoStart.cancel('Auto-start cancelled.');
   Town.record('stop');
   Alchemy.stop();
+  Trade.cancel();
   Stall.stop();
   BuffGear.cancel();
   const townActive = !!Town.trip;
@@ -106,7 +113,8 @@ function stopAll() {
   Resurrect.cancelTrip('', true);
   Resurrect.holdUntil = 0;
   Controller.resumeAfterRevive = false;
-  const active = townActive || Hunt.running || Restock.trip || WalkBack.active || Loot.active;
+  const active = townActive || Hunt.running || Restock.trip || WalkBack.active || Travel.active || Loot.active;
+  Travel.cancel();
   WalkBack.cancel('', false);
   if (Hunt.running) Hunt.stop();
   Restock.trip = null;
@@ -142,8 +150,10 @@ Combat.fight = function (target) {
   return fightBetweenCasts.call(this, target);
 };
 // Berserk fires when the gauge is full and the target's class is ticked in Combat options.
+// A party Giant has its own switch; other party monsters share the Party monsters one.
 Combat.berserk = function (cls) {
-  if (!Settings.profile.macro.berserkClasses?.[cls] || World.berserkGauge < 5) return false;
+  const key = cls === 'party' && RARITY[World.ents.get(World.gp.target)?.rarity] === 'giant' ? 'giantParty' : cls;
+  if (!Settings.profile.macro.berserkClasses?.[key] || World.berserkGauge < 5) return false;
   if (World.local()?.appearanceState?.[2] === 1) return false;
   return Cmd.berserk();
 };
@@ -156,15 +166,33 @@ const Controller = {
       return false;
     }
   },
-  // Start hunting again after an interruption, but only where that is safe: at the hunting spot it just starts,
-  // otherwise it walks back. WalkBack first tries the navdata corridor and falls back to short legs; its own caps
-  // refuse a spot that is too far. Returns 'started', 'walking' or 'stopped'.
+  // Start hunting again after an interruption, but only where that is safe: at the hunting spot it just starts; in
+  // the town of the saved services it does the town cycle and goes back (townReturn); otherwise it walks back.
+  // WalkBack first tries the navdata corridor and falls back to short legs; its own caps refuse a spot that is too
+  // far. Returns 'started', 'town', 'walking' or 'stopped'.
   resumeHunting(prefix) {
     const H = Hunt.cfg(), pose = World.pose(), distance = H.center && pose ? dist2D(pose, H.center) : Infinity;
     if (Number.isFinite(distance) && distance <= Math.max(H.radius * 1.5, 600)) { UI.toast(prefix + '; resuming hunting.', 'info', 4000); Hunt.start(); return 'started'; }
-    if (Number.isFinite(distance)) { UI.toast(prefix + '; walking back to the hunting spot.', 'info', 4000); WalkBack.start(true); return WalkBack.active ? 'walking' : 'stopped'; }
+    if (this.townReturn()) { UI.toast(prefix + ', in town: doing town services, then ' + (Town.reverses() ? 'reversing' : 'walking') + ' to the hunting spot.', 'info', 4000); return 'town'; }
+    if (Number.isFinite(distance)) { UI.toast(prefix + '; walking back to the hunting spot.', 'info', 4000); WalkBack.start(true); return WalkBack.active || Travel.active ? 'walking' : 'stopped'; }
     UI.toast(prefix + ', but not at the hunting spot. Use Return & hunt when ready.', 'warn', 6000);
     return 'stopped';
+  },
+  // Far from the hunting spot while standing in the town of the saved services: a character that was dead at login
+  // and woke up in town, or a revive the game did by itself. Do the town services first, as after a death in the
+  // field, then reverse, or walk back without a reverse scroll. True when the town cycle took over (or stopped hunting
+  // with a reason); false when not in that town or the town cycle is off.
+  townReturn() {
+    const c = Town.cfg();
+    if (!c.enabled) return false;
+    const here = Town.detect(), home = Town.detect(c.vendor || c.storage || c.arrival || {});
+    if (!here || !home || here.key !== home.key) return false;
+    Log.info('Far from the hunting spot, in town: doing town services before going back.');
+    WalkBack.cancel('', false);
+    Hunt.deathAt = 0; Hunt.revived = false; Hunt.targetGid = 0;
+    Town.begin(true);
+    if (Town.trip?.phase === 'revive-arrival') Town.arrived();
+    return true;
   },
   returnAfterRevive() {
     this.resumeAfterRevive = false;
@@ -176,9 +204,11 @@ const Controller = {
   tick() {
     try {
       this.guard('Reconnect', () => Reconnect.tick());
+      this.guard('Auto-start', () => AutoStart.tick());
       this.guard('Team', () => { Team.tick(); TeamIntel.tick(); TeamKnowledge.tick(); TeamArbiter.tick(); });
       Restock.sample();
       Alchemy.tick();
+      BuffGear.resume();
       if (BuffGear.run) {
         if (World.inWorld()) { Party.tick(); Potion.tick(); }
         if (BuffGear.tick()) { this.mode = 'buff gear'; return; }
@@ -210,24 +240,27 @@ const Controller = {
       AutoMastery.tick();
       StatPoints.tick();
       Potion.tick();
-      ItemRules.dropTick();
+      if (!ItemRules.dropTick()) ItemRules.balanceTick();
       Loot.checkPetFull();
       if (Town.tick()) { this.mode = 'town service'; return; }
       if (Trap.tick()) { this.mode = 'escape'; return; }
       if (Chase.tick()) { this.mode = 'obstacle pursuit'; return; }
       if (BuffGear.tick()) { this.mode = 'buff gear'; return; }
       if (SpeedScroll.tick()) { this.mode = 'speed scroll'; return; }
-      if (!WalkBack.active && !Restock.trip && !Restock.recording && !Controller.resumeAfterRevive &&
+      if (this.guard('Repair hammer', () => RepairHammer.tick())) { this.mode = 'repair hammer'; return; }
+      if (Trade.tick()) { this.mode = 'trading'; return; }
+      if (!WalkBack.active && !Travel.active && !Restock.trip && !Restock.recording && !Controller.resumeAfterRevive &&
           !Restock.activeShop() && !World.gp.storage && Resurrect.tick()) {
         this.mode = 'resurrect'; return;
       }
-      if (!WalkBack.active && !Restock.trip && !Restock.recording && !Restock.activeShop() && !World.gp.storage && Support.tick()) {
+      if (!WalkBack.active && !Travel.active && !Restock.trip && !Restock.recording && !Restock.activeShop() && !World.gp.storage && Support.tick()) {
         this.mode = 'party support'; return;
       }
       if (WalkBack.active) { this.mode = 'returning'; WalkBack.tick(); }
+      else if (Travel.active) { this.mode = 'travelling'; Travel.tick(); }
       else if (Restock.recording) this.mode = 'recording';
       else if (Hunt.running) { if (!Trace.tick()) Hunt.tick(); this.mode = Restock.trip ? 'shopping' : Hunt.state; }
-      else this.mode = 'idle';
+      else { this.guard('Idle pet pickup', () => Loot.idleTick()); this.mode = 'idle'; }
     } catch (e) {
       stopAll();
       if (now() - this.lastErrorAt > 5000) { this.lastErrorAt = now(); Log.error(e.message || String(e)); UI.toast('Bot stopped: ' + e.message, 'warn'); }

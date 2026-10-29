@@ -70,7 +70,7 @@ Important runtime objects: `World` mirrors observed game state; `Cmd` submits na
 - Pet requests still wait for busy inventory transactions and potion priority. Manual pause, death, stop and restock interruption remain respected.
 - Pet-full alert: optional soft three-note chime and notice, once per full-bag episode, with a 30-second cooldown. Frees/rearms when space returns. Existing stacks may still merge. Loot includes a test-sound button.
 - Wardrobe retains compatible paid cosmetics as local appearance previews, without changing real inventory or granting ownership.
-- `F8`: start/stop hunting or return. `F7`: fold. `Shift+F7`: hide/show the entire panel without stopping the bot.
+- `F8`: start/stop hunting or return. `F7`: fold. `F6`: minimise to the icon or restore, like the ×. `Shift+F7`: hide/show the entire panel without stopping the bot.
 - Typing in bot fields must not activate game shortcuts. `lean-boot.js` stops keyboard propagation for bot editing controls without preventing native editing defaults. Shadow-root focus must be used when protecting controls from refresh overwrites.
 - Automatic potions remain controlled by their own switch, separately from hunting.
 

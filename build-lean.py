@@ -21,6 +21,10 @@ utils = section('const now =', '// ---------------------------------------------
 utils = utils.replace("prefix: 'sroAsistan:v7:'", "prefix: 'sroBotLean:v1:'")
 geometry = section('const SECTOR =', '// ---------------------------------------------------------------------------\n// Worker hook.')
 hook = section('const Hook =', '// ---------------------------------------------------------------------------\n// Display rewriters:')
+# The game's asset worker builds any region's collision; route checks ask it for regions ahead (lean-route-check.js).
+assert hook.count("  simUrl: '',\n") == 1 and hook.count("        if (name === 'sro-simulation') {\n") == 1
+hook = hook.replace("  simUrl: '',\n", "  simUrl: '',\n  assetUrl: '',\n")
+hook = hook.replace("        if (name === 'sro-simulation') {\n", "        if (name === 'sro-assets') Hook.assetUrl = String(url);\n        if (name === 'sro-simulation') {\n")
 # Wardrobe rewrites only renderer copies; the mirror retains real items.
 hook = hook.replace("          if (!(Hook.probe.passSelect && inner && inner.kind === 'select')) return undefined;", "          return undefined;")
 world = section('const TRANSIENT_PHASES =', '// ---------------------------------------------------------------------------\n// Probe:')
@@ -51,6 +55,13 @@ potion = section('const Potion =', '// Same rule as the client').replace("Stats.
 combat = section('const Combat =', '// ---- Assist:')
 combat = combat.replace('return Assets.skillMeta.get(id) || null;', 'return World.skill(id) || null;')
 combat = combat.replace('return !m || !m.mp || m.mp <= me.mp;', 'return !m || (m.mp ?? 0) + Math.trunc(me.maxMp * (m.mpPercent ?? 0) / 100) <= me.mp;')
+# Cleric blessings (Holy Spell, Body Blessing...) need a target but accept the caster: keep them up on yourself.
+buff_old = "      if (info && info.targetRequired) continue;\n"
+assert combat.count(buff_old) == 1
+combat = combat.replace(buff_old, "      if (info && info.targetRequired && !(info.targets & 1)) continue;\n")
+buff_cast_old = "      if (this.cast(id, 0)) {\n        this.buffCastAt.set(b.group, now());"
+assert combat.count(buff_cast_old) == 1
+combat = combat.replace(buff_cast_old, "      if (this.cast(id, info?.targetRequired ? World.localGid() : 0)) {\n        this.buffCastAt.set(b.group, now());")
 # A normal attack replaces skills silently in the original loop. Record why each rotation skill was
 # skipped so the panel and bug reports can say so, and stop false "silent rejection" blocks: a skill is only
 # judged rejected after a newer game snapshot arrived and the cooldown still did not start.
@@ -200,7 +211,7 @@ skin += '\nconst LEAN_CSS = ' + __import__('json').dumps((base / 'lean-skin.css'
 header = '''// ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.4.3
+// @version      1.5.0
 // @updateURL    https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking, walk-back and an optional team relay in one compact panel.
@@ -221,7 +232,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.4.3';
+const VERSION = '1.5.0';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -246,29 +257,38 @@ def release_notes():
     return 'const RELEASE_NOTES = ' + json.dumps(releases[:8], ensure_ascii=False) + ';'
 parts = [header, utils, (base / 'lean-settings.js').read_text(encoding='utf-8'), geometry,
          hook, display, world, commands, ticker, potion, attackable, combat, restock, hunt,
+         (base / 'lean-clipper.js').read_text(encoding='utf-8'),
+         (base / 'lean-clip-route.js').read_text(encoding='utf-8'),
          (base / 'lean-navigation.js').read_text(encoding='utf-8'),
          (base / 'lean-pursuit-navigation.js').read_text(encoding='utf-8'),
          (base / 'lean-navdata-index.js').read_text(encoding='utf-8'),
-         (base / 'lean-route.js').read_text(encoding='utf-8'), walkback,
+         (base / 'lean-route.js').read_text(encoding='utf-8'),
+         (base / 'lean-route-check.js').read_text(encoding='utf-8'), walkback,
          (base / 'lean-loot.js').read_text(encoding='utf-8'),
          (base / 'lean-stats.js').read_text(encoding='utf-8'),
          (base / 'lean-party.js').read_text(encoding='utf-8'),
          (base / 'lean-resurrect.js').read_text(encoding='utf-8'),
          (base / 'lean-speed-scroll.js').read_text(encoding='utf-8'),
+         (base / 'lean-repair-hammer.js').read_text(encoding='utf-8'),
          (base / 'lean-towns-data.js').read_text(encoding='utf-8'),
          (base / 'lean-town.js').read_text(encoding='utf-8'),
          (base / 'lean-stall.js').read_text(encoding='utf-8'),
+         (base / 'lean-travel-data.js').read_text(encoding='utf-8'),
+         (base / 'lean-travel.js').read_text(encoding='utf-8'),
          (base / 'lean-buff-gear.js').read_text(encoding='utf-8'),
          (base / 'lean-support.js').read_text(encoding='utf-8'),
          (base / 'lean-team.js').read_text(encoding='utf-8'),
          (base / 'lean-team-intel.js').read_text(encoding='utf-8'),
          (base / 'lean-team-knowledge.js').read_text(encoding='utf-8'),
+         (base / 'lean-trade.js').read_text(encoding='utf-8'),
+         (base / 'lean-lure.js').read_text(encoding='utf-8'),
          (base / 'lean-controller.js').read_text(encoding='utf-8'),
          (base / 'lean-team-arbiter.js').read_text(encoding='utf-8'),
          (base / 'lean-antistuck.js').read_text(encoding='utf-8'),
          (base / 'lean-chase.js').read_text(encoding='utf-8'),
          (base / 'lean-trap.js').read_text(encoding='utf-8'),
          (base / 'lean-reconnect.js').read_text(encoding='utf-8'),
+         (base / 'lean-autostart.js').read_text(encoding='utf-8'),
          (base / 'lean-mastery.js').read_text(encoding='utf-8'),
          (base / 'lean-statpoints.js').read_text(encoding='utf-8'),
          (base / 'lean-trace.js').read_text(encoding='utf-8'),
@@ -286,6 +306,7 @@ parts = [header, utils, (base / 'lean-settings.js').read_text(encoding='utf-8'),
          (base / 'lean-reports.js').read_text(encoding='utf-8'),
          (base / 'lean-items.js').read_text(encoding='utf-8'),
          (base / 'lean-map.js').read_text(encoding='utf-8'),
+         (base / 'lean-render.js').read_text(encoding='utf-8'),
          (base / 'lean-ui.js').read_text(encoding='utf-8'),
          (base / 'lean-session.js').read_text(encoding='utf-8'),
          (base / 'lean-logging.js').read_text(encoding='utf-8'),

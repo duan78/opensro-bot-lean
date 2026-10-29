@@ -2,6 +2,12 @@ name: Announce release on Discord
 on:
   release:
     types: [published]
+  # release.yml calls this directly: a release made with GITHUB_TOKEN raises no release event.
+  workflow_call:
+    inputs:
+      title: { type: string, required: true }
+      url: { type: string, required: true }
+      version: { type: string, required: true }
 jobs:
   discord:
     runs-on: ubuntu-latest
@@ -9,11 +15,14 @@ jobs:
       - name: Post to Discord
         env:
           WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          TITLE: ${{ github.event.release.name }}
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ inputs.title || github.event.release.name }}
           BODY: ${{ github.event.release.body }}
-          URL: ${{ github.event.release.html_url }}
+          URL: ${{ inputs.url || github.event.release.html_url }}
+          VERSION: ${{ inputs.version }}
         run: |
           if [ -z "$WEBHOOK" ]; then echo "DISCORD_WEBHOOK secret is not set; skipping."; exit 0; fi
+          if [ -n "$VERSION" ]; then BODY=$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json body --jq .body); fi
           jq -n --arg title "$TITLE" --arg url "$URL" --arg body "${BODY:0:3500}" \
             '{embeds: [{title: $title, url: $url, description: $body, color: 5793266}]}' > payload.json
           curl -sS -f -H "Content-Type: application/json" -d @payload.json "$WEBHOOK"

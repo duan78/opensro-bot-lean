@@ -13,7 +13,7 @@ Deeper background lives in `context.md` (handoff doc, snapshot — verify agains
 - `lean-loot.js` drops/pickup/pet collector; `lean-town.js` scroll town trips; `restock.js` merchant routes; `lean-walkback.js` return to hunt spot.
 - `lean-navigation.js`, `lean-pursuit-navigation.js`, `lean-chase.js`, `lean-trap.js`, `lean-antistuck.js` movement/obstacle logic.
 - `lean-settings.js` defaults + per-character persistence; `lean-ui.js` panel (open shadow root `#sro-bot-lean`); `lean-stats.js` session stats.
-- `lean-reconnect.js`, `lean-session.js` reconnect/login recovery; `lean-party.js`, `lean-resurrect.js`, `lean-alchemy.js`, `lean-speed-scroll.js`, `lean-support.js`/`lean-reports.js` reports.
+- `lean-reconnect.js`, `lean-session.js` reconnect/login recovery; `lean-autostart.js` optional start on entering the game; `lean-party.js`, `lean-resurrect.js`, `lean-alchemy.js`, `lean-speed-scroll.js`, `lean-support.js`/`lean-reports.js` reports.
 - Tests: `lean.test.cjs` (main integration suite, loads the generated script into a `vm` context), `lean.obstacle.test.cjs`, `lean.logging.test.cjs`, `lean.session.test.cjs`, `lean.browser.test.cjs` (Playwright + Edge), `lean.navigation.native.test.mjs` (needs an OpenSRO checkout).
 
 ## Commands (run from repo root)
@@ -47,7 +47,8 @@ Always rebuild before running tests, because tests read the generated `bot.lean.
 ## Code style
 Plain JavaScript (no bundler, no package.json), LF line endings, match the surrounding module's idiom and comment density. Python files: read/write with explicit `encoding='utf-8'`. Never edit sources with shell redirection that could change encoding or EOLs.
 
-## Releases (only when the user asks for a release)
+## Releases
+Merged PRs are released automatically by `.github/workflows/release.yml` (next patch version, notes, build, tests, GitHub release, Discord; the website entry only when the `SITE_TOKEN` secret is set). PR reviews, the review-fix-merge job, release notes and issue fixes run on Claude (`CLAUDE_CODE_OAUTH_TOKEN`). Do not release a merged PR by hand as well. By hand, only when the user asks:
 1. Bump BOTH version strings in `build-lean.py` (userscript `@version` and runtime `VERSION`). Versions are integer `major.minor.patch` (1.2.11 is newer than 1.2.9). Never reuse a published version for changed behaviour.
 2. Add `notes/<version>.md` (short, plain language; state what was only tested in simulation).
 3. Run build, `node --check`, `node lean.test.cjs`, `git diff --check`. Confirm both generated headers and runtime `VERSION` agree.

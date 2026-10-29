@@ -88,9 +88,8 @@ const Diagnostics = {
     const blocked = Town.blocked();
     if (blocked) return 'Town return blocked: ' + blocked + '.';
     const c = Town.cfg();
-    if (['arrival', 'vendor', 'smith', 'gate', ...(c.petFull ? ['storage'] : [])].some(role => !c[role])) return 'Town return blocked: save missing service points in Supplies.';
+    if (['arrival', 'vendor', 'smith', ...(Town.walks() ? [] : ['gate']), ...(c.petFull ? ['storage'] : [])].some(role => !c[role])) return 'Town return blocked: save missing service points in Supplies.';
     if (!Town.scroll(0x09ec)) return 'Town return blocked: return scroll missing.';
-    if (!Town.scroll(0x19ec)) return 'Town return blocked: reverse scroll missing.';
     if (Town.validate()) return 'Town return blocked: check refill targets, low-stock thresholds and gold.';
     return Town.reason() ? 'Town return: preparing departure.' : '';
   },
@@ -135,7 +134,7 @@ const Diagnostics = {
     if (Trap.run) return Trap.message;
     if (Chase.owns()) return Chase.message || 'Checking obstacle approach.';
     if (BuffGear.run) return BuffGear.run.restoring ? 'Buff gear: restoring combat equipment.' : 'Buff gear: swapping or casting.';
-    if (BuffGear.recovery) return 'Buff gear: manual equipment review needed.';
+    if (BuffGear.recovery) return 'Buff gear: manual equipment review needed. ' + String(BuffGear.message).slice(0, 160);
     if (Alchemy.pending) return Alchemy.run ? 'Alchemy: waiting for the server result.' : 'Alchemy stopped; outstanding result unconfirmed.';
     if (Alchemy.run) return 'Alchemy: preparing the next attempt.';
     if (Reconnect.active() && Reconnect.message && !World.inWorld()) return Reconnect.message;
@@ -144,13 +143,14 @@ const Diagnostics = {
     if (Town.trip) {
       if (Town.trip.phase === 'buy') return Town.trip.supplies.map(s => `Refilling ${s.kind === 'hp' ? 'HP' : s.kind === 'mp' ? 'MP' : 'abnormal pills'}: ${Restock.count(s.refObjId)} / ${s.target}`).join(' · ');
       if (World.gp?.inventoryPending) return 'Town services: waiting for inventory transaction.';
-      const phases = { recall: 'stopping combat for recall', 'recall-wait': 'waiting for recall arrival', 'reverse-wait': 'waiting for reverse arrival', 'revive-arrival': 'waiting for town revival', store: 'depositing loot', sell: 'selling pet loot', ammo: 'buying ammunition', repair: 'repairing equipment', reverse: 'opening reverse return' };
+      const phases = { recall: 'stopping combat for recall', 'recall-wait': 'waiting for recall arrival', 'reverse-wait': 'waiting for reverse arrival', 'revive-arrival': 'waiting for town revival', store: 'depositing loot', sell: 'selling pet loot', ammo: 'buying ammunition', repair: 'repairing equipment', reverse: 'opening reverse return', leave: 'starting the walk back' };
       if (/^(walk|open)-/.test(Town.trip.phase) && Town.message) return Town.message;
       return 'Town services: ' + (phases[Town.trip.phase] || 'travelling between or opening services') + '.';
     }
+    if (Travel.active && !WalkBack.active) return Travel.status();
     if (WalkBack.active) return WalkBack.status();
     if (Restock.trip || Resurrect.trip) return 'Travelling; waiting to reach the destination.';
-    if (!Hunt.running) return 'Bot stopped.';
+    if (!Hunt.running) return AutoStart.pending() ? AutoStart.message || 'Auto-start: waiting.' : 'Bot stopped.';
     if (now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000) return 'Hunting paused after manual control.';
     if (Restock.activeShop() || World.gp?.storage) return 'Hunting paused: close shop or storage.';
     if (Hunt.state === 'resting' || Hunt.state === 'standing') return 'Recovering HP / MP.';
@@ -165,7 +165,7 @@ const Diagnostics = {
   snapshot() {
     const gp = World.gp, c = Settings.profile, pet = Loot.pet(), social = gp?.social, matching = gp?.partyMatching;
     return {
-      action: this.main(), partyStatus: this.party(), teamStatus: Settings.profile.team?.enabled ? Team.status() : '',
+      action: this.main(), partyStatus: this.party(), teamStatus: Team.diag(),
       teamDetail: Settings.profile.team?.enabled ? TeamIntel.rows().length + ' shared entities, ' + TeamIntel.edges.size + ' combat edges, ' + TeamKnowledge.uniques.size + ' tracked uniques, ' + TeamKnowledge.players.size + ' known players' : '', petStatus: this.pet(), townStatus: this.town(), townDetail: this.townDetail(), townReason: this.townReason(),
       navigationReady: !!Navigation.scene, navigationError: String(Navigation.error || '').slice(0, 80),
       buffGearStatus: BuffGear.cfg().buffSwap ? String(BuffGear.status()).slice(0, 600) : '', buffGearActive: !!BuffGear.run, buffGearRestoring: !!BuffGear.run?.restoring, buffGearMovePending: !!BuffGear.run?.pending, buffGearRecovery: !!BuffGear.recovery,
@@ -192,7 +192,7 @@ const Diagnostics = {
       joinRequest: !!matching?.request, acceptanceSent: !!matching?.request && Party.answered === `${matching.request.a}:${matching.request.b}:${matching.request.expires}`,
       requestRemainingMs: Number.isFinite(World.simNow()) && Number.isFinite(matching?.request?.expires) ? Math.max(0, matching.request.expires - World.simNow()) : null,
       townActive: !!Town.trip,
-      townPhase: ['recall', 'recall-wait', 'revive-arrival', 'walk-storage', 'open-storage', 'store', 'close-storage', 'walk-vendor', 'open-vendor', 'buy', 'close-vendor', 'walk-smith', 'open-smith', 'sell', 'repair', 'close-smith', 'walk-gate', 'open-gate', 'reverse', 'reverse-wait'].includes(Town.trip?.phase) ? Town.trip.phase : null,
+      townPhase: ['recall', 'recall-wait', 'revive-arrival', 'walk-arrival', 'walk-storage', 'open-storage', 'store', 'close-storage', 'walk-vendor', 'open-vendor', 'buy', 'close-vendor', 'walk-smith', 'open-smith', 'sell', 'repair', 'close-smith', 'walk-gate', 'open-gate', 'reverse', 'reverse-wait', 'leave'].includes(Town.trip?.phase) ? Town.trip.phase : null,
       scrollAttempts: this.number(Town.trip?.scrollAttempts), scrollAccepted: !!Town.trip?.scrollRequest?.accepted,
       returnScroll: !!Town.scroll(0x09ec), reverseScroll: !!Town.scroll(0x19ec),
       settings: { autoRecruit: !!c.party.autoRecruit, autoAccept: !!c.party.autoAcceptMatching,
@@ -202,7 +202,7 @@ const Diagnostics = {
         buyCure: !!Restock.cfg().cure.on, cureTarget: this.number(Restock.cfg().cure.target), cureLow: this.number(Restock.cfg().cure.low),
         hpLow: this.number(Restock.cfg().hp.low), mpLow: this.number(Restock.cfg().mp.low),
         collectDrops: !!c.hunt.pickup.enabled, petCollector: Loot.petMode(), follow: Settings.profile.trace.enabled ? Trace.code : '', autoStatPoints: Settings.profile.statPoints.enabled ? String(StatPoints.status()).slice(0, 200) : '', autoMastery: AutoMastery.active() ? String(AutoMastery.message).slice(0, 600) : '', trapStage: Trap.stage, trapTile: Trap.stage ? Trap.tile : '', characterCollects: Loot.categories.some(k => c.hunt.pickup[k] && Loot.collectorFor(k) === 'character'), pickupRadius: this.number(c.hunt.pickup.radius / 10),
-        finishFight: !!c.hunt.pickup.afterKillOnly, speedScroll: !!c.potion.speedScroll }
+        finishFight: !!c.hunt.pickup.afterKillOnly, speedScroll: !!c.potion.speedScroll, autoStart: !!c.hunt.autoStart }
     };
   },
   sample() {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.4.3
+// @version      1.5.0
 // @updateURL    https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking, walk-back and an optional team relay in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.4.3';
+const VERSION = '1.5.0';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -186,7 +186,7 @@ const DISCORD_URL = 'https://discord.gg/Y5H5ZyfQ7u';
 const NOTES_URL = 'https://nixxane.github.io/opensro-bot-lean-site/#patch-notes';
 const CLASS_KEYS = ['normal', 'champion', 'giant', 'party', 'elite', 'unique'];
 const DEFAULT_PROFILE = {
-  items: { rules: {} },
+  items: { rules: {}, balance: false, gear: { primaryWeapon: null, primaryShield: null, secondaryWeapon: null, secondaryShield: null } },
   stall: { title: '', greeting: '', network: true, closeWhenEmpty: true, prices: {} },
   alchemy: { target: 3, limit: 20, elixir: 0, powder: false, use: { luck: false, steady: false, immortal: false, astral: false }, stones: { luck: 1, steady: 1, immortal: 1, astral: 1 }, stoneLimit: 0,
     // The plus from which each helper is used: a failure from +5 up can destroy the item (Steady and Immortal matter from there),
@@ -195,26 +195,28 @@ const DEFAULT_PROFILE = {
     // Attribute percentages: the lowest variance value (0 to 31) wanted per NATTR_ name, 0 or missing = leave it alone.
     attr: { targets: {}, limit: 100 } },
   statPoints: { enabled: false, str: 1, int: 0, reserve: 0 },
+  trade: { from: 'CH', to: 'WC', trips: 1, potions: true, goods: 0 },
   trace: { enabled: false, name: '', distance: 12, fight: true },
   mastery: { enabled: false, ids: [], gap: 0, skills: false, scope: 'rotation', reserve: 0, order: 'masteries' },
-  party: { autoAcceptMatching: false, autoRecruit: false, joinMain: false, mainName: '', autoRes: false, acceptRes: false, resRadius: 300, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true,
+  lure: { enabled: false, points: [], taunt: { id: 0, group: 0 }, area: { id: 0, group: 0 }, holdS: 10, pauseEveryM: 10, pauseS: 4, radius: 15, returnHpPct: 50, stopAt: 0 },
+  party: { autoAcceptMatching: false, autoRecruit: false, joinMain: false, mainName: '', leaveIfNotLeader: false, acceptNames: '', autoRes: false, acceptRes: false, resRadius: 300, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true,
     support: { enabled: false, whileStopped: false, range: 30, heal: { id: 0, group: 0, pct: 60, self: false }, group: { id: 0, group: 0, pct: 60, count: 2 }, buffs: [] } },
   team: { enabled: false, url: '', token: '', role: 'none', assist: false, townSync: false, converge: false, share: { public: false, monsters: true, players: true, uniques: true } },
   wardrobe: { on: true, phantom: true, realAnim: true, hideAvatars: false,
     eq: {}, av: {}, pet: { atk: 0, pick: 0, mount: 0 }, presets: {}, undo: null },
   macro: {
     rotations: { normal: [], champion: [], giant: [], party: [], elite: [], unique: [] },
-    fallbackToNormal: true, normalAttack: true, buffs: [], imbue: null, buffSwap: false, buffSets: [],
-    imbueBeforeAttack: true, berserkClasses: { normal: false, champion: false, giant: true, party: false, elite: false, unique: false, titan: false },
+    fallbackToNormal: true, normalAttack: true, buffs: [], imbue: null, buffSwap: false, buffAuto: true, buffSets: [],
+    imbueBeforeAttack: true, berserkClasses: { normal: false, champion: false, giant: true, giantParty: false, party: false, elite: false, unique: false, titan: false },
     minMpPct: 0, castGapMs: 350,
   },
   potion: {
-    enabled: true, speedScroll: false, hp: { on: true, pct: 60 }, mp: { on: true, pct: 40 },
+    enabled: true, speedScroll: false, repairHammer: { on: false, pct: 50 }, hp: { on: true, pct: 60 }, mp: { on: true, pct: 40 },
     vigor: { on: true, hpPct: 30, mpPct: 15 }, cure: { on: true }, petHp: { on: false, pct: 50 },
     prefer: { hp: 0, mp: 0, vigor: 0, cure: 0 }, delayMs: 350,
     restock: {
       enabled: false, vendor: null, route: [], offers: [],
-      town: { enabled: false, revive: true, deathReturn: 'recall', storeSox: true, sellBag: false, storeLevels: '', petFull: true, petFree: 1, arrivalRadius: 500,
+      town: { enabled: false, revive: true, deathReturn: 'recall', returnBy: 'reverse', storeSox: true, sellStar: false, sellBag: false, storeLevels: '', petFull: true, petFree: 1, arrivalRadius: 500,
         broken: true, wear: { on: false, pct: 15 }, noXp: { on: false, minutes: 10 }, every: { on: false, minutes: 60 }, arrival: null, storage: null, vendor: null, smith: null, gate: null,
         keep: '', store: { equipment: true, elixirs: true, powders: true, alchemy: true, others: false } },
       hp: { on: true, refObjId: 0, low: 20, target: 100 },
@@ -225,7 +227,7 @@ const DEFAULT_PROFILE = {
     },
   },
   hunt: {
-    center: null, radius: 400, chase: 700, returnToCenter: true,
+    center: null, radius: 400, chase: 700, returnToCenter: true, travel: true,
     classes: { normal: true, champion: true, giant: true, party: false, elite: false, unique: false, titan: false },
     levelMin: 0, levelMax: 0, include: '', exclude: '', priority: 'attackers', avoidKs: true,
     targetTimeoutS: 25,
@@ -235,7 +237,7 @@ const DEFAULT_PROFILE = {
     antiStuck: { enabled: true, minutes: 3, maxRecoveries: 3 },
     detour: { enabled: true, stallMs: 2500 },
     trap: { enabled: true, seconds: 20, recall: false, diagnostics: false },
-    onDeath: 'stop', stopNoHpPotion: false, stopInvFull: false,
+    onDeath: 'stop', stopNoHpPotion: false, stopInvFull: false, autoStart: false,
     playerAlert: { enabled: false, radius: 250, pause: false }, manualPauseS: 6,
   },
 };
@@ -243,7 +245,7 @@ const DEFAULT_PROFILE = {
 function botProfile(input) {
   const result = deepMerge(DEFAULT_PROFILE, {});
   if (!input || typeof input !== 'object') return result;
-  for (const key of ['macro', 'potion', 'hunt', 'wardrobe', 'party', 'team', 'alchemy', 'mastery', 'statPoints', 'trace', 'items', 'stall']) {
+  for (const key of ['macro', 'potion', 'hunt', 'lure', 'wardrobe', 'party', 'team', 'alchemy', 'mastery', 'statPoints', 'trace', 'items', 'trade', 'stall']) {
     if (!input[key] || typeof input[key] !== 'object') continue;
     for (const field of Object.keys(DEFAULT_PROFILE[key])) {
       if (field in input[key]) result[key][field] = deepMerge(DEFAULT_PROFILE[key][field], input[key][field]);
@@ -261,6 +263,7 @@ function botProfile(input) {
   delete result.potion.restock.town.stacks;
   if (!Number.isInteger(result.potion.delayMs) || result.potion.delayMs < 0 || result.potion.delayMs > 60000) result.potion.delayMs = DEFAULT_PROFILE.potion.delayMs;
   if (!['death', 'recall'].includes(result.potion.restock.town.deathReturn)) result.potion.restock.town.deathReturn = 'recall';
+  if (!['reverse', 'walk'].includes(result.potion.restock.town.returnBy)) result.potion.restock.town.returnBy = 'reverse';
   // New categories inherit the old Other items switch, preserving existing selection.
   const pickup = input.hunt?.pickup;
   for (const key of ['elixirs', 'powders', 'alchemy']) {
@@ -271,6 +274,9 @@ function botProfile(input) {
   if (!input.macro?.berserkClasses && (mode === 'off' || mode === 'always')) {
     for (const key of Object.keys(result.macro.berserkClasses)) result.macro.berserkClasses[key] = mode === 'always';
   }
+  // Party Giants used to follow the Party monsters switch.
+  const savedBerserk = input.macro?.berserkClasses;
+  if (savedBerserk && typeof savedBerserk === 'object' && !('giantParty' in savedBerserk)) result.macro.berserkClasses.giantParty = savedBerserk.party === true;
   // Magic and attribute stones used to sit in the alchemy switch, so they keep its setting.
   for (const key of ['magicStones', 'attrStones']) {
     if (pickup && !(key in pickup)) result.hunt.pickup[key] = pickup.alchemy ?? pickup.others ?? true;
@@ -318,7 +324,7 @@ const Sound = {
     } catch {}
   },
   // Only these alerts are audible; existing combat/UI calls stay silent.
-  tones: { 'pet-full': { notes: [659.25, 830.61, 987.77], gap: 0.18 }, sox: { notes: [783.99, 987.77, 1174.66, 1567.98], gap: 0.11 }, unique: { notes: [523.25, 659.25, 783.99, 1046.5], gap: 0.12 } },
+  tones: { 'pet-full': { notes: [659.25, 830.61, 987.77], gap: 0.18 }, sox: { notes: [783.99, 987.77, 1174.66, 1567.98], gap: 0.11 } },
   play(kind) {
     const tone = this.tones[kind];
     if (!tone) return false;
@@ -440,6 +446,7 @@ const Hook = {
   nativePost: null,
   NativeWorker: null,
   simUrl: '',
+  assetUrl: '',
   observers: [],
   guards: [], // fn(command) -> true swallows one of the game's own commands
   probe: null,
@@ -499,6 +506,7 @@ function installWorkerHook() {
       super(url, options);
       try {
         const name = options && options.name;
+        if (name === 'sro-assets') Hook.assetUrl = String(url);
         if (name === 'sro-simulation') {
           Hook.simUrl = String(url);
           attachSimulation(this, false);
@@ -1313,7 +1321,7 @@ const Combat = {
       const id = this.resolve(b);
       if (!id || this.blocked(id) || !Cmd.canCast(id) || !this.mpOk(id, me)) continue;
       const info = World.skill(id);
-      if (info && info.targetRequired) continue;
+      if (info && info.targetRequired && !(info.targets & 1)) continue;
       const rem = World.buffRemaining(id);
       if (rem >= 0) this.buffSeen.add(b.group);
       const refresh = (b.refreshS ?? 3) * 1000;
@@ -1322,7 +1330,7 @@ const Combat = {
       const meta = this.meta(id);
       const minGap = rem < 0 && !this.buffSeen.has(b.group) ? Math.max(4000, Math.min((meta?.durationMs || 20000) * 0.85, 600000)) : 1500;
       if (now() - (this.buffCastAt.get(b.group) || 0) < minGap) continue;
-      if (this.cast(id, 0)) {
+      if (this.cast(id, info?.targetRequired ? World.localGid() : 0)) {
         this.buffCastAt.set(b.group, now());
         return true;
       }
@@ -1522,7 +1530,12 @@ const Restock = {
     if (move.waiting) return false;
     if (World.isSitting()) {
       if (now() - t.movedAt > 2500 && Cmd.action(1000)) t.movedAt = now();
-    } else if (now() - t.movedAt > 900 && Cmd.move(move.point)) t.movedAt = now();
+      return false;
+    }
+    // A recorded step is walked straight unless the character is stuck; then collision routing goes round the spot.
+    if (Navigation.watch(t, World.pose(), t.movedAt, dest) === 'giveup') return this.fail('Blocked on the way to the merchant; I could not walk around the obstacle.');
+    const step = Navigation.next(t, dest, true);
+    if (now() - t.movedAt > 900 && Cmd.move(step.point || dest)) t.movedAt = now();
     return false;
   },
   tick() {
@@ -1571,7 +1584,8 @@ const Restock = {
         t.pending = null;
       }
       if (gp.inventoryPending) return true;
-      const s = t.supplies.find(i => this.count(i.refObjId) < i.target);
+      t.skipped ||= [];
+      const s = t.supplies.find(i => !t.skipped.includes(i.refObjId) && this.count(i.refObjId) < i.target);
       if (!s) {
         if (Cmd.raw({ kind: 'npc-close' }, 'Auto buy: close merchant')) {
           t.phase = 'return'; t.index = 1; t.best = Infinity; t.progressAt = now(); t.movedAt = 0;
@@ -1583,10 +1597,17 @@ const Restock = {
       if (!offer) { this.fail(s.kind === 'cure' ? 'Special Universal Pill (small) is unavailable at this merchant.' : 'Selected potion is unavailable at this merchant.'); return true; }
       const before = this.count(s.refObjId);
       const stackRoom = World.items().filter(i => i.refObjId === s.refObjId).reduce((n, i) => n + Math.max(0, offer.maxStack - (i.quantity ?? 1)), 0);
-      const quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, stackRoom + World.freeBagSlots() * offer.maxStack);
+      let quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, stackRoom + World.freeBagSlots() * offer.maxStack);
       if (quantity < 1) { this.fail('Inventory full; make room for potions.'); return true; }
       const gold = gp.progression?.gold;
-      if (gold === undefined || toBigInt(offer.price) * BigInt(quantity) > toBigInt(gold)) { this.fail('Not enough gold for the potion refill.'); return true; }
+      if (gold === undefined) { this.fail('Not enough gold for the potion refill.'); return true; }
+      // Short on gold: buy what the gold covers and go back, instead of stopping in the shop.
+      const price = toBigInt(offer.price), have = toBigInt(gold);
+      if (price > 0n && price * BigInt(quantity) > have) quantity = Number(have / price);
+      if (quantity < 1) {
+        if (before > 0) { t.skipped.push(s.refObjId); return true; }
+        this.fail('Not enough gold for the potion refill.'); return true;
+      }
       if (Cmd.raw({ kind: 'shop-buy', tab: offer.tab, slot: offer.slot, quantity }, `Auto buy: ${offer.name} x${quantity}`)) t.pending = { ref: s.refObjId, before, quantity, at: now() };
       return true;
     }
@@ -1827,11 +1848,2923 @@ const Hunt = {
   },
 };
 
+// lean-clipper.js: GENERATED by tools/build-clipper.mjs from OpenSRO 974979ef 2026-10-28. Do not edit.
+// The game's own movement clipper (apps/client-next/src/engine/foundation/navigation/clipper.ts
+// and the 18 modules it imports), types stripped. OpenSRO code, AGPL-3.0-or-later:
+// https://github.com/opensro-dev/opensro
+const NativeClipper = (() => {
+  const factories = new Map(), loaded = new Map();
+  const need = id => {
+    if (!loaded.has(id)) loaded.set(id, factories.get(id)());
+    return loaded.get(id);
+  };
+  factories.set('engine/foundation/math/hypot', () => {
+function hypot3(x, y, z) {
+    const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z), total = ax + ay + az;
+    if (!(total > 0 && total < Infinity)) return Math.hypot(x, y, z);
+    const max = ax > ay ? ax > az ? ax : az : ay > az ? ay : az;
+    const a = ax / max, b = ay / max, c = az / max;
+    const ab = a * a + b * b, compensation = ab - a * a - b * b;
+    return Math.sqrt(ab + (c * c - compensation)) * max;
+}
+function hypot2(x, y) {
+    const ax = Math.abs(x), ay = Math.abs(y), total = ax + ay;
+    if (!(total > 0 && total < Infinity)) return Math.hypot(x, y);
+    const max = ax > ay ? ax : ay, a = ax / max, b = ay / max;
+    return Math.sqrt(a * a + b * b) * max;
+}
+function hypot4(x, y, z, w) {
+    const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z), aw = Math.abs(w), total = ax + ay + az + aw;
+    if (!(total > 0 && total < Infinity)) return Math.hypot(x, y, z, w);
+    const xy = ax > ay ? ax : ay, zw = az > aw ? az : aw, max = xy > zw ? xy : zw;
+    const a = ax / max, b = ay / max, c = az / max, d = aw / max;
+    const ab = a * a + b * b, k2 = ab - a * a - b * b;
+    const s3 = c * c - k2, abc = ab + s3, k3 = abc - ab - s3;
+    return Math.sqrt(abc + (d * d - k3)) * max;
+}
+return { hypot3, hypot2, hypot4 };
+  });
+  factories.set('engine/foundation/gameplay/minimap-floor-key', () => {
+const MINIMAP_FLOOR_CELL_XZ = 16;
+const MINIMAP_FLOOR_CELL_Y = 8;
+function minimapPoseKey(p) {
+    return [
+        p.regionId,
+        Math.floor(p.x / MINIMAP_FLOOR_CELL_XZ),
+        Math.floor(p.y / MINIMAP_FLOOR_CELL_Y),
+        Math.floor(p.z / MINIMAP_FLOOR_CELL_XZ)
+    ].join(":");
+}
+return { MINIMAP_FLOOR_CELL_XZ, MINIMAP_FLOOR_CELL_Y, minimapPoseKey };
+  });
+  factories.set('engine/foundation/world/world-space', () => {
+const { hypot2 } = need('engine/foundation/math/hypot');
+const { minimapPoseKey } = need('engine/foundation/gameplay/minimap-floor-key');
+const REGION_SIZE = 1920;
+const DUNGEON_REGION_BIT = 0x8000;
+function sectorX(regionId) {
+    return regionId & 0xff;
+}
+function sectorY(regionId) {
+    return regionId >>> 8 & 0x7f;
+}
+function isDungeonRegion(regionId) {
+    return (regionId & DUNGEON_REGION_BIT) !== 0;
+}
+function samePlane(a, b) {
+    return isDungeonRegion(a) === isDungeonRegion(b);
+}
+function sameCoordinateSpace(a, b) {
+    return !(isDungeonRegion(a) || isDungeonRegion(b)) || a === b;
+}
+function samePlaneAdjacent(a, b) {
+    if (!samePlane(a, b)) {
+        return false;
+    }
+    if (isDungeonRegion(a)) {
+        return true;
+    }
+    const dx = sectorX(a) - sectorX(b);
+    const dz = sectorY(a) - sectorY(b);
+    return dx >= -1 && dx <= 1 && dz >= -1 && dz <= 1;
+}
+function regionOffsetXZ(fromRegion, toRegion) {
+    if (isDungeonRegion(fromRegion) || isDungeonRegion(toRegion)) {
+        return [
+            0,
+            0
+        ];
+    }
+    return [
+        (sectorX(toRegion) - sectorX(fromRegion)) * REGION_SIZE,
+        (sectorY(toRegion) - sectorY(fromRegion)) * REGION_SIZE
+    ];
+}
+function regionOriginXZ(regionId) {
+    if (isDungeonRegion(regionId)) {
+        return [
+            0,
+            0
+        ];
+    }
+    return [
+        sectorX(regionId) * REGION_SIZE,
+        sectorY(regionId) * REGION_SIZE
+    ];
+}
+function coordinateFrame(regionId) {
+    return isDungeonRegion(regionId) ? regionId : 0;
+}
+function regionRelativeXZ(originRegion, point) {
+    const [ox, oz] = regionOffsetXZ(originRegion, point.regionId);
+    return [
+        point.x + ox,
+        point.z + oz
+    ];
+}
+function worldDelta(from, to) {
+    const [ox, oz] = regionOffsetXZ(from.regionId, to.regionId);
+    return [
+        to.x - from.x + ox,
+        to.z - from.z + oz
+    ];
+}
+function normalizeRegionXZ(regionId, x, z) {
+    if (isDungeonRegion(regionId)) {
+        return {
+            regionId,
+            x,
+            z
+        };
+    }
+    const rx = Math.floor(x / REGION_SIZE);
+    const rz = Math.floor(z / REGION_SIZE);
+    return {
+        regionId: sectorX(regionId) + rx | sectorY(regionId) + rz << 8,
+        x: x - rx * REGION_SIZE,
+        z: z - rz * REGION_SIZE
+    };
+}
+function displaceRegionXZ(point, dx, dz) {
+    if (isDungeonRegion(point.regionId)) {
+        return {
+            regionId: point.regionId,
+            x: point.x + dx,
+            z: point.z + dz
+        };
+    }
+    const wx = point.x + dx + sectorX(point.regionId) * REGION_SIZE;
+    const wz = point.z + dz + sectorY(point.regionId) * REGION_SIZE;
+    const rx = Math.floor(wx / REGION_SIZE);
+    const rz = Math.floor(wz / REGION_SIZE);
+    return {
+        regionId: rx | rz << 8,
+        x: wx - rx * REGION_SIZE,
+        z: wz - rz * REGION_SIZE
+    };
+}
+function worldAudioPosition(pose) {
+    return [
+        sectorX(pose.regionId) * REGION_SIZE + pose.x,
+        pose.y,
+        (pose.regionId >>> 8) * REGION_SIZE + pose.z
+    ];
+}
+function planarDistanceSquared(from, to) {
+    const [dx, dz] = worldDelta(from, to);
+    return dx * dx + dz * dz;
+}
+function planarDistance(from, to) {
+    const [dx, dz] = worldDelta(from, to);
+    return hypot2(dx, dz);
+}
+function sameDungeonFloor(local, target, game) {
+    if (!isDungeonRegion(local.regionId) && !isDungeonRegion(target.regionId)) {
+        return true;
+    }
+    if (local.regionId !== target.regionId || game?.navigationFloor === undefined) {
+        return false;
+    }
+    return game.minimapFloors?.[minimapPoseKey(target)] === game.navigationFloor;
+}
+return { REGION_SIZE, DUNGEON_REGION_BIT, sectorX, sectorY, isDungeonRegion, samePlane, sameCoordinateSpace, samePlaneAdjacent, regionOffsetXZ, regionOriginXZ, coordinateFrame, regionRelativeXZ, worldDelta, normalizeRegionXZ, displaceRegionXZ, worldAudioPosition, planarDistanceSquared, planarDistance, sameDungeonFloor };
+  });
+  factories.set('engine/foundation/world/plane', () => {
+const { isDungeonRegion } = need('engine/foundation/world/world-space');
+function planeKindOf(regionId) {
+    return isDungeonRegion(regionId) ? "cave" : "outdoor";
+}
+const OUTDOOR_FEATURES = {
+    minimapCoordinates: true,
+    reverseReturnPoints: true,
+    characterPvs: false,
+    terrainGrid: true,
+    residentOnly: false,
+    rooms: false,
+    sectorFrames: true,
+    signedLocalCoordinates: false,
+    worldMap: true,
+    floorMinimap: false,
+    regionCatalog: true,
+    sky: true,
+    animatedWater: true,
+    dungeonWater: false
+};
+const CAVE_FEATURES = {
+    minimapCoordinates: false,
+    reverseReturnPoints: false,
+    characterPvs: true,
+    terrainGrid: false,
+    residentOnly: true,
+    rooms: true,
+    sectorFrames: false,
+    signedLocalCoordinates: true,
+    worldMap: false,
+    floorMinimap: true,
+    regionCatalog: false,
+    sky: false,
+    animatedWater: false,
+    dungeonWater: true
+};
+function featuresAt(regionId) {
+    return planeKindOf(regionId) === "cave" ? CAVE_FEATURES : OUTDOOR_FEATURES;
+}
+return { planeKindOf, featuresAt };
+  });
+  factories.set('engine/foundation/rendering/pick-destination', () => {
+const { planeKindOf } = need('engine/foundation/world/plane');
+const { normalizeRegionXZ, REGION_SIZE, sectorX, sectorY } = need('engine/foundation/world/world-space');
+function pickDestination(ray, depth, originRegion) {
+    if (!Number.isFinite(depth) || depth < 0 || depth > 1 || !originRegion) return null;
+    const rawX = ray.start[0] + ray.delta[0] * depth, y = ray.start[1] + ray.delta[1] * depth, rawZ = ray.start[2] + ray.delta[2] * depth;
+    if (![
+        rawX,
+        y,
+        rawZ
+    ].every(Number.isFinite)) return null;
+    if (planeKindOf(originRegion) === "outdoor") {
+        const normalized = normalizeRegionXZ(originRegion, rawX, rawZ);
+        const rx = sectorX(originRegion) + Math.floor(rawX / REGION_SIZE), rz = sectorY(originRegion) + Math.floor(rawZ / REGION_SIZE);
+        if (rx < 0 || rx > 255 || rz < 0 || rz >= 128) return null;
+        return {
+            regionId: normalized.regionId,
+            x: normalized.x,
+            y,
+            z: normalized.z
+        };
+    }
+    return {
+        regionId: originRegion,
+        x: rawX,
+        y,
+        z: rawZ
+    };
+}
+return { pickDestination };
+  });
+  factories.set('engine/foundation/rendering/picking', () => {
+const PACKED_FLOATS = 14;
+const PACKED_UV = 6;
+const PACKED_ALPHA = 11;
+const PICK_BLOCK_INDICES = 96;
+function geometryPickBlocks(geometry) {
+    const blocks = new Float64Array(Math.ceil(geometry.indices.length / PICK_BLOCK_INDICES) * 6);
+    for(let start = 0; start < geometry.indices.length; start += PICK_BLOCK_INDICES){
+        let x = Infinity, y = Infinity, z = Infinity, X = -Infinity, Y = -Infinity, Z = -Infinity;
+        for(let i = start; i < Math.min(start + PICK_BLOCK_INDICES, geometry.indices.length); i++){
+            const at = geometry.indices[i] * 3, a = geometry.positions[at], b = geometry.positions[at + 1], c = geometry.positions[at + 2];
+            x = Math.min(x, a);
+            y = Math.min(y, b);
+            z = Math.min(z, c);
+            X = Math.max(X, a);
+            Y = Math.max(Y, b);
+            Z = Math.max(Z, c);
+        }
+        const at = start / PICK_BLOCK_INDICES * 6;
+        blocks[at] = x;
+        blocks[at + 1] = y;
+        blocks[at + 2] = z;
+        blocks[at + 3] = X;
+        blocks[at + 4] = Y;
+        blocks[at + 5] = Z;
+    }
+    return blocks;
+}
+function geometryPickBounds(positions) {
+    const b = [
+        Infinity,
+        Infinity,
+        Infinity,
+        -Infinity,
+        -Infinity,
+        -Infinity
+    ];
+    for(let i = 0; i < positions.length; i++){
+        const axis = i % 3;
+        b[axis] = Math.min(b[axis], positions[i]);
+        b[axis + 3] = Math.max(b[axis + 3], positions[i]);
+    }
+    return [
+        b[0],
+        b[1],
+        b[2],
+        b[3],
+        b[4],
+        b[5]
+    ];
+}
+function palettePickBounds(b, palette) {
+    const result = [
+        Infinity,
+        Infinity,
+        Infinity,
+        -Infinity,
+        -Infinity,
+        -Infinity
+    ];
+    for(let offset = 0; offset < palette.length; offset += 16){
+        for(let axis = 0; axis < 3; axis++){
+            let center = palette[offset + 12 + axis], extent = 0;
+            for(let k = 0; k < 3; k++){
+                center += palette[offset + k * 4 + axis] * (b[k] + b[k + 3]) * .5;
+                extent += Math.abs(palette[offset + k * 4 + axis]) * (b[k + 3] - b[k]) * .5;
+            }
+            result[axis] = Math.min(result[axis], center - extent);
+            result[axis + 3] = Math.max(result[axis + 3], center + extent);
+        }
+    }
+    return [
+        result[0],
+        result[1],
+        result[2],
+        result[3],
+        result[4],
+        result[5]
+    ];
+}
+function rayIntersectsBounds(ray, b, m, limit = 1, offset = 0) {
+    let enter = 0, exit = limit;
+    for(let axis = 0; axis < 3; axis++){
+        let center = m[12 + axis], extent = 0;
+        for(let k = 0; k < 3; k++){
+            center += m[k * 4 + axis] * (b[offset + k] + b[offset + k + 3]) * .5;
+            extent += Math.abs(m[k * 4 + axis]) * (b[offset + k + 3] - b[offset + k]) * .5;
+        }
+        const delta = ray.delta[axis], start = ray.start[axis], low = center - extent - 1e-5, high = center + extent + 1e-5;
+        if (Math.abs(delta) < 1e-15) {
+            if (start < low || start > high) return false;
+            continue;
+        }
+        const a = (low - start) / delta, c = (high - start) / delta;
+        enter = Math.max(enter, Math.min(a, c));
+        exit = Math.min(exit, Math.max(a, c));
+        if (enter > exit) return false;
+    }
+    return true;
+}
+function samplePickAlpha(mask, u, v) {
+    const x = u * mask.width - .5, y = v * mask.height - .5, x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0;
+    const read = (x, y)=>mask.pixels[(y % mask.height + mask.height) % mask.height * mask.width + (x % mask.width + mask.width) % mask.width] / 255;
+    return (read(x0, y0) * (1 - fx) + read(x0 + 1, y0) * fx) * (1 - fy) + (read(x0, y0 + 1) * (1 - fx) + read(x0 + 1, y0 + 1) * fx) * fy;
+}
+function pickRay(matrix, x, y) {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) return null;
+    return pickRayProjector(matrix)?.(x, y) ?? null;
+}
+function pickRayProjector(matrix) {
+    const a = Array.from({
+        length: 4
+    }, (_, r)=>Array.from({
+            length: 8
+        }, (_, c)=>c < 4 ? matrix[c * 4 + r] : Number(c - 4 === r)));
+    for(let c = 0; c < 4; c++){
+        let pivot = c;
+        for(let r = c + 1; r < 4; r++)if (Math.abs(a[r][c]) > Math.abs(a[pivot][c])) pivot = r;
+        if (Math.abs(a[pivot][c]) < 1e-12) return null;
+        [a[c], a[pivot]] = [
+            a[pivot],
+            a[c]
+        ];
+        const divisor = a[c][c];
+        for(let k = 0; k < 8; k++)a[c][k] /= divisor;
+        for(let r = 0; r < 4; r++){
+            if (r !== c) {
+                const factor = a[r][c];
+                for(let k = 0; k < 8; k++)a[r][k] -= factor * a[c][k];
+            }
+        }
+    }
+    return (x, y)=>{
+        if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) return null;
+        function point(z) {
+            const px = x * 2 - 1, py = 1 - y * 2, w = a[3][4] * px + a[3][5] * py + a[3][6] * z + a[3][7];
+            return [
+                0,
+                1,
+                2
+            ].map((r)=>(a[r][4] * px + a[r][5] * py + a[r][6] * z + a[r][7]) / w);
+        }
+        const start = point(0), end = point(1);
+        if (![
+            ...start,
+            ...end
+        ].every(Number.isFinite)) return null;
+        return {
+            start,
+            delta: end.map((n, i)=>n - start[i])
+        };
+    };
+}
+function geometryVertex(geometry, instance, index, palette) {
+    const out = [
+        0,
+        0,
+        0
+    ];
+    writeGeometryVertex(geometry, instance, index, palette, out, 0);
+    return out;
+}
+function writeGeometryVertex(geometry, instance, index, palette, out, at) {
+    const x = geometry.positions[index * 3], y = geometry.positions[index * 3 + 1], z = geometry.positions[index * 3 + 2];
+    let px = x, py = y, pz = z, pw = 1;
+    if (palette && geometry.joints && geometry.weights) {
+        px = 0;
+        py = 0;
+        pz = 0;
+        pw = 0;
+        for(let j = 0; j < 4; j++){
+            const weight = geometry.weights[index * 4 + j];
+            if (!weight) continue;
+            const offset = geometry.joints[index * 4 + j] * 16;
+            px += weight * (palette[offset] * x + palette[offset + 4] * y + palette[offset + 8] * z + palette[offset + 12]);
+            py += weight * (palette[offset + 1] * x + palette[offset + 5] * y + palette[offset + 9] * z + palette[offset + 13]);
+            pz += weight * (palette[offset + 2] * x + palette[offset + 6] * y + palette[offset + 10] * z + palette[offset + 14]);
+            pw += weight * (palette[offset + 3] * x + palette[offset + 7] * y + palette[offset + 11] * z + palette[offset + 15]);
+        }
+    }
+    out[at] = instance[0] * px + instance[4] * py + instance[8] * pz + instance[12] * pw;
+    out[at + 1] = instance[1] * px + instance[5] * py + instance[9] * pz + instance[13] * pw;
+    out[at + 2] = instance[2] * px + instance[6] * py + instance[10] * pz + instance[14] * pw;
+}
+function pickGeometry(ray, geometry, instance, palette, surface) {
+    return intersectGeometry(ray, geometry, instance, {
+        palette,
+        surface
+    });
+}
+function pickGeometryBlocks(ray, geometry, instance, blocks) {
+    return intersectGeometry(ray, geometry, instance, {
+        blocks
+    });
+}
+function occludesGeometry(ray, geometry, instance, limit, palette, surface) {
+    if (!Number.isFinite(limit) || limit < 0) throw Error("Invalid occlusion depth");
+    return intersectGeometry(ray, geometry, instance, {
+        palette,
+        surface,
+        stopBefore: limit
+    }) !== null;
+}
+function intersectGeometry(ray, geometry, instance, query) {
+    const { palette, surface, stopBefore } = query, blocks = query.blocks ?? (surface?.ranges ? undefined : surface?.blocks);
+    let vertices, ready;
+    const corners = palette && geometry.joints && geometry.weights ? undefined : new Float64Array(9);
+    const vertex = (index)=>{
+        if (!vertices) {
+            vertices = new Float64Array(geometry.positions.length);
+            ready = new Uint8Array(geometry.positions.length / 3);
+        }
+        if (!ready[index]) {
+            writeGeometryVertex(geometry, instance, index, palette, vertices, index * 3);
+            ready[index] = 1;
+        }
+        return index * 3;
+    };
+    let nearest = stopBefore ?? Infinity, rangeIndex = 0, rangeEnd = 0;
+    const rangeBounds = surface?.ranges ? [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+    ] : undefined;
+    for(let i = 0; i < geometry.indices.length; i += 3){
+        if (surface?.ranges && i === rangeEnd) {
+            let range;
+            do {
+                range = surface.ranges[rangeIndex++];
+                rangeEnd += range.indexCount;
+            }while (rangeEnd === i)
+            const b = rangeBounds;
+            for(let axis = 0; axis < 3; axis++){
+                b[axis] = range.center[axis] - range.radius;
+                b[axis + 3] = range.center[axis] + range.radius;
+            }
+            if (!rayIntersectsBounds(ray, rangeBounds, instance, Math.min(1, nearest))) {
+                i = rangeEnd - 3;
+                continue;
+            }
+        }
+        if (blocks && i % PICK_BLOCK_INDICES === 0 && !rayIntersectsBounds(ray, blocks, instance, Math.min(1, nearest), i / PICK_BLOCK_INDICES * 6)) {
+            i += PICK_BLOCK_INDICES - 3;
+            continue;
+        }
+        let a = 0, b = 3, c = 6, points;
+        if (corners) {
+            writeGeometryVertex(geometry, instance, geometry.indices[i], undefined, corners, 0);
+            writeGeometryVertex(geometry, instance, geometry.indices[i + 1], undefined, corners, 3);
+            writeGeometryVertex(geometry, instance, geometry.indices[i + 2], undefined, corners, 6);
+            points = corners;
+        } else {
+            a = vertex(geometry.indices[i]);
+            b = vertex(geometry.indices[i + 1]);
+            c = vertex(geometry.indices[i + 2]);
+            points = vertices;
+        }
+        const ex = points[b] - points[a], ey = points[b + 1] - points[a + 1], ez = points[b + 2] - points[a + 2];
+        const fx = points[c] - points[a], fy = points[c + 1] - points[a + 1], fz = points[c + 2] - points[a + 2];
+        const dx = ray.delta[0], dy = ray.delta[1], dz = ray.delta[2], hx = dy * fz - dz * fy, hy = dz * fx - dx * fz, hz = dx * fy - dy * fx, det = ex * hx + ey * hy + ez * hz;
+        if (Math.abs(det) < 1e-12) continue;
+        const sx = ray.start[0] - points[a], sy = ray.start[1] - points[a + 1], sz = ray.start[2] - points[a + 2], u = (sx * hx + sy * hy + sz * hz) / det;
+        if (u < 0 || u > 1) continue;
+        const qx = sy * ez - sz * ey, qy = sz * ex - sx * ez, qz = sx * ey - sy * ex, v = (dx * qx + dy * qy + dz * qz) / det;
+        if (v < 0 || u + v > 1) continue;
+        const t = (fx * qx + fy * qy + fz * qz) / det;
+        if (t < 0 || t > 1 || t >= nearest) continue;
+        if (surface) {
+            if (geometry.material?.doubleSided === false && det < 0) continue;
+            const weights = [
+                1 - u - v,
+                u,
+                v
+            ];
+            let alpha = (geometry.material?.color[3] ?? 1) * (surface.opacity ?? 1);
+            const packed = geometry.colors || geometry.uvs ? undefined : geometry.vertices;
+            if (geometry.colors) {
+                alpha *= weights.reduce((n, w, k)=>n + w * geometry.colors[geometry.indices[i + k] * 4 + 3], 0);
+            } else if (packed) {
+                alpha *= weights.reduce((n, w, k)=>n + w * packed[geometry.indices[i + k] * PACKED_FLOATS + PACKED_ALPHA], 0);
+            }
+            if (surface.alpha && (geometry.uvs || packed)) {
+                const uv = [
+                    0,
+                    1
+                ].map((a)=>weights.reduce((n, w, k)=>{
+                        const vertex = geometry.indices[i + k];
+                        return n + w * (geometry.uvs ? geometry.uvs[vertex * 2 + a] : packed[vertex * PACKED_FLOATS + PACKED_UV + a]);
+                    }, 0));
+                alpha *= samplePickAlpha(surface.alpha, uv[0], uv[1]);
+            }
+            if (alpha <= 0 || alpha < (geometry.material?.alphaCutoff ?? 0)) continue;
+        }
+        if (stopBefore !== undefined) return t;
+        nearest = t;
+    }
+    return stopBefore === undefined && Number.isFinite(nearest) ? nearest : null;
+}
+return { PICK_BLOCK_INDICES, geometryPickBlocks, geometryPickBounds, palettePickBounds, rayIntersectsBounds, samplePickAlpha, pickRay, pickRayProjector, geometryVertex, pickGeometry, pickGeometryBlocks, occludesGeometry };
+  });
+  factories.set('engine/foundation/navigation/ground-pick', () => {
+const { pickDestination } = need('engine/foundation/rendering/pick-destination');
+const { pickGeometry, rayIntersectsBounds } = need('engine/foundation/rendering/picking');
+const { regionOffsetXZ, sameCoordinateSpace } = need('engine/foundation/world/world-space');
+function pickNavigationGround(objects, origin, query) {
+    const { ray, originRegion, terrainDepth } = query;
+    if (!Number.isInteger(originRegion) || originRegion <= 0 || originRegion > 65535 || ray.start.length !== 3 || ray.delta.length !== 3 || ![
+        ...ray.start,
+        ...ray.delta
+    ].every(Number.isFinite) || Math.hypot(...ray.delta) > 1000.001 || terrainDepth !== null && (!Number.isFinite(terrainDepth) || terrainDepth < 0 || terrainDepth > 1)) {
+        throw Error("Invalid ground ray");
+    }
+    if (!sameCoordinateSpace(originRegion, origin)) return null;
+    let nearest = terrainDepth ?? Infinity;
+    const [dx, dz] = regionOffsetXZ(originRegion, origin);
+    for (const p of objects){
+        const c = Math.cos(p.yaw), s = Math.sin(p.yaw), transform = new Float32Array([
+            c,
+            0,
+            s,
+            0,
+            0,
+            1,
+            0,
+            0,
+            -s,
+            0,
+            c,
+            0,
+            p.x + dx,
+            p.y,
+            p.z + dz,
+            1
+        ]);
+        if (!rayIntersectsBounds(ray, p.mesh.bounds, transform, Math.min(1, nearest))) continue;
+        const depth = pickGeometry(ray, {
+            positions: p.mesh.vertices,
+            indices: new Uint32Array(p.mesh.cells),
+            transform
+        }, transform);
+        if (depth !== null && depth < nearest) nearest = depth;
+    }
+    return Number.isFinite(nearest) ? pickDestination(ray, nearest, originRegion) : null;
+}
+return { pickNavigationGround };
+  });
+  factories.set('engine/foundation/navigation/vertex-direction', () => {
+function vertexDirection(index) {
+    const angle = Math.fround(index * 0.024543600156903267);
+    return [
+        Math.fround(Math.cos(angle)),
+        -Math.fround(Math.sin(angle))
+    ];
+}
+function outsideEdgeStart(source, hit, a, b, directionA, directionB) {
+    const f = Math.fround;
+    const distance = (v)=>{
+        const x = f(v[0] - hit[0]), z = f(v[1] - hit[1]);
+        return f(x * x + z * z);
+    };
+    const n = vertexDirection(distance(a) < distance(b) ? directionA : directionB), scale = 0.009999999776482582;
+    return [
+        f(f(source[0]) + f(n[0] * scale)),
+        f(f(source[1]) + f(n[1] * scale))
+    ];
+}
+return { vertexDirection, outsideEdgeStart };
+  });
+  factories.set('engine/foundation/navigation/contact-response', () => {
+function f(n) {
+    return Math.fround(n);
+}
+function cellEntry(center, hit) {
+    let x = f(f(center[0]) - f(hit[0])), z = f(f(center[1]) - f(hit[1]));
+    const length = f(Math.sqrt(f(x * x + z * z)));
+    const limit = 0.19999998807907104;
+    if (length > limit) {
+        const inverse = f(1 / length);
+        x = f(f(x * inverse) * limit);
+        z = f(f(z * inverse) * limit);
+    }
+    return [
+        f(f(hit[0]) + x),
+        f(f(hit[1]) + z)
+    ];
+}
+function edgeResponse(center, hit, requested, flags, blockThrough, budget) {
+    if (flags & 4) throw new Error('Outline response requires an outline edge');
+    if (budget === 0) return {
+        point: [
+            ...requested
+        ],
+        status: 0x20,
+        cell: 'original',
+        remainingBudget: 0
+    };
+    const inside = cellEntry(center, hit), portal = flags & 8 ? 2 : 0;
+    if (blockThrough && flags & 0x12) return {
+        point: inside,
+        status: portal | 1,
+        cell: 'original',
+        remainingBudget: budget - 1
+    };
+    return {
+        point: [
+            f(2 * f(hit[0]) - inside[0]),
+            f(2 * f(hit[1]) - inside[1])
+        ],
+        status: portal | 0x10,
+        cell: 'none',
+        remainingBudget: budget - 1
+    };
+}
+function normalize(v) {
+    const length = f(Math.sqrt(f(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])));
+    const inverse = length > 0 ? f(1 / length) : 0;
+    return [
+        f(v[0] * inverse),
+        f(v[1] * inverse),
+        f(v[2] * inverse)
+    ];
+}
+function slideNormal(a, b, originalStart, requested) {
+    const edge = normalize([
+        f(b[0] - a[0]),
+        f(b[1] - a[1]),
+        f(b[2] - a[2])
+    ]);
+    const remaining = normalize([
+        f(requested[0] - originalStart[0]),
+        f(requested[1] - originalStart[1]),
+        f(requested[2] - originalStart[2])
+    ]);
+    const sign = remaining[0] * edge[0] + remaining[1] * edge[1] + remaining[2] * edge[2] < 0 ? -1 : 1;
+    return [
+        f(-edge[2] * sign),
+        0,
+        f(edge[0] * sign)
+    ];
+}
+return { cellEntry, edgeResponse, slideNormal };
+  });
+  factories.set('engine/foundation/assets/base64', () => {
+function base64Bytes(text) {
+    const native = Uint8Array.fromBase64;
+    if (native) return native.call(Uint8Array, text);
+    const raw = atob(text), bytes = new Uint8Array(raw.length);
+    for(let i = 0; i < raw.length; i++)bytes[i] = raw.charCodeAt(i);
+    return bytes;
+}
+return { base64Bytes };
+  });
+  factories.set('engine/foundation/navigation/object-navigation', () => {
+const { outsideEdgeStart } = need('engine/foundation/navigation/vertex-direction');
+const { cellEntry, edgeResponse, slideNormal } = need('engine/foundation/navigation/contact-response');
+const { base64Bytes } = need('engine/foundation/assets/base64');
+function objectNavigation(row) {
+    const offsets = row.headerOffsets;
+    if (!Array.isArray(offsets) || !offsets[7]) return [];
+    const flags = offsets[11] ?? 0;
+    if (flags & ~7) throw new Error("Unsupported object navigation flags");
+    const payload = row.nativePayloads?.find((p)=>p.kind === "bms-offset7-post-payload-tail" && p.byteOffset === offsets[7]);
+    if (!payload) throw new Error("Missing object navigation payload");
+    if (typeof payload.rawBase64 !== "string" || payload.rawBase64.length > 32 * 1024 * 1024) {
+        throw new Error("Object navigation payload budget");
+    }
+    const raw = base64Bytes(payload.rawBase64);
+    if (raw.length !== payload.byteLength) throw new Error("Object navigation byte length");
+    const end = Math.min(row.byteLength, ...offsets.filter((n, i)=>i !== 11 && n > offsets[7])), size = end - offsets[7];
+    if (!Number.isInteger(size) || size < 0 || size > raw.length) {
+        throw new Error("Object navigation section bounds");
+    }
+    const v = new DataView(raw.buffer, 0, size);
+    let o = 0;
+    function take(n) {
+        if (!Number.isSafeInteger(n) || n < 0 || o + n > size) throw new Error("Truncated object navigation");
+        const at = o;
+        o += n;
+        return at;
+    }
+    const u8 = ()=>v.getUint8(take(1)), u16 = ()=>v.getUint16(take(2), true), u32 = ()=>v.getUint32(take(4), true), f32 = ()=>{
+        const n = v.getFloat32(take(4), true);
+        if (!Number.isFinite(n)) throw new Error("Invalid nav coordinate");
+        return n;
+    };
+    const count = (limit)=>{
+        const n = u32();
+        if (n > limit) throw new Error("Navigation count budget");
+        return n;
+    };
+    const n = count(65536);
+    const vertices = new Float32Array(n * 3), vertexDirections = new Uint8Array(n), bounds = [
+        Infinity,
+        Infinity,
+        Infinity,
+        -Infinity,
+        -Infinity,
+        -Infinity
+    ];
+    for(let i = 0; i < n; i++){
+        for(let k = 0; k < 3; k++){
+            const x = f32();
+            vertices[i * 3 + k] = x;
+            bounds[k] = Math.min(bounds[k], x);
+            bounds[k + 3] = Math.max(bounds[k + 3], x);
+        }
+        vertexDirections[i] = u8();
+    }
+    const nc = count(65536), cells = new Uint16Array(nc * 3), cellWords = new Uint16Array(nc), cellEvents = new Uint8Array(nc);
+    for(let i = 0; i < nc; i++){
+        for(let k = 0; k < 3; k++){
+            const a = u16();
+            if (a >= n) throw new Error("Invalid nav cell vertex");
+            cells[i * 3 + k] = a;
+        }
+        cellWords[i] = u16();
+        if (flags & 2) cellEvents[i] = u8();
+    }
+    const edges = [], edgeEvents = [];
+    let outlines = 0;
+    for(let group = 0; group < 2; group++){
+        const ne = count(nc * 3);
+        if (!group) outlines = ne;
+        for(let i = 0; i < ne; i++){
+            const a = u16(), b = u16(), src = u16(), dst = u16(), f = u8();
+            edgeEvents.push(flags & 1 ? u8() : 0);
+            if (a >= n || b >= n || src >= nc || dst !== 65535 && dst >= nc) {
+                throw new Error("Invalid nav edge reference");
+            }
+            edges.push(a, b, src, dst, f, group);
+        }
+    }
+    const names = [];
+    if (flags & 4) {
+        const nn = count(65536);
+        for(let i = 0; i < nn; i++){
+            const len = count(65536), at = take(len);
+            names.push(new TextDecoder().decode(raw.subarray(at, at + len)));
+        }
+    }
+    const gridX = f32(), gridZ = f32(), nx = count(65536), nz = count(65536), nt = count(1048576);
+    if (nx * nz !== nt) throw new Error("Invalid navigation grid");
+    const offsetsGrid = new Uint32Array(nt + 1), gridEdges = [];
+    for(let i = 0; i < nt; i++){
+        const nr = count(outlines);
+        if (gridEdges.length + nr > 8 * 1024 * 1024) throw Error("Navigation grid residency budget");
+        for(let j = 0; j < nr; j++){
+            const edge = u16();
+            if (edge >= outlines) throw new Error("Invalid navigation grid edge");
+            gridEdges.push(edge);
+        }
+        offsetsGrid[i + 1] = gridEdges.length;
+    }
+    if (o !== size) throw new Error("Object navigation trailing bytes");
+    if (!n || !nc) return [];
+    return [
+        {
+            outlineGrid: {
+                x: gridX,
+                z: gridZ,
+                nx,
+                nz,
+                offsets: offsetsGrid,
+                edgeIds: Uint16Array.from(gridEdges)
+            },
+            vertices,
+            vertexDirections,
+            cells,
+            cellWords,
+            cellEvents,
+            edgeEvents: Uint8Array.from(edgeEvents),
+            eventNames: names,
+            edges: Uint32Array.from(edges),
+            bounds,
+            passThrough: nc === 2 && names.length === 1 && [
+                "event",
+                "EVENT"
+            ].includes(names[0])
+        }
+    ];
+}
+function navLocal(p, x, y, z) {
+    const c = Math.cos(p.yaw), s = Math.sin(p.yaw), dx = x - p.x, dz = z - p.z;
+    return [
+        c * dx + s * dz,
+        y - p.y,
+        -s * dx + c * dz
+    ];
+}
+function navHeight(mesh, x, z, hint, cellIndex) {
+    const b = mesh.bounds;
+    if (x < b[0] || x > b[3] || z < b[2] || z > b[5]) return null;
+    let best = null, delta = Infinity;
+    const v = mesh.vertices;
+    for(let i = cellIndex === undefined ? 0 : cellIndex * 3; i < (cellIndex === undefined ? mesh.cells.length : cellIndex * 3 + 3); i += 3){
+        const a = mesh.cells[i] * 3, b = mesh.cells[i + 1] * 3, c = mesh.cells[i + 2] * 3, ax = v[a], az = v[a + 2], bx = v[b] - ax, bz = v[b + 2] - az, cx = v[c] - ax, cz = v[c + 2] - az, den = bx * cz - bz * cx;
+        if (Math.abs(den) < 1e-10) continue;
+        const u = ((x - ax) * cz - (z - az) * cx) / den, w = (bx * (z - az) - bz * (x - ax)) / den;
+        if (u < -1e-6 || w < -1e-6 || u + w > 1.000001) continue;
+        const y = v[a + 1] + u * (v[b + 1] - v[a + 1]) + w * (v[c + 1] - v[a + 1]);
+        if (Math.abs(y - hint) < delta) {
+            best = y;
+            delta = Math.abs(y - hint);
+        }
+    }
+    return best;
+}
+function navContactDetail(p, from, to, objects = [], passages = [], slide = false, exits = false, ownership) {
+    const a = navLocal(p, from[0], from[1], from[2]), b = navLocal(p, to[0], to[1], to[2]), m = p.mesh, v = m.vertices, bb = m.bounds;
+    if (Math.max(a[0], b[0]) < bb[0] || Math.min(a[0], b[0]) > bb[3] || Math.max(a[2], b[2]) < bb[2] || Math.min(a[2], b[2]) > bb[5] || !ownership && !p.terrainCells && (Math.max(a[1], b[1]) < bb[1] - 2 || Math.min(a[1], b[1]) > bb[4] + 2)) return null;
+    const visit = ownership ? 0 : terrainVisit(p.terrainCells, from, to);
+    if (visit === Infinity) return null;
+    const rx = b[0] - a[0], rz = b[2] - a[2];
+    let best = Infinity, edge = -1, owner = -1;
+    for(let i = 0; i < m.edges.length; i += 6){
+        const e = m.edges, aa = e[i] * 3, ab = e[i + 1] * 3, src = e[i + 2], flags = e[i + 4], outline = e[i + 5] === 0;
+        if (!ownership && p.terrainCells && (!outline || flags & 0x10)) continue;
+        if (outline ? flags === 0 && !exits : !(flags & 3)) continue;
+        const ax = v[aa], az = v[aa + 2], sx = v[ab] - ax, sz = v[ab + 2] - az, den = rx * sz - rz * sx;
+        if (Math.abs(den) < 1e-12) continue;
+        const t = ((ax - a[0]) * sz - (az - a[2]) * sx) / den, u = ((ax - a[0]) * rz - (az - a[2]) * rx) / den;
+        if (t <= 0 || t > 1 || t >= best || u < 0 || u > 1) continue;
+        if (!ownership && p.terrainCells && t < visit - 1e-9) continue;
+        if (!ownership && !p.terrainCells && Math.abs(a[1] + (b[1] - a[1]) * t - (v[aa + 1] + (v[ab + 1] - v[aa + 1]) * u)) > 2) continue;
+        let cx = 0, cz = 0;
+        for(let k = 0; k < 3; k++){
+            const at = m.cells[src * 3 + k] * 3;
+            cx += v[at] / 3;
+            cz += v[at + 2] / 3;
+        }
+        const side = sx * (cz - az) - sz * (cx - ax), start = sx * (a[2] - az) - sz * (a[0] - ax), approach = start || -(sx * (b[2] - az) - sz * (b[0] - ax));
+        if (ownership && !ownership.some((span)=>span.cell === (approach * side > 0 ? src : e[i + 3]) && t >= span.from - 1e-8 && t <= span.to + 1e-8)) continue;
+        if (outline && exits && flags === 0 && approach * side <= 0) continue;
+        if (outline && flags & 8 && passages.some((link)=>objects[link.source] === p && link.edge === i / 6 || objects[link.target] === p && link.targetEdge === i / 6)) continue;
+        if (outline && exits && approach * side > 0 || outline && (flags & 8 || !(flags & 3)) || (approach * side > 0 ? flags & 2 : flags & 1)) {
+            best = t;
+            edge = i;
+            owner = approach * side > 0 ? src : e[i + 3];
+        }
+    }
+    if (edge < 0) return null;
+    const f = Math.fround, e = m.edges, aa = e[edge] * 3, ab = e[edge + 1] * 3;
+    const x0 = f(a[0]), z0 = f(a[2]), dx = f(f(b[0]) - x0), dz = f(f(b[2]) - z0);
+    const ex = f(v[ab] - v[aa]), ez = f(v[ab + 2] - v[aa + 2]);
+    const nx = f(x0 - v[aa]), nz = f(z0 - v[aa + 2]);
+    const t = f(f(ex * nz - ez * nx) / f(ez * dx - ex * dz));
+    const hit = [
+        f(x0 + dx * t),
+        f(z0 + dz * t)
+    ];
+    if (owner === 65535) {
+        if (!m.vertexDirections || !(e[edge + 4] & 1)) {
+            return {
+                fraction: best,
+                point: null,
+                normal: null,
+                cell: owner,
+                edge: edge / 6,
+                visit,
+                status: 1
+            };
+        }
+        const origin = visit > 0 ? [
+            f(a[0] + (b[0] - a[0]) * visit),
+            f(a[2] + (b[2] - a[2]) * visit)
+        ] : [
+            x0,
+            z0
+        ];
+        const q = outsideEdgeStart(origin, hit, [
+            v[aa],
+            v[aa + 2]
+        ], [
+            v[ab],
+            v[ab + 2]
+        ], m.vertexDirections[aa / 3], m.vertexDirections[ab / 3]);
+        const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
+        return {
+            fraction: best,
+            point: [
+                f(c * q[0] - s * q[1] + p.x),
+                f(a[1] + p.y),
+                f(s * q[0] + c * q[1] + p.z)
+            ],
+            normal: null,
+            cell: owner,
+            edge: edge / 6,
+            visit,
+            status: 1
+        };
+    }
+    let cx = 0, cz = 0;
+    for(let k = 0; k < 3; k++){
+        const at = m.cells[owner * 3 + k] * 3;
+        cx += v[at];
+        cz += v[at + 2];
+    }
+    const reflection = exits && e[edge + 5] === 0 && !(e[edge + 4] & 0x1a);
+    const adjusted = reflection ? edgeResponse([
+        f(cx / 3),
+        f(cz / 3)
+    ], hit, [
+        b[0],
+        b[2]
+    ], e[edge + 4], true, 1).point : cellEntry([
+        f(cx / 3),
+        f(cz / 3)
+    ], hit);
+    const local = [
+        adjusted[0],
+        f(navHeight(m, adjusted[0], adjusted[1], a[1], owner) ?? a[1]),
+        adjusted[1]
+    ];
+    const normal = slide && !reflection ? slideNormal([
+        v[aa],
+        v[aa + 1],
+        v[aa + 2]
+    ], [
+        v[ab],
+        v[ab + 1],
+        v[ab + 2]
+    ], [
+        f(from[0]),
+        f(from[1]),
+        f(from[2])
+    ], [
+        f(b[0]),
+        f(b[1]),
+        f(b[2])
+    ]) : null;
+    const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
+    return {
+        status: reflection ? 0x10 : 1,
+        fraction: best,
+        point: [
+            f(c * local[0] - s * local[2] + p.x),
+            f(local[1] + p.y),
+            f(s * local[0] + c * local[2] + p.z)
+        ],
+        normal: normal ? [
+            f(c * normal[0] - s * normal[2] + p.x),
+            f(normal[1] + p.y),
+            f(s * normal[0] + c * normal[2] + p.z)
+        ] : null,
+        cell: owner,
+        edge: edge / 6,
+        visit
+    };
+}
+function navContact(p, from, to, objects = [], passages = []) {
+    return navContactDetail(p, from, to, objects, passages)?.fraction ?? Infinity;
+}
+function navCrossings(p, from, to, cuts, index) {
+    const a = navLocal(p, from[0], from[1], from[2]), b = navLocal(p, to[0], to[1], to[2]), m = p.mesh, v = m.vertices, bb = m.bounds;
+    if (Math.max(a[0], b[0]) < bb[0] || Math.min(a[0], b[0]) > bb[3] || Math.max(a[2], b[2]) < bb[2] || Math.min(a[2], b[2]) > bb[5]) return;
+    const rx = b[0] - a[0], rz = b[2] - a[2];
+    for (const cell of index?.cells(m, a, b) ?? Array.from({
+        length: m.cells.length / 3
+    }, (_, i)=>i)){
+        for(let k = 0; k < 3; k++){
+            const i = cell * 3;
+            const aa = m.cells[i + k] * 3, ab = m.cells[i + (k + 1) % 3] * 3, ax = v[aa], az = v[aa + 2], sx = v[ab] - ax, sz = v[ab + 2] - az, den = rx * sz - rz * sx;
+            if (Math.abs(den) < 1e-12) {
+                continue;
+            }
+            const t = ((ax - a[0]) * sz - (az - a[2]) * sx) / den, u = ((ax - a[0]) * rz - (az - a[2]) * rx) / den;
+            if (t > 0 && t < 1 && u >= 0 && u <= 1) {
+                if (cuts.length >= 65536) throw new Error("Navigation chord complexity");
+                cuts.push(t);
+            }
+        }
+    }
+}
+function navObstacleContact(p, from, to, ownership) {
+    const dx = to[0] - from[0], dz = to[2] - from[2], a = dx * dx + dz * dz;
+    if (a === 0) return Infinity;
+    for (const obstacle of p.obstacles ?? []){
+        const x = from[0] - obstacle.x, z = from[2] - obstacle.z, b = x * dx + z * dz, c = x * x + z * z - obstacle.radiusSquared;
+        let t;
+        if (c < 0) {
+            if (b >= 0) continue;
+            t = 0;
+        } else {
+            const d = b * b - a * c;
+            if (d < 0) continue;
+            t = (-b - Math.sqrt(d)) / a;
+            if (t < 0 || t > 1) continue;
+        }
+        if (ownership && !ownership.some((span)=>t >= span.from - 1e-8 && t <= span.to + 1e-8)) continue;
+        const q = navLocal(p, from[0] + dx * t, from[1] + (to[1] - from[1]) * t, from[2] + dz * t), h = navHeight(p.mesh, q[0], q[2], q[1]);
+        if (h !== null && Math.abs(h - q[1]) <= 2) return t;
+    }
+    return Infinity;
+}
+function terrainVisit(cells, from, to) {
+    if (!cells) return 0;
+    let best = Infinity;
+    for (const r of cells){
+        let lo = 0, hi = 1, ok = true;
+        for (const [p, q, a, b] of [
+            [
+                from[0],
+                to[0] - from[0],
+                r[0],
+                r[2]
+            ],
+            [
+                from[2],
+                to[2] - from[2],
+                r[1],
+                r[3]
+            ]
+        ]){
+            if (Math.abs(q) < 1e-12) {
+                if (p < a || p > b) {
+                    ok = false;
+                    break;
+                }
+                continue;
+            }
+            let t0 = (a - p) / q, t1 = (b - p) / q;
+            if (t0 > t1) [t0, t1] = [
+                t1,
+                t0
+            ];
+            lo = Math.max(lo, t0);
+            hi = Math.min(hi, t1);
+            if (lo > hi) {
+                ok = false;
+                break;
+            }
+        }
+        if (ok && lo < best) best = lo;
+    }
+    return best;
+}
+return { objectNavigation, navLocal, navHeight, navContactDetail, navContact, navCrossings, navObstacleContact, terrainVisit };
+  });
+  factories.set('engine/foundation/navigation/navigation-events', () => {
+const { navLocal } = need('engine/foundation/navigation/object-navigation');
+const { cellEntry } = need('engine/foundation/navigation/contact-response');
+function navigationEventDirection(byte, from, to) {
+    if (!Number.isInteger(byte) || byte < 0 || byte > 255 || !Number.isInteger(from) || !Number.isInteger(to) || from < -1 || to < -1) throw new Error('Invalid navigation event transition');
+    if (byte & 0x40 && from < to) return true;
+    if (byte & 0x80 && from > to) return false;
+    return null;
+}
+function navigationEvents(objects, spans, context) {
+    const result = [];
+    function append(placement, cell, edge, byte, from, to, fraction) {
+        const entering = navigationEventDirection(byte, from, to);
+        if (entering === null) return;
+        const name = objects[placement].mesh.eventNames?.[byte & 63];
+        if (name === undefined) throw new Error('Missing navigation event registry name');
+        result.push({
+            name,
+            entering,
+            placement,
+            cell,
+            edge,
+            fraction,
+            context
+        });
+    }
+    for(let i = 1; i < spans.length; i++){
+        const a = spans[i - 1], b = spans[i], p = objects[a.placement], q = objects[b.placement], same = a.placement === b.placement;
+        let edge = null;
+        for(let e = 0; e < p.mesh.edges.length / 6; e++){
+            const o = e * 6;
+            if (same ? p.mesh.edges[o + 2] === a.cell && p.mesh.edges[o + 3] === b.cell || p.mesh.edges[o + 3] === a.cell && p.mesh.edges[o + 2] === b.cell : p.links?.some((link)=>link.edge === e && link.target === b.placement)) {
+                edge = e;
+                break;
+            }
+        }
+        if (edge !== null) append(a.placement, a.cell, edge, p.mesh.edgeEvents?.[edge] ?? 0, a.cell, same ? b.cell : -1, b.from);
+        const before = p.mesh.cellEvents?.[a.cell] ?? 0, after = q.mesh.cellEvents?.[b.cell] ?? 0;
+        if (!same || !(before & 192) || !(after & 192) || (before & 63) !== (after & 63)) {
+            append(a.placement, a.cell, null, before, a.cell, -1, b.from);
+            append(b.placement, b.cell, null, after, -1, b.cell, b.from);
+        }
+    }
+    return result;
+}
+function navigationEventStop(objects, spans, event, from, to) {
+    const source = spans.find((s)=>s.to >= event.fraction - 1e-8 && s.from < event.fraction);
+    if (!source) throw Error('Navigation event has no source owner');
+    const p = objects[source.placement], m = p.mesh, v = m.vertices, ids = m.cells.subarray(source.cell * 3, source.cell * 3 + 3);
+    let q = navLocal(p, to[0], to[1], to[2]);
+    if (event.edge !== null || event.entering) {
+        const hit = from.map((x, i)=>x + (to[i] - x) * event.fraction), local = navLocal(p, hit[0], hit[1], hit[2]);
+        let cx = 0, cz = 0;
+        for (const i of ids){
+            cx += v[i * 3];
+            cz += v[i * 3 + 2];
+        }
+        const at = cellEntry([
+            Math.fround(cx / 3),
+            Math.fround(cz / 3)
+        ], [
+            Math.fround(local[0]),
+            Math.fround(local[2])
+        ]);
+        q = [
+            at[0],
+            local[1],
+            at[1]
+        ];
+    }
+    const a = ids[0] * 3, b = ids[1] * 3, c = ids[2] * 3, ax = v[a], az = v[a + 2], bx = v[b] - ax, bz = v[b + 2] - az, cx = v[c] - ax, cz = v[c + 2] - az, den = bx * cz - bz * cx;
+    const u = ((q[0] - ax) * cz - (q[2] - az) * cx) / den, w = (bx * (q[2] - az) - bz * (q[0] - ax)) / den;
+    const y = Math.fround(v[a + 1] + u * (v[b + 1] - v[a + 1]) + w * (v[c + 1] - v[a + 1])), co = Math.cos(p.yaw), si = Math.sin(p.yaw);
+    return {
+        owner: {
+            placement: source.placement,
+            cell: source.cell
+        },
+        point: [
+            Math.fround(co * q[0] - si * q[2] + p.x),
+            Math.fround(y + p.y),
+            Math.fround(si * q[0] + co * q[2] + p.z)
+        ]
+    };
+}
+return { navigationEventDirection, navigationEvents, navigationEventStop };
+  });
+  factories.set('engine/foundation/navigation/owned-start', () => {
+const { cellEntry } = need('engine/foundation/navigation/contact-response');
+const { navLocal } = need('engine/foundation/navigation/object-navigation');
+function ownedCellStart(mesh, cell, x, z) {
+    const f = Math.fround, v = mesh.vertices, ids = mesh.cells.subarray(cell * 3, cell * 3 + 3);
+    if (ids.length !== 3) return [
+        x,
+        z
+    ];
+    const points = Array.from(ids, (i)=>[
+            v[i * 3],
+            v[i * 3 + 2]
+        ]);
+    const cx = f(points.reduce((s, p)=>s + p[0], 0) / 3), cz = f(points.reduce((s, p)=>s + p[1], 0) / 3);
+    let outside = false, boundary = false;
+    for(let i = 0; i < 3; i++){
+        const a = points[i], b = points[(i + 1) % 3], sx = f(b[0] - a[0]), sz = f(b[1] - a[1]);
+        const side = f(sz * f(x - a[0]) - sx * f(z - a[1])), inside = sz * (cx - a[0]) - sx * (cz - a[1]);
+        if (side * inside < 0) outside = true;
+        if (side === 0) boundary = true;
+    }
+    if (!outside) return boundary ? cellEntry([
+        cx,
+        cz
+    ], [
+        x,
+        z
+    ]) : [
+        x,
+        z
+    ];
+    const dx = f(cx - f(x)), dz = f(cz - f(z));
+    for(let i = 0; i < 3; i++){
+        const a = points[i], b = points[(i + 1) % 3], sx = f(b[0] - a[0]), sz = f(b[1] - a[1]), den = f(dx * sz - dz * sx);
+        if (den === 0) continue;
+        const t = f(f((a[0] - x) * sz - (a[1] - z) * sx) / den), u = f(f((a[0] - x) * dz - (a[1] - z) * dx) / den);
+        if (t > 0 && t <= 1 && u >= 0 && u < 1) return cellEntry([
+            cx,
+            cz
+        ], [
+            f(f(x) + dx * t),
+            f(f(z) + dz * t)
+        ]);
+    }
+    return [
+        x,
+        z
+    ];
+}
+function ownedPlacementStart(p, cell, point) {
+    const q = navLocal(p, point[0], point[1], point[2]), a = ownedCellStart(p.mesh, cell, q[0], q[2]);
+    if (a[0] === q[0] && a[1] === q[2]) return point;
+    const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
+    return [
+        c * a[0] - s * a[1] + p.x,
+        point[1],
+        s * a[0] + c * a[1] + p.z
+    ];
+}
+return { ownedCellStart, ownedPlacementStart };
+  });
+  factories.set('engine/foundation/navigation/topology', () => {
+const { navHeight, navLocal } = need('engine/foundation/navigation/object-navigation');
+const { base64Bytes } = need('engine/foundation/assets/base64');
+const { ownedCellStart } = need('engine/foundation/navigation/owned-start');
+const { edgeResponse } = need('engine/foundation/navigation/contact-response');
+function linkedEntry(objects, from, to, spans) {
+    let best = null;
+    for (const span of spans){
+        const p = objects[span.placement], m = p.mesh;
+        if (!p.links?.length) continue;
+        const a = navLocal(p, from[0], from[1], from[2]), b = navLocal(p, to[0], to[1], to[2]);
+        const dx = b[0] - a[0], dz = b[2] - a[2];
+        for (const link of p.links){
+            const e = link.edge * 6, flags = m.edges[e + 4];
+            if (!(flags & 8) || m.edges[e + 2] !== span.cell) continue;
+            const va = m.edges[e] * 3, vb = m.edges[e + 1] * 3;
+            const ax = m.vertices[va], az = m.vertices[va + 2], sx = m.vertices[vb] - ax, sz = m.vertices[vb + 2] - az;
+            const den = dx * sz - dz * sx;
+            if (Math.abs(den) < 1e-12) continue;
+            const t = ((ax - a[0]) * sz - (az - a[2]) * sx) / den;
+            const u = ((ax - a[0]) * dz - (az - a[2]) * dx) / den;
+            if (t <= 0 || t > 1 || t < span.from - 1e-9 || t > span.to + 1e-9 || u < 0 || u > 1 || best && t >= best.fraction) continue;
+            let cx = 0, cz = 0;
+            for(let i = 0; i < 3; i++){
+                const at = m.cells[span.cell * 3 + i] * 3;
+                cx += m.vertices[at] / 3;
+                cz += m.vertices[at + 2] / 3;
+            }
+            if ((sx * (cz - az) - sz * (cx - ax)) * (sx * (a[2] - az) - sz * (a[0] - ax)) <= 0) continue;
+            const response = edgeResponse([
+                cx,
+                cz
+            ], [
+                a[0] + dx * t,
+                a[2] + dz * t
+            ], [
+                b[0],
+                b[2]
+            ], flags, true, 1);
+            if (response.status & 1) continue;
+            const x = response.point[0], z = response.point[1], c = Math.cos(p.yaw), s = Math.sin(p.yaw);
+            const target = objects[link.target], cell = target.mesh.edges[link.targetEdge * 6 + 2];
+            const q = navLocal(target, c * x - s * z + p.x, from[1], s * x + c * z + p.z);
+            const entry = ownedCellStart(target.mesh, cell, q[0], q[2]);
+            const y = navHeight(target.mesh, entry[0], entry[1], q[1], cell);
+            if (y === null) continue;
+            const tc = Math.cos(target.yaw), ts = Math.sin(target.yaw);
+            best = {
+                fraction: t,
+                owner: {
+                    placement: link.target,
+                    cell
+                },
+                status: response.status,
+                point: [
+                    tc * entry[0] - ts * entry[1] + target.x,
+                    y + target.y,
+                    ts * entry[0] + tc * entry[1] + target.z
+                ]
+            };
+        }
+    }
+    return best;
+}
+function objectLinks(count = 0, encoded) {
+    if (!Number.isInteger(count) || count < 0 || count > 65535) {
+        throw new Error("Invalid object link count");
+    }
+    if (!count) {
+        if (encoded) {
+            throw new Error("Unexpected object links");
+        }
+        return [];
+    }
+    if (typeof encoded !== "string" || encoded.length > count * 8 + 8) {
+        throw new Error("Missing object link bytes");
+    }
+    const raw = base64Bytes(encoded);
+    if (raw.length !== count * 6) {
+        throw new Error("Object link length");
+    }
+    const v = new DataView(raw.buffer), links = [];
+    for(let i = 0; i < count; i++){
+        links.push({
+            target: v.getUint16(i * 6, true),
+            targetEdge: v.getUint16(i * 6 + 2, true),
+            edge: v.getUint16(i * 6 + 4, true)
+        });
+    }
+    return links;
+}
+function endpoint(p, edge, end) {
+    const at = p.mesh.edges[edge * 6 + end] * 3, v = p.mesh.vertices, x = v[at], z = v[at + 2], c = Math.cos(p.yaw), s = Math.sin(p.yaw);
+    return [
+        Math.fround(c * x - s * z + p.x),
+        Math.fround(v[at + 1] + p.y),
+        Math.fround(s * x + c * z + p.z)
+    ];
+}
+function portalCongruent(a, edge, b, other) {
+    const a0 = endpoint(a, edge, 0), a1 = endpoint(a, edge, 1), b0 = endpoint(b, other, 0), b1 = endpoint(b, other, 1);
+    const near = (x, y)=>{
+        const d = x.map((n, i)=>Math.fround(n - y[i]));
+        return Math.fround(Math.sqrt(Math.fround(d[0] ** 2 + d[1] ** 2 + d[2] ** 2))) < 5;
+    };
+    return near(a0, b0) ? near(a1, b1) : near(a1, b0) && near(a0, b1);
+}
+function dungeonLinks(objects, neighbors) {
+    const groups = neighbors.map(()=>[]);
+    objects.forEach((p, i)=>{
+        if (p.block === undefined || !groups[p.block]) {
+            throw new Error("Invalid dungeon block");
+        }
+        groups[p.block].push(i);
+    });
+    return objects.map((p)=>{
+        const links = [];
+        for(let e = 0; e < p.mesh.edges.length / 6; e++){
+            if (p.mesh.edges[e * 6 + 5] !== 0 || !(p.mesh.edges[e * 6 + 4] & 8)) {
+                continue;
+            }
+            search: for (const block of neighbors[p.block]){
+                if (!groups[block]) {
+                    throw new Error("Invalid dungeon neighbor");
+                }
+                for (const target of groups[block]){
+                    const q = objects[target];
+                    for(let k = 0; k < q.mesh.edges.length / 6; k++){
+                        if (q.mesh.edges[k * 6 + 5] === 0 && q.mesh.edges[k * 6 + 4] & 8 && portalCongruent(p, e, q, k)) {
+                            links.push({
+                                edge: e,
+                                target,
+                                targetEdge: k
+                            });
+                            break search;
+                        }
+                    }
+                }
+            }
+        }
+        return {
+            ...p,
+            links
+        };
+    });
+}
+function validateLinks(objects) {
+    for (const p of objects){
+        const seen = new Set();
+        for (const link of p.links ?? []){
+            const q = objects[link.target];
+            if (!Number.isInteger(link.edge) || !Number.isInteger(link.target) || !Number.isInteger(link.targetEdge) || link.edge < 0 || link.targetEdge < 0 || !q || p.mesh.edges[link.edge * 6 + 5] !== 0 || q.mesh.edges[link.targetEdge * 6 + 5] !== 0 || !(p.mesh.edges[link.edge * 6 + 4] & 8) || seen.has(link.edge)) {
+                throw new Error("Invalid navigation link");
+            }
+            seen.add(link.edge);
+        }
+    }
+}
+const PASSAGE_BOX_PAD = 1e-6;
+function linkEdge(p, edge) {
+    const a = endpoint(p, edge, 0), b = endpoint(p, edge, 1), cell = p.mesh.edges[edge * 6 + 2];
+    let cx = 0, cz = 0;
+    for(let k = 0; k < 3; k++){
+        const at = p.mesh.cells[cell * 3 + k] * 3, x = p.mesh.vertices[at], z = p.mesh.vertices[at + 2];
+        cx += (Math.cos(p.yaw) * x - Math.sin(p.yaw) * z + p.x) / 3;
+        cz += (Math.sin(p.yaw) * x + Math.cos(p.yaw) * z + p.z) / 3;
+    }
+    return {
+        a,
+        b,
+        cx,
+        cz,
+        minX: Math.min(a[0], b[0]),
+        maxX: Math.max(a[0], b[0]),
+        minZ: Math.min(a[2], b[2]),
+        maxZ: Math.max(a[2], b[2])
+    };
+}
+function createPassageLinks(objects) {
+    const links = [];
+    for(let source = 0; source < objects.length; source++){
+        const p = objects[source];
+        for (const link of p.links ?? []){
+            const sourceEdge = linkEdge(p, link.edge), targetEdge = linkEdge(objects[link.target], link.targetEdge);
+            links.push({
+                source,
+                link,
+                sourceEdge,
+                targetEdge,
+                minX: Math.min(sourceEdge.minX, targetEdge.minX),
+                maxX: Math.max(sourceEdge.maxX, targetEdge.maxX),
+                minZ: Math.min(sourceEdge.minZ, targetEdge.minZ),
+                maxZ: Math.max(sourceEdge.maxZ, targetEdge.maxZ)
+            });
+        }
+    }
+    return {
+        objects,
+        links
+    };
+}
+function linkPassages(objects, from, to, ownedSurface = false, prepared) {
+    const dx = to[0] - from[0], dz = to[2] - from[2], out = [];
+    const links = prepared?.objects === objects ? prepared.links : createPassageLinks(objects).links;
+    const minX = Math.min(from[0], to[0]) - PASSAGE_BOX_PAD, maxX = Math.max(from[0], to[0]) + PASSAGE_BOX_PAD, minZ = Math.min(from[2], to[2]) - PASSAGE_BOX_PAD, maxZ = Math.max(from[2], to[2]) + PASSAGE_BOX_PAD;
+    function misses(e) {
+        return e.maxX < minX || e.minX > maxX || e.maxZ < minZ || e.minZ > maxZ;
+    }
+    function crossing(e, leaving) {
+        if (misses(e)) {
+            return null;
+        }
+        const a = e.a, b = e.b, sx = b[0] - a[0], sz = b[2] - a[2], den = dx * sz - dz * sx;
+        if (Math.abs(den) < 1e-12) {
+            return null;
+        }
+        const t = ((a[0] - from[0]) * sz - (a[2] - from[2]) * sx) / den, u = ((a[0] - from[0]) * dz - (a[2] - from[2]) * dx) / den;
+        if (t < 0 || t > 1 || u < 0 || u > 1) {
+            return null;
+        }
+        if (!ownedSurface && Math.abs(from[1] + (to[1] - from[1]) * t - (a[1] + (b[1] - a[1]) * u)) > 2) {
+            return null;
+        }
+        const cx = e.cx, cz = e.cz;
+        const side = sx * (cz - a[2]) - sz * (cx - a[0]), approach = sx * (from[2] - a[2]) - sz * (from[0] - a[0]);
+        if (approach * side > 0 !== leaving) {
+            return null;
+        }
+        return t;
+    }
+    for (const region of links){
+        if (misses(region)) {
+            continue;
+        }
+        const source = region.source, link = region.link, p = objects[source], q = objects[link.target];
+        let a = crossing(region.sourceEdge, true), b = crossing(region.targetEdge, false);
+        const inside = (r, edge, t)=>{
+            const v = navLocal(r, from[0] + dx * t, from[1] + (to[1] - from[1]) * t, from[2] + dz * t), h = navHeight(r.mesh, v[0], v[2], v[1], r.mesh.edges[edge * 6 + 2]);
+            return h !== null && Math.abs(h - v[1]) <= 2;
+        };
+        if (a !== null && b === null && inside(q, link.targetEdge, a)) {
+            b = a;
+        } else if (b !== null && a === null && inside(p, link.edge, b)) {
+            a = b;
+        }
+        if (a === null || b === null) {
+            continue;
+        }
+        if (Math.abs(a - b) * Math.hypot(dx, dz, to[1] - from[1]) >= 5) {
+            continue;
+        }
+        out.push({
+            source,
+            target: link.target,
+            edge: link.edge,
+            targetEdge: link.targetEdge,
+            from: Math.max(0, Math.min(a, b) - 0.19999998807907104 / Math.max(Math.hypot(dx, dz), 1e-12)),
+            to: Math.min(1, Math.max(a, b) + 0.19999998807907104 / Math.max(Math.hypot(dx, dz), 1e-12))
+        });
+    }
+    return out;
+}
+return { linkedEntry, objectLinks, portalCongruent, dungeonLinks, validateLinks, createPassageLinks, linkPassages };
+  });
+  factories.set('engine/foundation/navigation/dungeon-ownership', () => {
+const { navCrossings, navHeight, navLocal, terrainVisit } = need('engine/foundation/navigation/object-navigation');
+const { linkPassages } = need('engine/foundation/navigation/topology');
+const { ownedPlacementStart } = need('engine/foundation/navigation/owned-start');
+function terrainOwnerPath(objects, from, to, preferred, index, terrainY) {
+    let resident = dungeonOwnerPath(objects, from, to, preferred, index);
+    if (resident.owner && !preferred && terrainY !== undefined && resident.spans[0]) {
+        const s0 = resident.spans[0], p = objects[s0.placement], q = navLocal(p, from[0], from[1], from[2]), h = navHeight(p.mesh, q[0], q[2], q[1], s0.cell);
+        if (h !== null && Math.abs(terrainY - from[1]) <= Math.abs(h + p.y - from[1])) {
+            resident = {
+                spans: [],
+                stop: 0,
+                owner: null
+            };
+        }
+    }
+    if (resident.owner) return resident;
+    let entry = null, fraction = Infinity, entryVisit = Infinity;
+    for (const placement of index?.placements(from, to) ?? objects.map((_, i)=>i)){
+        const visit = terrainVisit(objects[placement].terrainCells, from, to);
+        if (visit === Infinity || visit > entryVisit) continue;
+        const p = objects[placement], a = index?.local(p, from) ?? navLocal(p, from[0], from[1], from[2]), b = index?.local(p, to) ?? navLocal(p, to[0], to[1], to[2]), m = p.mesh, v = m.vertices;
+        const bounds = m.bounds;
+        if (Math.max(a[0], b[0]) < bounds[0] || Math.min(a[0], b[0]) > bounds[3] || Math.max(a[2], b[2]) < bounds[2] || Math.min(a[2], b[2]) > bounds[5]) continue;
+        const rx = b[0] - a[0], rz = b[2] - a[2];
+        for (const edge of index?.edges(m, a, b) ?? Array.from({
+            length: m.edges.length / 6
+        }, (_, i)=>i)){
+            const i = edge * 6;
+            const e = m.edges;
+            if (e[i + 5] !== 0 || e[i + 4] & 0x11) continue;
+            const aa = e[i] * 3, bb = e[i + 1] * 3, ax = v[aa], az = v[aa + 2], sx = v[bb] - ax, sz = v[bb + 2] - az, den = rx * sz - rz * sx;
+            if (Math.abs(den) < 1e-12) continue;
+            const t = ((ax - a[0]) * sz - (az - a[2]) * sx) / den, u = ((ax - a[0]) * rz - (az - a[2]) * rx) / den;
+            if (t < 0 || t < visit - 1e-9 || t >= 1 || u < 0 || u > 1) continue;
+            if (visit === entryVisit && t >= fraction) continue;
+            const cell = e[i + 2];
+            let cx = 0, cz = 0;
+            for(let k = 0; k < 3; k++){
+                const at = m.cells[cell * 3 + k] * 3;
+                cx += v[at] / 3;
+                cz += v[at + 2] / 3;
+            }
+            const side = sx * (cz - az) - sz * (cx - ax), start = sx * (a[2] - az) - sz * (a[0] - ax);
+            if (start * side > 0) continue;
+            entry = {
+                placement,
+                cell
+            };
+            fraction = t;
+            entryVisit = visit;
+        }
+    }
+    if (!entry) return resident;
+    const t = Math.min(1, fraction + 1e-7), start = from.map((v, i)=>v + (to[i] - v) * t), p = objects[entry.placement], q = navLocal(p, start[0], start[1], start[2]);
+    const h = navHeight(p.mesh, q[0], q[2], q[1], entry.cell);
+    if (h === null) return resident;
+    start[1] = h + p.y;
+    const path = dungeonOwnerPath(objects, start, to, entry, index);
+    return {
+        bridges: [
+            [
+                entryVisit,
+                fraction
+            ]
+        ],
+        owner: path.owner,
+        stop: t + (1 - t) * path.stop,
+        spans: path.spans.map((span, i)=>({
+                ...span,
+                from: i === 0 ? fraction : t + (1 - t) * span.from,
+                to: t + (1 - t) * span.to
+            }))
+    };
+}
+function dungeonOwnerPath(objects, from, to, preferred, index) {
+    const point = (t)=>from.map((v, i)=>v + (to[i] - v) * t);
+    function contains(owner, t, initial = false) {
+        const p = objects[owner.placement], v = point(t), q = index?.local(p, v) ?? navLocal(p, v[0], v[1], v[2]), h = navHeight(p.mesh, q[0], q[2], q[1], owner.cell);
+        return h !== null && (!initial || Math.abs(h - q[1]) <= 2);
+    }
+    if (preferred && (!Number.isInteger(preferred.placement) || !Number.isInteger(preferred.cell) || preferred.placement < 0 || preferred.cell < 0 || !objects[preferred.placement] || preferred.cell >= objects[preferred.placement].mesh.cells.length / 3)) throw new Error("Invalid dungeon owner");
+    if (preferred) from = ownedPlacementStart(objects[preferred.placement], preferred.cell, from);
+    let owner = null, delta = Infinity;
+    if (preferred && contains(preferred, 0)) {
+        owner = preferred;
+        delta = 0;
+    }
+    for (const placement of owner ? [] : preferred ? [
+        preferred.placement
+    ] : index?.placements(from) ?? objects.map((_, i)=>i)){
+        if (preferred && placement !== preferred.placement) continue;
+        const p = objects[placement], q = index?.local(p, from) ?? navLocal(p, from[0], from[1], from[2]);
+        const bounds = p.mesh.bounds;
+        if (q[0] < bounds[0] || q[0] > bounds[3] || q[2] < bounds[2] || q[2] > bounds[5]) continue;
+        for (const cell of index?.cells(p.mesh, q) ?? Array.from({
+            length: p.mesh.cells.length / 3
+        }, (_, i)=>i)){
+            const h = navHeight(p.mesh, q[0], q[2], q[1], cell);
+            if (h !== null && Math.abs(h - q[1]) < delta) {
+                delta = Math.abs(h - q[1]);
+                owner = {
+                    placement,
+                    cell
+                };
+            }
+        }
+    }
+    if (!owner || delta > 2) return {
+        spans: [],
+        stop: 0,
+        owner: null
+    };
+    const cuts = [
+        0,
+        1
+    ], spans = [], passages = linkPassages(objects, from, to, true, index?.passageLinks);
+    for (const placement of index?.placements(from, to) ?? objects.map((_, i)=>i)){
+        navCrossings(objects[placement], from, to, cuts, index);
+    }
+    cuts.sort((a, b)=>a - b);
+    for(let i = 1; i < cuts.length; i++){
+        const lo = cuts[i - 1], hi = cuts[i];
+        if (hi - lo < 1e-8) continue;
+        const t = (lo + hi) / 2;
+        if (!contains(owner, t)) {
+            const p = objects[owner.placement], cell = p.mesh.cells.subarray(owner.cell * 3, owner.cell * 3 + 3);
+            let next = null;
+            const sample = point(t), local = index?.local(p, sample) ?? navLocal(p, sample[0], sample[1], sample[2]);
+            for (const c of index?.cells(p.mesh, local) ?? Array.from({
+                length: p.mesh.cells.length / 3
+            }, (_, i)=>i)){
+                if (c === owner.cell) continue;
+                let shared = 0;
+                for(let k = 0; k < 3; k++)if (cell.includes(p.mesh.cells[c * 3 + k])) shared++;
+                if (shared >= 2 && contains({
+                    placement: owner.placement,
+                    cell: c
+                }, t)) {
+                    next = {
+                        placement: owner.placement,
+                        cell: c
+                    };
+                    break;
+                }
+            }
+            if (!next) {
+                for (const link of passages){
+                    if (link.source !== owner.placement || lo > link.to || hi < link.from) continue;
+                    const target = objects[link.target], entry = target.mesh.edges[link.targetEdge * 6 + 2];
+                    if (contains({
+                        placement: link.target,
+                        cell: entry
+                    }, t)) {
+                        next = {
+                            placement: link.target,
+                            cell: entry
+                        };
+                        break;
+                    }
+                    if (t >= link.from && t <= link.to) {
+                        next = owner;
+                        break;
+                    }
+                }
+            }
+            if (!next) return {
+                spans,
+                stop: lo,
+                owner
+            };
+            owner = next;
+        }
+        const last = spans.at(-1);
+        if (last && last.placement === owner.placement && last.cell === owner.cell) {
+            spans[spans.length - 1] = {
+                ...last,
+                to: hi
+            };
+        } else spans.push({
+            ...owner,
+            from: lo,
+            to: hi
+        });
+    }
+    return {
+        spans,
+        stop: 1,
+        owner
+    };
+}
+return { terrainOwnerPath, dungeonOwnerPath };
+  });
+  factories.set('engine/foundation/navigation/spatial-index', () => {
+const { createPassageLinks } = need('engine/foundation/navigation/topology');
+function tree(boxes) {
+    const order = Int32Array.from(boxes, (_, i)=>i), nodes = [];
+    function build(start, end) {
+        const at = nodes.length;
+        let x = Infinity, z = Infinity, X = -Infinity, Z = -Infinity;
+        for(let i = start; i < end; i++){
+            const b = boxes[order[i]];
+            x = Math.min(x, b[0]);
+            z = Math.min(z, b[1]);
+            X = Math.max(X, b[2]);
+            Z = Math.max(Z, b[3]);
+        }
+        nodes.push(x, z, X, Z, -1, -1, start, end - start);
+        if (end - start > 8) {
+            const axis = X - x >= Z - z ? 0 : 1, farAxis = axis === 0 ? 2 : 3;
+            order.subarray(start, end).sort((a, b)=>boxes[a][axis] + boxes[a][farAxis] - (boxes[b][axis] + boxes[b][farAxis]) || a - b);
+            const middle = start + end >>> 1;
+            nodes[at + 4] = build(start, middle);
+            nodes[at + 5] = build(middle, end);
+        }
+        return at;
+    }
+    if (boxes.length) build(0, boxes.length);
+    const data = Float64Array.from(nodes);
+    return {
+        bytes: data.byteLength + order.byteLength,
+        query (bounds) {
+            const found = [], pending = data.length ? [
+                0
+            ] : [];
+            let visited = 0;
+            while(pending.length){
+                const at = pending.pop();
+                visited++;
+                if (bounds[2] < data[at] || bounds[0] > data[at + 2] || bounds[3] < data[at + 1] || bounds[1] > data[at + 3]) continue;
+                if (data[at + 4] >= 0) {
+                    pending.push(data[at + 4], data[at + 5]);
+                    continue;
+                }
+                for(let i = data[at + 6]; i < data[at + 6] + data[at + 7]; i++){
+                    const id = order[i], b = boxes[id];
+                    if (bounds[2] >= b[0] && bounds[0] <= b[2] && bounds[3] >= b[1] && bounds[1] <= b[3]) {
+                        found.push(id);
+                    }
+                }
+            }
+            return {
+                ids: found.sort((a, b)=>a - b),
+                visited
+            };
+        }
+    };
+}
+function rectangle(from, to = from, pad = 1e-5) {
+    return [
+        Math.min(from[0], to[0]) - pad,
+        Math.min(from[2], to[2]) - pad,
+        Math.max(from[0], to[0]) + pad,
+        Math.max(from[2], to[2]) + pad
+    ];
+}
+function createNavigationIndex(objects) {
+    const meshes = new Map(), transforms = new Map();
+    let bytes = objects.length * 48, queries = 0, visited = 0, candidates = 0;
+    for (const p of objects){
+        transforms.set(p, [
+            Math.cos(p.yaw),
+            Math.sin(p.yaw)
+        ]);
+        if (meshes.has(p.mesh)) continue;
+        const m = p.mesh, v = m.vertices;
+        function bounds(ids) {
+            let x = Infinity, z = Infinity, X = -Infinity, Z = -Infinity;
+            for (const id of ids){
+                x = Math.min(x, v[id * 3]);
+                z = Math.min(z, v[id * 3 + 2]);
+                X = Math.max(X, v[id * 3]);
+                Z = Math.max(Z, v[id * 3 + 2]);
+            }
+            return [
+                x,
+                z,
+                X,
+                Z
+            ];
+        }
+        const cellBoxes = [], edgeBoxes = [];
+        for(let i = 0; i < m.cells.length; i += 3){
+            const b = bounds([
+                m.cells[i],
+                m.cells[i + 1],
+                m.cells[i + 2]
+            ]);
+            const pad = Math.max(1, b[2] - b[0], b[3] - b[1]) * 2e-6;
+            cellBoxes.push([
+                b[0] - pad,
+                b[1] - pad,
+                b[2] + pad,
+                b[3] + pad
+            ]);
+        }
+        for(let i = 0; i < m.edges.length; i += 6)edgeBoxes.push(bounds([
+            m.edges[i],
+            m.edges[i + 1]
+        ]));
+        const cells = tree(cellBoxes), edges = tree(edgeBoxes), b = [
+            m.bounds[0],
+            m.bounds[2],
+            m.bounds[3],
+            m.bounds[5]
+        ];
+        const actual = [
+            ...b
+        ];
+        for (const box of [
+            ...cellBoxes,
+            ...edgeBoxes
+        ]){
+            actual[0] = Math.min(actual[0], box[0]);
+            actual[1] = Math.min(actual[1], box[1]);
+            actual[2] = Math.max(actual[2], box[2]);
+            actual[3] = Math.max(actual[3], box[3]);
+        }
+        bytes += cells.bytes + edges.bytes + (cellBoxes.length + edgeBoxes.length) * 32;
+        if (bytes > 64 * 1024 * 1024) throw Error("Navigation acceleration budget");
+        meshes.set(m, {
+            cells,
+            edges,
+            bounds: actual
+        });
+    }
+    const placements = tree(objects.map((p)=>{
+        const [c, s] = transforms.get(p), b = meshes.get(p.mesh).bounds;
+        const xx = [
+            c * b[0] - s * b[1] + p.x,
+            c * b[0] - s * b[3] + p.x,
+            c * b[2] - s * b[1] + p.x,
+            c * b[2] - s * b[3] + p.x
+        ], zz = [
+            s * b[0] + c * b[1] + p.z,
+            s * b[0] + c * b[3] + p.z,
+            s * b[2] + c * b[1] + p.z,
+            s * b[2] + c * b[3] + p.z
+        ];
+        return [
+            Math.min(...xx),
+            Math.min(...zz),
+            Math.max(...xx),
+            Math.max(...zz)
+        ];
+    }));
+    bytes += placements.bytes;
+    function query(index, bounds) {
+        const result = index.query(bounds);
+        queries++;
+        visited += result.visited;
+        candidates += result.ids.length;
+        return result.ids;
+    }
+    const passageLinks = createPassageLinks(objects);
+    bytes += passageLinks.links.length * 160;
+    return {
+        bytes,
+        passageLinks,
+        local (p, point) {
+            const [c, s] = transforms.get(p), dx = point[0] - p.x, dz = point[2] - p.z;
+            return [
+                c * dx + s * dz,
+                point[1] - p.y,
+                -s * dx + c * dz
+            ];
+        },
+        placements (from, to = from) {
+            return query(placements, rectangle(from, to));
+        },
+        cells (mesh, from, to = from) {
+            return query(meshes.get(mesh).cells, rectangle(from, to));
+        },
+        edges (mesh, from, to = from) {
+            return query(meshes.get(mesh).edges, rectangle(from, to));
+        },
+        stats () {
+            return {
+                queries,
+                visited,
+                candidates,
+                bytes
+            };
+        }
+    };
+}
+return { createNavigationIndex };
+  });
+  factories.set('engine/foundation/navigation/region-move', () => {
+const { REGION_SIZE, regionRelativeXZ, sameCoordinateSpace } = need('engine/foundation/world/world-space');
+function regionMoveDestination(to, regionId) {
+    const [x, z] = regionRelativeXZ(regionId, to);
+    return {
+        ...to,
+        regionId,
+        x: Math.fround(x),
+        z: Math.fround(z)
+    };
+}
+function regionMoveAllowed(from, to, limit = 0x7fffffff) {
+    if (!sameCoordinateSpace(from.regionId, to.regionId)) return false;
+    const target = regionMoveDestination(to, from.regionId);
+    return !(limit > 10 && (target.x - from.x > REGION_SIZE || target.z - from.z > REGION_SIZE));
+}
+function regionMoveContinuation(start, target, result, calls) {
+    if (!result.point || result.status & 0x10000001 || !(result.status & 0x14)) return "stop";
+    const dx = Math.fround(target.x - start.x), dy = Math.fround(target.y - start.y), dz = Math.fround(target.z - start.z);
+    if (Math.fround(dy * dy + dx * dx + dz * dz) < 25) return "stop";
+    return calls >= 6 ? "reject" : "continue";
+}
+return { regionMoveDestination, regionMoveAllowed, regionMoveContinuation };
+  });
+  factories.set('engine/foundation/navigation/admission', () => {
+const { validateLinks } = need('engine/foundation/navigation/topology');
+function admitObjectProduct(product, regionId) {
+    if (product.regionId !== regionId || !Array.isArray(product.objects) || product.objects.length > 32768) throw new Error("Invalid navigation product");
+    const seen = new Set(), seenObstacles = new Set(), seenTerrainCells = new Set();
+    let bytes = product.objects.length * 40;
+    const placements = product.objects;
+    validateLinks(placements);
+    for (const p of placements){
+        if (!p) throw new Error("Invalid collision placement");
+        if (p.terrainCells !== undefined && !seenTerrainCells.has(p.terrainCells)) {
+            if (!Array.isArray(p.terrainCells) || p.terrainCells.length > 65536 || p.terrainCells.some((r)=>!Array.isArray(r) || r.length !== 4 || !r.every(Number.isFinite) || r[0] > r[2] || r[1] > r[3])) throw Error("Invalid terrain object cells");
+            seenTerrainCells.add(p.terrainCells);
+            bytes += p.terrainCells.length * 32;
+        }
+        if (!p || ![
+            p.x,
+            p.y,
+            p.z,
+            p.yaw
+        ].every(Number.isFinite) || !p.mesh || p.floor !== undefined && (!Number.isInteger(p.floor) || p.floor < 0 || p.floor > 0xffffffff)) throw new Error("Invalid collision placement");
+        if (p.obstacles && (!Array.isArray(p.obstacles) || p.obstacles.length > 65536 || p.obstacles.some((o)=>![
+                o.x,
+                o.y,
+                o.z,
+                o.radiusSquared
+            ].every(Number.isFinite) || o.radiusSquared < 0))) throw new Error("Invalid navigation obstacle");
+        bytes += (p.links?.length ?? 0) * 12;
+        if (p.obstacles && !seenObstacles.has(p.obstacles)) {
+            bytes += p.obstacles.length * 32;
+            seenObstacles.add(p.obstacles);
+        }
+        if (bytes > 64 * 1024 * 1024) throw new Error("Navigation residency budget");
+        const m = p.mesh;
+        if (seen.has(m)) continue;
+        seen.add(m);
+        if (!(m.vertices instanceof Float32Array) || !(m.cells instanceof Uint16Array) || !(m.edges instanceof Uint32Array) || m.vertices.length % 3 || m.cells.length % 3 || m.edges.length % 6 || !m.vertices.every(Number.isFinite) || m.bounds.length !== 6 || !m.bounds.every(Number.isFinite) || m.cells.some((i)=>i >= m.vertices.length / 3)) throw new Error("Invalid collision mesh");
+        if (m.vertexDirections && (!(m.vertexDirections instanceof Uint8Array) || m.vertexDirections.length !== m.vertices.length / 3)) throw Error("Invalid navigation vertex directions");
+        if (m.cellWords && (!(m.cellWords instanceof Uint16Array) || m.cellWords.length !== m.cells.length / 3) || m.cellEvents && (!(m.cellEvents instanceof Uint8Array) || m.cellEvents.length !== m.cells.length / 3) || m.edgeEvents && (!(m.edgeEvents instanceof Uint8Array) || m.edgeEvents.length !== m.edges.length / 6) || m.eventNames && (!Array.isArray(m.eventNames) || m.eventNames.length > 65536 || m.eventNames.some((name)=>typeof name !== "string" || name.length > 65536))) throw new Error("Invalid navigation events");
+        if (m.outlineGrid) {
+            const g = m.outlineGrid;
+            if (![
+                g.x,
+                g.z
+            ].every(Number.isFinite) || ![
+                g.nx,
+                g.nz
+            ].every((n)=>Number.isInteger(n) && n >= 0 && n <= 65536) || g.nx * g.nz > 1048576 || !(g.offsets instanceof Uint32Array) || !(g.edgeIds instanceof Uint16Array) || g.offsets.length !== g.nx * g.nz + 1 || g.offsets[0] !== 0 || g.offsets.at(-1) !== g.edgeIds.length || g.edgeIds.length > 8 * 1024 * 1024) throw Error("Invalid navigation outline grid");
+            for(let i = 1; i < g.offsets.length; i++){
+                if (g.offsets[i] < g.offsets[i - 1]) throw Error("Invalid navigation grid offsets");
+            }
+            for (const id of g.edgeIds){
+                if (id >= m.edges.length / 6 || m.edges[id * 6 + 5] !== 0) {
+                    throw Error("Invalid navigation grid edge");
+                }
+            }
+            bytes += g.offsets.byteLength + g.edgeIds.byteLength;
+        }
+        bytes += (m.vertexDirections?.byteLength ?? 0) + (m.cellWords?.byteLength ?? 0) + (m.cellEvents?.byteLength ?? 0) + (m.edgeEvents?.byteLength ?? 0) + (m.eventNames?.reduce((n, name)=>n + name.length * 2, 0) ?? 0);
+        bytes += m.vertices.byteLength + m.cells.byteLength + m.edges.byteLength;
+        if (bytes > 64 * 1024 * 1024) throw new Error("Navigation residency budget");
+        for(let i = 0; i < m.edges.length; i += 6){
+            if (m.edges[i] >= m.vertices.length / 3 || m.edges[i + 1] >= m.vertices.length / 3 || m.edges[i + 2] >= m.cells.length / 3 || m.edges[i + 3] !== 65535 && m.edges[i + 3] >= m.cells.length / 3 || m.edges[i + 4] > 255 || m.edges[i + 5] > 1) throw new Error("Invalid collision edge");
+        }
+    }
+    return bytes;
+}
+return { admitObjectProduct };
+  });
+  factories.set('engine/foundation/navigation/clipper', () => {
+const { pickNavigationGround } = need('engine/foundation/navigation/ground-pick');
+const { navigationEvents, navigationEventStop } = need('engine/foundation/navigation/navigation-events');
+const { dungeonOwnerPath: walkDungeon, terrainOwnerPath: walkTerrain } = need('engine/foundation/navigation/dungeon-ownership');
+const { createNavigationIndex } = need('engine/foundation/navigation/spatial-index');
+const { regionMoveAllowed, regionMoveDestination, regionMoveContinuation } = need('engine/foundation/navigation/region-move');
+const { linkedEntry, linkPassages } = need('engine/foundation/navigation/topology');
+const { admitObjectProduct } = need('engine/foundation/navigation/admission');
+const { navHeight, navLocal, navContactDetail, navObstacleContact } = need('engine/foundation/navigation/object-navigation');
+const { ownedPlacementStart } = need('engine/foundation/navigation/owned-start');
+const { base64Bytes } = need('engine/foundation/assets/base64');
+const { featuresAt } = need('engine/foundation/world/plane');
+const { coordinateFrame, REGION_SIZE, regionOffsetXZ, regionOriginXZ, regionRelativeXZ, sameCoordinateSpace, sectorX, sectorY } = need('engine/foundation/world/world-space');
+function terrainIntervals(spans) {
+    const out = [];
+    let at = 0;
+    for (const span of [
+        ...spans
+    ].sort((a, b)=>a.from - b.from)){
+        if (span.from > at) out.push([
+            at,
+            span.from
+        ]);
+        at = Math.max(at, span.to);
+    }
+    if (at < 1) out.push([
+        at,
+        1
+    ]);
+    return out;
+}
+function createNavigation() {
+    let revision = 0, index;
+    const dungeonOwnerPath = (rows, a, b, owner)=>walkDungeon(rows, a, b, owner, index);
+    const terrainOwnerPath = (rows, a, b, owner, terrainY)=>walkTerrain(rows, a, b, owner, index, terrainY);
+    let objects = [], origin = 0, complete = false;
+    let blockKey = "", blockValue;
+    const floors = new Map();
+    const eventHandlers = new Map();
+    const regions = new Map();
+    function bytes(value, length) {
+        if (typeof value !== "string" || value.length > length * 2 + 8) {
+            throw new Error("Invalid navigation column");
+        }
+        const raw = base64Bytes(value);
+        if (raw.length !== length) {
+            throw new Error("Navigation column length mismatch");
+        }
+        return raw;
+    }
+    function cell(region, x, z) {
+        if (!featuresAt(region).terrainGrid) {
+            return "unknown";
+        }
+        const dx = Math.floor(x / REGION_SIZE), dz = Math.floor(z / REGION_SIZE), rx = sectorX(region) + dx, rz = sectorY(region) + dz;
+        if (rx < 0 || rx > 255 || rz < 0 || rz > 127) {
+            return "unknown";
+        }
+        const grid = regions.get(rx | rz << 8);
+        if (!grid || grid.objects && !complete) {
+            return "unknown";
+        }
+        const index = Math.floor((z - dz * REGION_SIZE) / 20) * 96 + Math.floor((x - dx * REGION_SIZE) / 20);
+        return grid.blocked[index] || grid.cells.getUint32(index * 4, true) >= grid.count ? "blocked" : "open";
+    }
+    function surfaceHeight(pose, preferred, initialize = true) {
+        const { x, y, z } = pose, from = pose, features = featuresAt(pose.regionId), onTerrainPlane = features.terrainGrid;
+        if (features.residentOnly && (!complete || origin !== pose.regionId)) return null;
+        const [ox, oz] = regionOffsetXZ(origin, pose.regionId);
+        if (preferred) {
+            const p = objects[preferred.placement];
+            if (p) {
+                const q = navLocal(p, x + ox, y, z + oz), h = navHeight(p.mesh, q[0], q[2], q[1], preferred.cell);
+                if (h !== null) return h + p.y;
+            }
+        }
+        let h = null, delta = Infinity;
+        if (onTerrainPlane) {
+            const dx = Math.floor(x / REGION_SIZE), dz = Math.floor(z / REGION_SIZE), rx = sectorX(from.regionId) + dx, rz = sectorY(from.regionId) + dz;
+            const grid = rx >= 0 && rx <= 255 && rz >= 0 && rz <= 127 ? regions.get(rx | rz << 8) : undefined;
+            if (grid?.heights) {
+                const fx = (x - dx * REGION_SIZE) / 20, fz = (z - dz * REGION_SIZE) / 20, ix = Math.floor(fx), iz = Math.floor(fz);
+                if (ix >= 0 && iz >= 0 && ix < 96 && iz < 96) {
+                    const read = (dx, dz)=>grid.heights.getFloat32(((iz + dz) * 97 + ix + dx) * 4, true);
+                    h = (read(0, 0) * (1 - fx + ix) + read(1, 0) * (fx - ix)) * (1 - fz + iz) + (read(0, 1) * (1 - fx + ix) + read(1, 1) * (fx - ix)) * (fz - iz);
+                    const block = Math.floor(iz / 16) * 6 + Math.floor(ix / 16);
+                    if (grid.planeTypes && grid.planeHeights && grid.planeTypes[block] & 2) {
+                        h = Math.max(h, grid.planeHeights.getFloat32(block * 4, true));
+                    }
+                    delta = Math.abs(h - y);
+                }
+            }
+        }
+        if (initialize || !onTerrainPlane) {
+            const candidates = index ? index.placements([
+                x + ox,
+                y,
+                z + oz
+            ]).map((i)=>objects[i]) : objects;
+            for (const p of candidates){
+                const q = navLocal(p, x + ox, y, z + oz), local = navHeight(p.mesh, q[0], q[2], q[1]);
+                if (local !== null && Math.abs(local + p.y - y) < delta) {
+                    h = local + p.y;
+                    delta = Math.abs(h - y);
+                }
+            }
+        }
+        return h;
+    }
+    function worldX(p, o) {
+        return p.x + regionOriginXZ(o)[0];
+    }
+    function worldZ(p, o) {
+        return p.z + regionOriginXZ(o)[1];
+    }
+    function sameMesh(a, b) {
+        if (a.passThrough !== b.passThrough) return false;
+        for (const key of [
+            "vertices",
+            "vertexDirections",
+            "cells",
+            "edges",
+            "bounds",
+            "cellWords",
+            "cellEvents",
+            "edgeEvents",
+            "eventNames"
+        ]){
+            const x = a[key], y = b[key];
+            if (!x || !y) {
+                if (x !== y) return false;
+                continue;
+            }
+            if (x.length !== y.length) return false;
+            for(let i = 0; i < x.length; i++)if (x[i] !== y[i]) return false;
+        }
+        return true;
+    }
+    return {
+        anchor (owner) {
+            const p = owner && objects[owner.placement];
+            return owner && p ? {
+                region: coordinateFrame(origin),
+                x: worldX(p, origin),
+                y: p.y,
+                z: worldZ(p, origin),
+                yaw: p.yaw,
+                mesh: p.mesh,
+                cell: owner.cell
+            } : undefined;
+        },
+        relocate (anchor) {
+            if (!anchor || coordinateFrame(origin) !== anchor.region) return undefined;
+            const same = (a, b)=>Math.abs(a - b) < 1e-3;
+            const matches = objects.flatMap((p, i)=>same(worldX(p, origin), anchor.x) && same(worldZ(p, origin), anchor.z) && same(p.y, anchor.y) && Math.abs(p.yaw - anchor.yaw) < 1e-6 && sameMesh(p.mesh, anchor.mesh) ? [
+                    i
+                ] : []);
+            return matches.length !== 1 || anchor.cell < 0 || anchor.cell >= anchor.mesh.cells.length / 3 ? undefined : {
+                placement: matches[0],
+                cell: anchor.cell
+            };
+        },
+        available (pose) {
+            return featuresAt(pose.regionId).residentOnly ? complete && origin === pose.regionId : cell(pose.regionId, pose.x, pose.z) !== "unknown";
+        },
+        stats: ()=>index?.stats() ?? {
+                queries: 0,
+                visited: 0,
+                candidates: 0,
+                bytes: 0
+            },
+        pick (query) {
+            return complete ? pickNavigationGround(objects, origin, query) : null;
+        },
+        surface (pose, reference = pose, owner, cursor) {
+            if (cursor) {
+                const same = cursor.revision === revision, preferred = same ? cursor.owner : undefined;
+                cursor.revision = revision;
+                cursor.owner = undefined;
+                if (complete && sameCoordinateSpace(pose.regionId, origin) && sameCoordinateSpace(reference.regionId, origin)) {
+                    const point = (p)=>{
+                        const [px, pz] = regionRelativeXZ(origin, p);
+                        return [
+                            px,
+                            p.y,
+                            pz
+                        ];
+                    };
+                    const path = (featuresAt(pose.regionId).terrainGrid ? terrainOwnerPath : dungeonOwnerPath)(objects, point(reference), point(pose), preferred);
+                    if (path.stop === 1 && path.owner) owner = cursor.owner = path.owner;
+                }
+            }
+            const h = surfaceHeight({
+                ...pose,
+                y: reference.y
+            }, owner, !cursor);
+            return h === null ? pose : {
+                ...pose,
+                y: h
+            };
+        },
+        block (pose, owner) {
+            if (!pose || !featuresAt(pose.regionId).rooms || pose.regionId !== origin || !complete) {
+                return undefined;
+            }
+            if (owner) return objects[owner.placement]?.block;
+            const key = [
+                origin,
+                pose.x,
+                pose.y,
+                pose.z
+            ].join(":");
+            if (key === blockKey) return blockValue;
+            blockKey = key;
+            const point = [
+                pose.x,
+                pose.y,
+                pose.z
+            ], resolved = dungeonOwnerPath(objects, point, point, owner).owner;
+            return blockValue = resolved ? objects[resolved.placement]?.block : undefined;
+        },
+        floor (pose, owner) {
+            if (!pose || !featuresAt(pose.regionId).rooms || pose.regionId !== origin || !complete) {
+                return undefined;
+            }
+            const key = [
+                revision,
+                pose.regionId,
+                pose.x,
+                pose.y,
+                pose.z,
+                owner?.placement,
+                owner?.cell
+            ].join(":");
+            if (floors.has(key)) return floors.get(key);
+            const point = [
+                pose.x,
+                pose.y,
+                pose.z
+            ], resolved = owner ?? dungeonOwnerPath(objects, point, point).owner;
+            const floor = resolved ? objects[resolved.placement]?.floor : undefined, value = floor === 0xffffffff ? undefined : floor;
+            if (floors.size >= 4096) floors.clear();
+            floors.set(key, value);
+            return value;
+        },
+        registerEvent (name, response) {
+            if (!name || name.length > 65536 || !response || ![
+                response.enter,
+                response.exit
+            ].every((n)=>Number.isInteger(n) && n >= 0 && n <= 0xffffffff)) throw new Error("Invalid navigation event registration");
+            if (!eventHandlers.has(name) && eventHandlers.size >= 65536) {
+                throw new Error("Navigation event registration budget");
+            }
+            eventHandlers.set(name, Object.freeze({
+                ...response
+            }));
+        },
+        unregisterEvent (name) {
+            eventHandlers.delete(name);
+        },
+        install (regionId, value) {
+            floors.clear();
+            blockKey = "";
+            blockValue = undefined;
+            if (!value || typeof value !== "object" || !Number.isInteger(regionId) || regionId <= 0 || regionId > 65535) throw new Error("Invalid navigation admission");
+            const product = value;
+            let residencyBytes = 0;
+            if (product.complete === true) residencyBytes = admitObjectProduct(product, regionId);
+            if (featuresAt(regionId).residentOnly) {
+                if (!product.complete) throw new Error("Dungeon coverage is missing");
+                const copy = product.objects, nextIndex = createNavigationIndex(copy);
+                if (residencyBytes + nextIndex.bytes > 64 * 1024 * 1024) throw Error("Navigation residency budget");
+                index = nextIndex;
+                revision++;
+                regions.clear();
+                objects = copy;
+                origin = regionId;
+                complete = true;
+                return;
+            }
+            if (!Number.isInteger(regionId) || regionId <= 0 || !featuresAt(regionId).terrainGrid) {
+                throw new Error("Outdoor navigation region required");
+            }
+            const b = value;
+            const nav = b?.navmesh;
+            if (!nav || nav.regionSize !== REGION_SIZE || nav.tileSize !== 20 || nav.tilesPerAxis !== 96 || !Array.isArray(nav.regions) || nav.regions.length > 9) {
+                throw new Error("Unsupported published navigation schema");
+            }
+            const admitted = [];
+            for (const row of nav.regions){
+                if (!Number.isInteger(row.dx) || !Number.isInteger(row.dz) || Math.abs(row.dx) > 1 || Math.abs(row.dz) > 1 || !Number.isInteger(row.cells?.count) || row.cells.count < 0 || row.cells.count > 65536) {
+                    throw new Error("Invalid navigation region");
+                }
+                const blocked = bytes(row.blockedTiles, 9216), ids = bytes(row.tileCellIds, 36864);
+                const rx = sectorX(regionId) + row.dx, rz = sectorY(regionId) + row.dz;
+                if (rx < 0 || rx > 255 || rz < 0 || rz > 127) {
+                    throw new Error("Invalid navigation sector");
+                }
+                if (row.planeType === undefined !== (row.planeHeight === undefined)) {
+                    throw Error("Incomplete navigation plane");
+                }
+                const planeTypes = row.planeType === undefined ? undefined : bytes(row.planeType, 36);
+                const planeHeights = row.planeHeight === undefined ? undefined : new DataView(bytes(row.planeHeight, 36 * 4).buffer);
+                if (planeHeights) {
+                    for(let i = 0; i < 36; i++){
+                        if (!Number.isFinite(planeHeights.getFloat32(i * 4, true))) {
+                            throw Error("Invalid navigation plane height");
+                        }
+                    }
+                }
+                admitted.push({
+                    id: rx | rz << 8,
+                    grid: {
+                        blocked,
+                        planeTypes,
+                        planeHeights,
+                        cells: new DataView(ids.buffer),
+                        count: row.cells.count,
+                        objects: !!row.objects?.length,
+                        heights: row.heightMap ? new DataView(bytes(row.heightMap, 97 * 97 * 4).buffer) : undefined
+                    }
+                });
+            }
+            if (new Set(admitted.map((row)=>row.id)).size !== admitted.length) {
+                throw new Error("Duplicate navigation region");
+            }
+            for (const { grid } of admitted){
+                if (grid.heights) {
+                    for(let i = 0; i < 97 * 97; i++){
+                        if (!Number.isFinite(grid.heights.getFloat32(i * 4, true))) {
+                            throw new Error("Invalid terrain height");
+                        }
+                    }
+                }
+            }
+            if (regions.size + admitted.filter((row)=>!regions.has(row.id)).length > 64) {
+                throw new Error("Navigation residency limit exceeded");
+            }
+            const copy = product.complete ? product.objects : [];
+            const nextIndex = createNavigationIndex(copy);
+            if (residencyBytes + nextIndex.bytes > 64 * 1024 * 1024) throw Error("Navigation residency budget");
+            index = nextIndex;
+            revision++;
+            regions.clear();
+            objects = copy;
+            origin = regionId;
+            complete = product.complete === true;
+            for (const row of admitted){
+                regions.set(row.id, row.grid);
+            }
+        },
+        clip (from, to, output) {
+            if (output) {
+                output.owners = [];
+                output.events = [];
+                output.status = 0;
+                output.owner = undefined;
+                output.normal = undefined;
+                output.cell = undefined;
+                output.edge = undefined;
+            }
+            let status = 0, sourceOwner = output?.sourceOwner, firstLeg = true;
+            let reachedOwner;
+            const segment = (from, to)=>{
+                status = 0;
+                reachedOwner = undefined;
+                if (!sameCoordinateSpace(from.regionId, to.regionId)) return null;
+                if (featuresAt(from.regionId).sectorFrames) {
+                    const [tx, tz] = regionRelativeXZ(from.regionId, to);
+                    to = {
+                        ...to,
+                        regionId: from.regionId,
+                        x: tx,
+                        z: tz
+                    };
+                }
+                function canonicalPose(p) {
+                    if (!featuresAt(p.regionId).sectorFrames) return p;
+                    const dx = Math.floor(p.x / REGION_SIZE), dz = Math.floor(p.z / REGION_SIZE), rx = sectorX(p.regionId) + dx, rz = sectorY(p.regionId) + dz;
+                    if (rx < 0 || rx > 255 || rz < 0 || rz > 127) return null;
+                    return {
+                        ...p,
+                        regionId: rx | rz << 8,
+                        x: p.x - dx * REGION_SIZE,
+                        z: p.z - dz * REGION_SIZE
+                    };
+                }
+                const features = featuresAt(from.regionId), onTerrainPlane = features.terrainGrid;
+                if (features.residentOnly && (!complete || origin !== from.regionId)) return null;
+                const [ox, oz] = regionOffsetXZ(origin, from.regionId);
+                if (firstLeg && !sourceOwner) {
+                    const point = [
+                        from.x + ox,
+                        from.y,
+                        from.z + oz
+                    ], resident = dungeonOwnerPath(objects, point, point).owner ?? undefined;
+                    const deckY = resident ? surfaceHeight(from, resident) : null, terrainY = !onTerrainPlane ? null : surfaceHeight(from, undefined, false);
+                    sourceOwner = resident && deckY !== null && terrainY !== null && Math.abs(terrainY - from.y) <= Math.abs(deckY - from.y) ? undefined : resident;
+                }
+                firstLeg = false;
+                const retained = sourceOwner, placement = retained && objects[retained.placement];
+                if (retained && placement) {
+                    const start = ownedPlacementStart(placement, retained.cell, [
+                        from.x + ox,
+                        from.y,
+                        from.z + oz
+                    ]);
+                    from = {
+                        ...from,
+                        x: start[0] - ox,
+                        z: start[2] - oz
+                    };
+                }
+                if (!onTerrainPlane && surfaceHeight(from) === null) return null;
+                const deck = (x, z, y)=>{
+                    const candidates = index ? index.placements([
+                        x + ox,
+                        y,
+                        z + oz
+                    ]).map((i)=>objects[i]) : objects;
+                    return candidates.some((p)=>{
+                        const q = navLocal(p, x + ox, y, z + oz), h = navHeight(p.mesh, q[0], q[2], q[1]);
+                        return h !== null && Math.abs(h - q[1]) <= 2;
+                    });
+                };
+                const fromPoint = [
+                    from.x + ox,
+                    from.y,
+                    from.z + oz
+                ], toPoint = [
+                    to.x + ox,
+                    to.y,
+                    to.z + oz
+                ];
+                const requestedSpan = Math.max(Math.abs(to.x - from.x), Math.abs(to.z - from.z), .01);
+                const startTerrainY = onTerrainPlane && !sourceOwner ? surfaceHeight(from, undefined, false) ?? undefined : undefined;
+                const candidatePath = !onTerrainPlane ? dungeonOwnerPath(objects, fromPoint, toPoint, sourceOwner) : terrainOwnerPath(objects, fromPoint, toPoint, sourceOwner, startTerrainY);
+                const ownerPath = candidatePath.owner ? candidatePath : null;
+                if (onTerrainPlane && cell(from.regionId, from.x, from.z) !== "open" && !ownerPath?.spans.some((span)=>span.from === 0) && !deck(from.x, from.z, from.y)) return null;
+                if (!onTerrainPlane && !ownerPath) return null;
+                const passages = linkPassages(objects, fromPoint, toPoint, !!ownerPath, index?.passageLinks);
+                let transfer = onTerrainPlane && ownerPath ? linkedEntry(objects, fromPoint, toPoint, ownerPath.spans) : null;
+                let contact = Infinity, contactKey = Infinity, retainedFraction = 1;
+                let response = null;
+                if (globalThis.NAVDBG) console.log("CLIPSTART", {
+                    from,
+                    to,
+                    owner: ownerPath?.spans
+                });
+                const terrainParts = !onTerrainPlane ? [] : terrainIntervals(ownerPath?.spans ?? []);
+                for (const p of objects){
+                    const objectSpans = ownerPath?.spans.filter((span)=>objects[span.placement] === p);
+                    if (terrainParts.length) {
+                        const terrain = navContactDetail(p, fromPoint, toPoint, objects, passages, output?.slide === true, true);
+                        if (terrain && terrainParts.some(([lo, hi])=>terrain.visit >= lo - 1e-8 && terrain.visit <= hi + 1e-8) && terrainParts.some(([lo, hi])=>terrain.fraction >= lo - 1e-8 && terrain.fraction <= hi + 1e-8) && (terrain.visit < contactKey || terrain.visit === contactKey && terrain.fraction < contact)) {
+                            contact = terrain.fraction;
+                            contactKey = terrain.visit;
+                            response = terrain;
+                        }
+                    }
+                    const edge = navContactDetail(p, fromPoint, toPoint, objects, passages, output?.slide === true, onTerrainPlane, objectSpans);
+                    const owned = !ownerPath || ownerPath.spans.some((span)=>objects[span.placement] === p && edge && edge.fraction >= span.from - 1e-8 && edge.fraction <= span.to + 1e-8);
+                    if (edge && owned && edge.fraction < contactKey) {
+                        contact = edge.fraction;
+                        contactKey = edge.fraction;
+                        response = edge;
+                    }
+                    const obstacle = navObstacleContact(p, fromPoint, toPoint, objectSpans);
+                    if (obstacle < contactKey) {
+                        contact = obstacle;
+                        contactKey = obstacle;
+                        response = null;
+                    }
+                }
+                if (globalThis.NAVDBG) console.log("CONTACT", contact, JSON.stringify(response));
+                if (!onTerrainPlane && output?.context && ownerPath) {
+                    const events = navigationEvents(objects, ownerPath.spans, output.context).filter((e)=>e.fraction <= contact + 1e-8);
+                    for(let i = 0; i < events.length; i++){
+                        const event = events[i], handler = eventHandlers.get(event.name);
+                        if (!handler) continue;
+                        const result = event.entering ? handler.enter : handler.exit;
+                        if (!(result & 0x10000001)) continue;
+                        output.events = events.slice(0, i + 1);
+                        status = result;
+                        if (result & 0x10000000) return null;
+                        const stopped = navigationEventStop(objects, ownerPath.spans, event, [
+                            from.x,
+                            from.y,
+                            from.z
+                        ], [
+                            to.x,
+                            to.y,
+                            to.z
+                        ]);
+                        reachedOwner = stopped.owner;
+                        output.owner = stopped.owner;
+                        output.owners = event.edge === null && !event.entering ? ownerPath.spans.filter((s)=>s.from < event.fraction).map((s, i, all)=>i === all.length - 1 ? {
+                                ...s,
+                                to: 1
+                            } : s) : dungeonOwnerPath(objects, [
+                            from.x,
+                            from.y,
+                            from.z
+                        ], stopped.point, sourceOwner).spans;
+                        return canonicalPose({
+                            ...to,
+                            x: stopped.point[0],
+                            y: stopped.point[1],
+                            z: stopped.point[2]
+                        });
+                    }
+                }
+                if (transfer && contact < transfer.fraction - 1e-9) transfer = null;
+                if (transfer) {
+                    status = transfer.status;
+                    retainedFraction = contactKey = transfer.fraction;
+                    to = {
+                        ...to,
+                        x: transfer.point[0] - ox,
+                        y: transfer.point[1],
+                        z: transfer.point[2] - oz
+                    };
+                    reachedOwner = transfer.owner;
+                    if (output) {
+                        output.owner = transfer.owner;
+                        output.owners = ownerPath.spans.filter((s)=>s.from < transfer.fraction);
+                    }
+                } else if (response?.point) {
+                    status = response.status;
+                    if (output && status === 1) {
+                        output.cell = response.cell;
+                        output.edge = response.edge;
+                        if (output.slide) output.normal = response.normal ?? undefined;
+                    }
+                    retainedFraction = contact;
+                    to = {
+                        ...to,
+                        x: response.point[0] - ox,
+                        y: response.point[1],
+                        z: response.point[2] - oz
+                    };
+                } else if (contact <= 1) {
+                    status |= 1;
+                    const t = Math.max(0, contact - .01 / Math.max(Math.abs(to.x - from.x), Math.abs(to.z - from.z), .01));
+                    retainedFraction = t;
+                    to = {
+                        ...to,
+                        x: from.x + (to.x - from.x) * t,
+                        y: from.y + (to.y - from.y) * t,
+                        z: from.z + (to.z - from.z) * t
+                    };
+                }
+                if (onTerrainPlane && !transfer) {
+                    const resolved = ownerPath ? terrainOwnerPath(objects, [
+                        from.x + ox,
+                        from.y,
+                        from.z + oz
+                    ], [
+                        to.x + ox,
+                        to.y,
+                        to.z + oz
+                    ], sourceOwner) : null;
+                    reachedOwner = status & 0x10 ? undefined : resolved?.stop === 1 ? resolved.owner ?? undefined : undefined;
+                    if (output && resolved) {
+                        output.owners = resolved.spans;
+                        output.owner = reachedOwner;
+                    }
+                    to = {
+                        ...to,
+                        y: surfaceHeight(to, status & 0x10 ? undefined : resolved?.stop === 1 ? resolved.owner ?? undefined : undefined, false) ?? to.y
+                    };
+                }
+                if (!onTerrainPlane) {
+                    if (ownerPath.stop < retainedFraction) {
+                        status |= 1;
+                        const fraction = Math.max(0, ownerPath.stop - .01 / requestedSpan);
+                        const ratio = fraction / Math.max(retainedFraction, 1e-12);
+                        to = {
+                            ...from,
+                            x: from.x + (to.x - from.x) * ratio,
+                            y: from.y + (to.y - from.y) * ratio,
+                            z: from.z + (to.z - from.z) * ratio
+                        };
+                    }
+                    const resolved = dungeonOwnerPath(objects, [
+                        from.x,
+                        from.y,
+                        from.z
+                    ], [
+                        to.x,
+                        to.y,
+                        to.z
+                    ], sourceOwner);
+                    reachedOwner = resolved.owner ?? undefined;
+                    if (output) {
+                        output.owners = resolved.spans;
+                        output.owner = reachedOwner;
+                        output.events = navigationEvents(objects, resolved.spans, output.context ?? 0);
+                    }
+                    const endpoint = resolved.owner;
+                    if (endpoint) {
+                        const p = objects[endpoint.placement], q = navLocal(p, to.x, to.y, to.z), h = navHeight(p.mesh, q[0], q[2], q[1], endpoint.cell);
+                        if (h !== null) to = {
+                            ...to,
+                            y: h + p.y
+                        };
+                    }
+                    return canonicalPose(to);
+                }
+                const dx = to.x - from.x, dz = to.z - from.z;
+                let x = Math.floor(from.x / 20), z = Math.floor(from.z / 20);
+                const sx = Math.sign(dx), sz = Math.sign(dz), tx = dx ? 20 / Math.abs(dx) : Infinity, tz = dz ? 20 / Math.abs(dz) : Infinity;
+                let mx = dx ? ((sx > 0 ? (x + 1) * 20 : x * 20) - from.x) / dx : Infinity, mz = dz ? ((sz > 0 ? (z + 1) * 20 : z * 20) - from.z) / dz : Infinity;
+                for(let n = 0; n < 256; n++){
+                    const t = Math.min(mx, mz);
+                    if (t > 1) {
+                        return canonicalPose(to);
+                    }
+                    const crossX = mx <= mz, crossZ = mz <= mx;
+                    const a = crossX ? cell(from.regionId, (x + sx + .5) * 20, (z + .5) * 20) : "open";
+                    const b = crossZ && !crossX ? cell(from.regionId, (x + .5) * 20, (z + sz + .5) * 20) : "open";
+                    const c = crossX && crossZ ? cell(from.regionId, (x + sx + .5) * 20, (z + sz + .5) * 20) : "open";
+                    if (a === "unknown" || b === "unknown" || c === "unknown") {
+                        return null;
+                    }
+                    const original = t * retainedFraction;
+                    if ((a === "blocked" || b === "blocked" || c === "blocked") && !ownerPath?.spans.some((span)=>original >= span.from - 1e-9 && original <= span.to + 1e-9) && !(ownerPath?.bridges ?? []).some(([lo, hi])=>original >= lo - 1e-9 && original <= hi + 1e-9) && !(contactKey <= original)) {
+                        if (globalThis.NAVDBG) {
+                            console.log("TILEBLOCK", {
+                                t,
+                                x,
+                                z,
+                                sx,
+                                sz,
+                                a,
+                                b,
+                                c,
+                                fx: from.x,
+                                fz: from.z
+                            });
+                        }
+                        status |= 1;
+                        const rest = Math.max(0, t - .01 / Math.max(Math.abs(dx), Math.abs(dz)));
+                        const point = {
+                            ...from,
+                            x: from.x + dx * rest,
+                            y: from.y + (to.y - from.y) * rest,
+                            z: from.z + dz * rest
+                        };
+                        if (output) {
+                            output.owner = undefined;
+                            output.owners = ownerPath ? terrainOwnerPath(objects, [
+                                from.x + ox,
+                                from.y,
+                                from.z + oz
+                            ], [
+                                point.x + ox,
+                                point.y,
+                                point.z + oz
+                            ], sourceOwner).spans : [];
+                        }
+                        return canonicalPose({
+                            ...point,
+                            y: surfaceHeight(point, undefined, false) ?? point.y
+                        });
+                    }
+                    if (crossX) {
+                        x += sx;
+                        mx += tx;
+                    }
+                    if (crossZ) {
+                        z += sz;
+                        mz += tz;
+                    }
+                }
+                return null;
+            };
+            if (from.regionId === to.regionId && from.x === to.x && from.y === to.y && from.z === to.z) {
+                if (output) output.owner = output.sourceOwner;
+                return {
+                    ...from
+                };
+            }
+            if (!regionMoveAllowed(from, to)) {
+                if (output) output.status = 0x10000000;
+                return null;
+            }
+            let start = from;
+            for(let calls = 1; calls <= 6; calls++){
+                const target = regionMoveDestination(to, start.regionId), point = segment(start, target);
+                if (output) output.status = status;
+                const decision = regionMoveContinuation(start, target, {
+                    point,
+                    status: point ? status : 0x10000000
+                }, calls);
+                if (decision === "stop") {
+                    return point;
+                }
+                if (decision === "reject") {
+                    if (output) output.status = 0x10000000;
+                    return null;
+                }
+                sourceOwner = reachedOwner;
+                start = point;
+            }
+            if (output) output.status = 0x10000000;
+            return null;
+        },
+        clear () {
+            floors.clear();
+            index = undefined;
+            revision++;
+            blockKey = "";
+            blockValue = undefined;
+            eventHandlers.clear();
+            regions.clear();
+            objects = [];
+            origin = 0;
+            complete = false;
+        }
+    };
+}
+return { createNavigation };
+  });
+  return need('engine/foundation/navigation/clipper');
+})();
+
+
+// Routes checked and planned with the game's own movement clipper (lean-clipper.js).
+// The flat grid in lean-navigation.js reads terrain tiles and object walls in 2D, so
+// it closes towns whose ways out are object floors over blocked terrain, ramps and
+// bridges (issue #36, Hotan). The clipper clips every move the way the server does:
+// it checks each flat route, and plans where the check fails. A* over a fixed lattice
+// of 40-unit cells, every move clipped, one node per cell and height level (a bridge
+// and the ground under it are two places); the clipper's answer for a lattice move is
+// kept until the next product, so legs, detours and replans in one town reuse it.
+// A search runs in slices of a few milliseconds between the game's frames, so the page
+// never freezes; meanwhile the walker is told to wait. A destination it could not reach
+// is not searched again for a while.
+const CLIP_CELL = 40;           // lattice cell, and the longest step checked in one clip
+const CLIP_LEVEL = 12;          // height band of one node
+const CLIP_REACHED = 2;         // a clipped step ending this close to its target went through
+const CLIP_MAX_NODES = 8000;
+const CLIP_SLICE_MS = 5;        // search time per slice; the game draws between slices
+const CLIP_CPU_MS = 2500;       // total search time before a destination counts as unreachable
+const CLIP_FAILED_MS = 30000;   // an unreachable destination is not searched again this long
+const CLIP_PENDING = Object.freeze({ pending: true });
+const CLIP_GREED = 1.5;         // weighted A*: a route at most this much longer, far fewer nodes
+const CLIP_MAX_CHORD = 600;
+const ClipRoute = {
+  clipper: null, ready: false, moves: new Map(), failed: new Map(), job: null, token: null, message: '',
+  // In its own task right after the flat grid, so the two costs do not add up to one
+  // freeze. The clipper never writes into a product (clipper.ts), so it reads the one the
+  // page sent the game. Once ready, walkers plan again (Navigation.revision).
+  install(product) {
+    this.reset();
+    if (typeof NativeClipper === 'undefined') return;
+    const token = this.token = {};
+    setTimeout(() => {
+      if (this.token !== token || Navigation.scene?.regionId !== product.regionId) return;
+      try {
+        this.clipper ||= NativeClipper.createNavigation();
+        this.clipper.install(product.regionId, product);
+        this.ready = true; this.message = ''; Navigation.revision++;
+      } catch (e) { this.message = e.message; } // the flat grid alone plans in this region
+    }, 0);
+  },
+  reset() { this.ready = false; this.moves = new Map(); this.failed = new Map(); this.job = null; this.token = null; },
+  // One clipped move from a pose (with its height) to a local point: the pose reached, or null.
+  step(from, x, z) {
+    const to = { ...Navigation.pose({ x, z }, from.y), angle: 0 };
+    const got = this.clipper.clip({ ...from, angle: 0 }, to, { slide: false });
+    if (!got) return null;
+    const g = Navigation.local(got);
+    return g && Math.hypot(g.x - x, g.z - z) <= CLIP_REACHED ? got : null;
+  },
+  // A straight line in steps of at most one cell: the pose at its end, or null.
+  chord(from, to) {
+    const a = Navigation.local(from), b = Navigation.local(to);
+    const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / CLIP_CELL));
+    let at = from;
+    for (let i = 1; i <= n && at; i++) at = this.step(at, a.x + (b.x - a.x) * i / n, a.z + (b.z - a.z) * i / n);
+    return at;
+  },
+  walks(from, route) {
+    if (!this.ready) return true;
+    let at = from;
+    for (const point of route) { at = this.chord(at, point); if (!at) return false; }
+    return true;
+  },
+  // The points from a pose to another, each with its height; [] when the clipper finds no
+  // way within its budget; CLIP_PENDING while the search runs (ask again, it carries on
+  // between frames). avoid: local circles { x, z, r } kept out of the route.
+  // The search a request belongs to: its start cell, destination cell, radius and the
+  // spots it avoids. A failure is remembered for the destination with those same spots,
+  // so a search that failed only because of them does not hold back the plain one.
+  keys(from, to, arrivalRadius, avoid) {
+    const s = Navigation.local(from), g = Navigation.local(to);
+    if (!s || !g) return null;
+    const spots = avoid.map(a => Math.round(a.x / CLIP_CELL) + ',' + Math.round(a.z / CLIP_CELL) + ',' + a.r).join(';');
+    const goal = Math.round(g.x / CLIP_CELL) + ',' + Math.round(g.z / CLIP_CELL) + ',' + arrivalRadius + '|' + spots;
+    return { goal, key: Math.round(s.x / CLIP_CELL) + ',' + Math.round(s.z / CLIP_CELL) + '>' + goal };
+  },
+  // Is this request's search already running? Then the flat planner need not try again.
+  busy(from, to, arrivalRadius = 0, avoid = []) {
+    return !!this.job && !this.job.result && this.job.key === this.keys(from, to, arrivalRadius, avoid)?.key;
+  },
+  plan(from, to, arrivalRadius = 0, avoid = []) {
+    const k = this.keys(from, to, arrivalRadius, avoid);
+    if (!k) return [];
+    const { goal, key } = k;
+    if ((this.failed.get(goal) ?? 0) > now()) return [];
+    let job = this.job;
+    if (job?.key !== key) job = this.job = { key, goal, steps: this.search(from, to, arrivalRadius, avoid), cpu: 0, result: null, driven: false };
+    // A short search ends within its first slice, and is answered at once.
+    if (!job.result) this.slice(job);
+    if (job.result) { this.job = null; return job.result; }
+    if (!job.driven) { job.driven = true; setTimeout(() => this.drive(job), 0); }
+    return CLIP_PENDING;
+  },
+  slice(job) {
+    const started = performance.now();
+    for (;;) {
+      const step = job.steps.next();
+      if (step.done) { job.result = step.value; break; }
+      if (performance.now() - started >= CLIP_SLICE_MS) break;
+    }
+    job.cpu += performance.now() - started;
+    if (!job.result && job.cpu > CLIP_CPU_MS) job.result = [];
+    if (job.result && !job.result.length) this.failed.set(job.goal, now() + CLIP_FAILED_MS);
+  },
+  drive(job) {
+    if (this.job !== job || job.result) return;
+    this.slice(job);
+    if (!job.result) setTimeout(() => this.drive(job), 0);
+  },
+  // The A* itself, yielding after every node so slice() can stop between them.
+  *search(from, to, arrivalRadius, avoid) {
+    const s = Navigation.local(from), g = Navigation.local(to);
+    const goalReach = Math.max(arrivalRadius, CLIP_CELL * 1.5);
+    const h = (i, j) => Math.hypot(i * CLIP_CELL - g.x, j * CLIP_CELL - g.z);
+    const key = (i, j, y) => i + ',' + j + ',' + Math.round(y / CLIP_LEVEL);
+    const move = (n, a, b) => {
+      const k = key(n.i, n.j, n.pose.y) + '>' + a + ',' + b;
+      if (!this.moves.has(k)) this.moves.set(k, this.step(n.pose, a * CLIP_CELL, b * CLIP_CELL));
+      return this.moves.get(k);
+    };
+    const heap = [], scores = new Map(), closed = new Set();
+    const push = n => { heap.push(n); for (let c = heap.length - 1; c;) { const p = (c - 1) >> 1; if (heap[p].f <= heap[c].f) break; [heap[p], heap[c]] = [heap[c], heap[p]]; c = p; } };
+    const pop = () => {
+      const top = heap[0], last = heap.pop();
+      if (heap.length) {
+        heap[0] = last;
+        for (let c = 0; ;) {
+          const a = 2 * c + 1, b = a + 1; let m = c;
+          if (a < heap.length && heap[a].f < heap[m].f) m = a;
+          if (b < heap.length && heap[b].f < heap[m].f) m = b;
+          if (m === c) break;
+          [heap[m], heap[c]] = [heap[c], heap[m]]; c = m;
+        }
+      }
+      return top;
+    };
+    const avoided = (x, z) => avoid.some(a => Math.hypot(x - a.x, z - a.z) < a.r);
+    // The start joins the lattice at its own cell's corner when the clipper walks there.
+    const i0 = Math.round(s.x / CLIP_CELL), j0 = Math.round(s.z / CLIP_CELL), first = this.step(from, i0 * CLIP_CELL, j0 * CLIP_CELL);
+    if (!first) return [];
+    push({ i: i0, j: j0, g: 0, f: CLIP_GREED * h(i0, j0), pose: first, parent: null });
+    let end = null, expanded = 0;
+    while (heap.length && expanded < CLIP_MAX_NODES) {
+      yield;
+      const n = pop(), k = key(n.i, n.j, n.pose.y);
+      if (closed.has(k)) continue;
+      closed.add(k); expanded++;
+      const d = h(n.i, n.j);
+      if (d <= goalReach) {
+        const last = this.step(n.pose, g.x, g.z);
+        if (last || d <= arrivalRadius) { end = { node: n, last }; break; }
+      }
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+        const a = n.i + di, b = n.j + dj, x = a * CLIP_CELL, z = b * CLIP_CELL;
+        if (!Navigation.covered(x, z) || avoided(x, z)) continue;
+        // A fresh clip can take a few milliseconds in a dense town: room for a pause.
+        if (!this.moves.has(key(n.i, n.j, n.pose.y) + '>' + a + ',' + b)) yield;
+        const cost = n.g + CLIP_CELL * Math.hypot(di, dj), pose = move(n, a, b);
+        if (!pose) continue;
+        const kk = key(a, b, pose.y);
+        if (closed.has(kk) || (scores.get(kk) ?? Infinity) <= cost) continue;
+        scores.set(kk, cost);
+        push({ i: a, j: b, g: cost, f: cost + CLIP_GREED * h(a, b), pose, parent: n });
+      }
+    }
+    if (!end) return [];
+    const path = [];
+    for (let n = end.node; n; n = n.parent) path.unshift(n.pose);
+    if (end.last) path.push(end.last);
+    // Straight chords where the clipper walks them, as the flat planner smooths.
+    const result = [];
+    let anchor = from;
+    for (let i = 0; i < path.length;) {
+      let j = i;
+      while (j + 1 < path.length) {
+        yield;
+        const a = Navigation.local(anchor), b = Navigation.local(path[j + 1]);
+        if (Math.hypot(b.x - a.x, b.z - a.z) >= CLIP_MAX_CHORD || !this.chord(anchor, path[j + 1])) break;
+        j++;
+      }
+      const p = path[j];
+      result.push({ regionId: p.regionId, x: p.x, y: p.y, z: p.z });
+      anchor = p; i = j + 1;
+    }
+    return result;
+  },
+};
+
+
 // Outdoor routing over the collision product already admitted by the game.
 // A 20-unit A* grid respects blocked terrain, object walls and linked portals.
+// Every route is then checked with the game's own clipper, and planned with it
+// where the flat grid is wrong (lean-clip-route.js).
 // Native movement remains the final authority for height and collision response.
+const STALL_MS = 2500;      // standing still this long while moves are sent counts as a stall
+const STALL_TRIES = 4;      // sidesteps tried at one spot before the walk gives up
+const AVOID_AHEAD = 36;     // the suspected obstacle sits this far ahead of the stalled character
+const AVOID_RADIUS = 28;    // and is kept out of the next route by this much
+const AVOID_MS = 45000;
+const FLAT_NODES_WITH_CLIPPER = 2500;  // flat A* budget when the clipper can take over
 const Navigation = {
-  scene: null, revision: 0, error: '',
+  scene: null, revision: 0, error: '', avoidNow: null,
   bytes(value, size) {
     const raw = atob(value), out = Uint8Array.from(raw, c => c.charCodeAt(0));
     if (out.length !== size) throw Error('Invalid navigation grid');
@@ -1840,7 +4773,7 @@ const Navigation = {
   capture(command) {
     const c = command?.command || command;
     if (c?.kind !== 'navigation') return;
-    try { this.install(c.bundle); } catch (e) { this.scene = null; this.error = e.message; Log.warn('Walk-back navigation: ' + e.message); }
+    try { this.install(c.bundle); } catch (e) { this.scene = null; this.error = e.message; ClipRoute.reset(); Log.warn('Walk-back navigation: ' + e.message); }
   },
   install(product) {
     if (!product?.complete || (product.regionId & DUNGEON)) throw Error('Outdoor collision data required');
@@ -1893,6 +4826,7 @@ const Navigation = {
       }
     }
     this.scene = scene; this.error = ''; this.revision++;
+    ClipRoute.install(product);
   },
   local(p) {
     const d = regionDelta({ regionId: this.scene.regionId, x: 0, z: 0 }, p);
@@ -1906,6 +4840,7 @@ const Navigation = {
   open(x, z) {
     const sx = Math.floor(x / SECTOR), sz = Math.floor(z / SECTOR), grid = this.scene.grids.get(sx + ',' + sz);
     if (!grid) return false;
+    if (this.avoidNow) for (const a of this.avoidNow) if (Math.hypot(x - a.x, z - a.z) < a.r) return false;
     const tx = Math.floor((x - sx * SECTOR) / 20), tz = Math.floor((z - sz * SECTOR) / 20), i = tz * 96 + tx;
     return !grid.blocked[i] && grid.cells.getUint32(i * 4, true) < grid.count;
   },
@@ -1943,6 +4878,27 @@ const Navigation = {
   plan(from, to, arrivalRadius = 0, options = {}) {
     if (!this.scene || (from.regionId | to.regionId) & DUNGEON) return null;
     const start = this.local(from), goal = this.local(to);
+    // Spots a stalled walk bumped into are kept out of the route, but never the start itself.
+    const avoid = (options.avoid || []).map(a => ({ ...this.local(a), r: a.r })).filter(a => Number.isFinite(a.x) && start && Math.hypot(a.x - start.x, a.z - start.z) >= a.r);
+    // The clipper is already searching this way between frames: no flat search again.
+    if (options.clip !== false && ClipRoute.ready && Number.isFinite(from.y) && ClipRoute.busy(from, to, arrivalRadius, avoid)) {
+      return ClipRoute.plan(from, to, arrivalRadius, avoid);
+    }
+    this.avoidNow = avoid.length ? avoid : null;
+    // With the clipper behind it, the flat search stays short: a way it does not find
+    // quickly is searched by the clipper, in slices, instead of in one long freeze.
+    const clipping = options.clip !== false && ClipRoute.ready && Number.isFinite(from.y);
+    const flat = clipping ? { ...options, maxNodes: Math.min(options.maxNodes ?? Infinity, FLAT_NODES_WITH_CLIPPER) } : options;
+    let route;
+    try { route = this.planLocal(from, to, start, goal, arrivalRadius, flat); } finally { this.avoidNow = null; }
+    // The clipper checks the flat route and plans where the flat grid is wrong. A flat
+    // route it stops is never walked: it would run into a wall. Callers that plan often
+    // (pursuit, detour candidates) keep the flat grid alone: options.clip false.
+    if (options.clip === false || !ClipRoute.ready || !Number.isFinite(from.y) || !goal || !this.covered(goal.x, goal.z)) return route;
+    if (route?.length && ClipRoute.walks(from, route)) return route;
+    return ClipRoute.plan(from, to, arrivalRadius, avoid);
+  },
+  planLocal(from, to, start, goal, arrivalRadius, options) {
     if (!start || !goal || !this.open(start.x, start.z)) return null;
     if (Math.hypot(goal.x - start.x, goal.z - start.z) < 1800 && this.clear(start, goal)) return [to];
     const key = p => p.x + ',' + p.z, center = p => ({ x: p.x * 20 + 10, z: p.z * 20 + 10 });
@@ -2039,19 +4995,87 @@ const Navigation = {
       if (turned) candidates.push(turned);
     }
     for (const candidate of candidates) {
-      const route = this.plan(from, candidate, 0, { maxNodes: options.maxNodes ?? 20000 });
+      const route = this.plan(from, candidate, 0, { maxNodes: options.maxNodes ?? 20000, clip: false });
       if (route?.length && dist2D(route[route.length - 1], candidate) <= 15) return candidate;
     }
     return null;
   },
-  next(owner, destination, recorded = false, arrivalRadius = 0) {
+  // Stall watchdog shared by every walker that sends plain moves (WalkBack, Town, Restock). When the character has
+  // not moved for a few seconds although moves were sent, the spot just ahead is remembered on the owner as
+  // blocked, so next() routes around it; after a few tries at one place it reports 'giveup'. Returns '', 'recover'
+  // or 'giveup'. Only normal moves are ever sent; nothing here moves the character.
+  watch(owner, pose, sentAt, toward) {
+    const t = now();
+    let w = owner.stall;
+    if (!w || t - w.seen > 1500) w = owner.stall = { pose: { ...pose }, at: t, seen: t, tries: 0, origin: null };
+    w.seen = t;
+    const moved = dist2D(w.pose, pose);
+    if (!Number.isFinite(moved) || moved > 3) {
+      if (w.origin && !(dist2D(w.origin, pose) < 100)) { w.tries = 0; w.origin = null; owner.avoid = []; }
+      w.pose = { ...pose }; w.at = t;
+      return '';
+    }
+    if (t - w.at < STALL_MS || sentAt < w.at) return '';
+    w.at = t;
+    if (w.tries >= STALL_TRIES) { w.tries = 0; w.origin = null; owner.avoid = []; return 'giveup'; }
+    w.tries++; w.origin = w.origin || { ...pose };
+    const delta = toward && regionDelta(pose, toward), length = delta ? Math.hypot(delta[0], delta[1]) : 0;
+    if (length > 0) {
+      const spot = { regionId: pose.regionId, x: pose.x + delta[0] / length * AVOID_AHEAD, z: pose.z + delta[1] / length * AVOID_AHEAD, r: AVOID_RADIUS, until: t + AVOID_MS };
+      owner.avoid = [...(owner.avoid || []).filter(a => a.until > t), spot];
+    }
+    owner.travel = null;
+    return 'recover';
+  },
+  stepOut(pose) {
+    if (this.pointStatus(pose) !== 'blocked') return null;
+    const strict = this.escapeCandidates(pose)[0];
+    if (strict) return strict;
+    const p = this.local(pose);
+    for (let r = 20; r <= 160; r += 20) for (let i = 0; i < 16; i++) {
+      const ux = Math.cos(i * Math.PI / 8), uz = Math.sin(i * Math.PI / 8);
+      const to = this.pose({ x: p.x + ux * r, z: p.z + uz * r }, pose.y), ahead = { x: p.x + ux * 5, z: p.z + uz * 5 };
+      if (this.pointStatus(to) === 'open' && !this.crosses(p, ahead) && this.clear(ahead, this.local(to), true)) return to;
+    }
+    return null;
+  },
+  crosses(a, b) {
+    const cross = (p, q, r) => (q.x - p.x) * (r.z - p.z) - (q.z - p.z) * (r.x - p.x);
+    for (let x = Math.floor((Math.min(a.x, b.x) - 2) / 80); x <= Math.floor((Math.max(a.x, b.x) + 2) / 80); x++)
+      for (let z = Math.floor((Math.min(a.z, b.z) - 2) / 80); z <= Math.floor((Math.max(a.z, b.z) + 2) / 80); z++)
+        for (const w of this.scene.walls.get(x + ',' + z) || []) {
+          const c = { x: w[0], z: w[1] }, d = { x: w[2], z: w[3] };
+          if (cross(a, b, c) * cross(a, b, d) < 0 && cross(c, d, a) * cross(c, d, b) < 0) return true;
+        }
+    return false;
+  },
+  // near: the destination only gives a direction (a walk-back leg end); reaching within
+  // arrivalRadius of it is the plan, not a fallback.
+  next(owner, destination, recorded = false, arrivalRadius = 0, near = false) {
     const pose = World.pose(), previous = owner.travel;
     if (!this.scene || (pose.regionId & DUNGEON)) {
       return recorded ? { point: destination } : { waiting: true, error: this.error || 'Waiting for game collision data. Reload the game if attached late, or record a walking route.' };
     }
     if (!previous || previous.revision !== this.revision || dist2D(previous.destination, destination) > 1 || previous.index >= previous.route.length) {
-      let route = this.plan(pose, destination);
-      if (route && !route.length && arrivalRadius > 0) route = this.plan(pose, destination, arrivalRadius);
+      const avoid = (owner.avoid || []).filter(a => a.until > now());
+      const attempt = options => {
+        if (near) return this.plan(pose, destination, arrivalRadius, options);
+        let route = this.plan(pose, destination, 0, options);
+        if (route && route !== CLIP_PENDING && !route.length && arrivalRadius > 0) route = this.plan(pose, destination, arrivalRadius, options);
+        return route;
+      };
+      let route = attempt({ avoid });
+      // The clipper is still searching, between frames: wait for it.
+      if (route === CLIP_PENDING) return { waiting: true, planning: true, error: 'Finding a way through the game collision.' };
+      // Avoided spots are only a hint: if they leave no route, walk the plain one rather than nothing.
+      if (avoid.length && !route?.length) {
+        route = attempt({});
+        if (route === CLIP_PENDING) return { waiting: true, planning: true, error: 'Finding a way through the game collision.' };
+      }
+      if (!route?.length) {
+        const out = this.stepOut(pose);
+        if (out) { owner.travel = null; return { point: out, stepOut: true }; }
+      }
       if (!route) return { waiting: true, error: 'Waiting for collision coverage at the current position.' };
       if (!route.length) return { error: 'No walkable route found through the loaded collision map.' };
       owner.travel = { destination: { ...destination }, route, index: 0, revision: this.revision };
@@ -2153,7 +5177,8 @@ Navigation.query = function( from, to, maxNodes = PURSUIT_NAV.nodes ) {
 	if ( start === "blocked" ) return { status: "invalid-start", route: [] };
 	if ( this.segment( from, to ) ) return { status: "direct", route: [ to ] };
 	const result = {};
-	const route = this.plan( from, to, 0, { maxNodes, maxChord: PURSUIT_NAV.chord, result } );
+	// Pursuit plans many times a fight: the flat grid alone, never a clipper search.
+	const route = this.plan( from, to, 0, { maxNodes, maxChord: PURSUIT_NAV.chord, result, clip: false } );
 	if ( !route?.length ) {
 		return { status: result.limited ? "search-limit" : "unreachable", route: [], visited: result.visited };
 	}
@@ -2296,7 +5321,11 @@ const Route = {
   areas: typeof NAVDATA_AREAS !== 'undefined' ? NAVDATA_AREAS : [],
   base: typeof NAVDATA_BASE !== 'undefined' ? NAVDATA_BASE : '',
   cache: new Map(), loading: new Map(), dbp: null, loader: null, message: '',
-  setAreas(list) { this.areas = Array.isArray(list) ? list : []; this.cache.clear(); this.loading.clear(); this.message = ''; },
+  // Edges the game's collision does not walk (lean-route-check.js), per area, for this session: 'from>to' both ways.
+  banned: new Map(),
+  setAreas(list) { this.areas = Array.isArray(list) ? list : []; this.cache.clear(); this.loading.clear(); this.banned.clear(); this.message = ''; },
+  bans(name) { if (!this.banned.has(name)) this.banned.set(name, new Set()); return this.banned.get(name); },
+  ban(name, a, b) { this.bans(name).add(a + '>' + b).add(b + '>' + a); },
   setLoader(fn) { this.loader = typeof fn === 'function' ? fn : null; },
   absolute(p) {
     return p ? { x: (p.regionId & 255) * SECTOR + p.x, z: (p.regionId >>> 8) * SECTOR + p.z } : null;
@@ -2462,7 +5491,7 @@ const Route = {
     }
     return best < 0 ? null : { node: best, distance: Math.sqrt(score) };
   },
-  astar(graph, start, goal) {
+  astar(graph, start, goal, banned = null) {
     const count = graph.count, score = new Float64Array(count).fill(Infinity), came = new Int32Array(count).fill(-1);
     const closed = new Uint8Array(count), heap = [];
     const h = i => Math.hypot(graph.x[i] - graph.x[goal], graph.z[i] - graph.z[goal]);
@@ -2509,7 +5538,7 @@ const Route = {
       }
       for (let k = graph.offsets[node]; k < graph.offsets[node + 1]; k++) {
         const next = graph.neighbours[k];
-        if (closed[next]) continue;
+        if (closed[next] || banned?.has(node + '>' + next)) continue;
         const step = Math.hypot(graph.x[next] - graph.x[node], graph.z[next] - graph.z[node]) +
           Math.min(Math.abs(graph.y[next] - graph.y[node]), 200) * .25;
         const value = score[node] + step;
@@ -2544,6 +5573,21 @@ const Route = {
     for (let i = 1; i < points.length; i++) length.value += dist2D(points[i - 1], points[i]);
     return { points, length: length.value };
   },
+  // The corridor, checked against the game's collision first where the asset worker is known (lean-route-check.js).
+  // An edge it cannot walk is banned, so the plan below already goes around it.
+  async checked(from, to) {
+    if (!await this.ensure(from, to)) return null;
+    const meta = this.commonArea(from, to), area = meta && this.cache.get(meta.name);
+    let checked = false;
+    if (area && RouteCheck.available()) {
+      const graph = this.graph(area), here = this.absolute(from), there = this.absolute(to);
+      const start = this.nearest(graph, here.x, here.z), end = this.nearest(graph, there.x, there.z);
+      if (start && end && start.node !== end.node) checked = await RouteCheck.verify(meta.name, graph, start.node, end.node) !== null;
+    }
+    const plan = this.plan(from, to);
+    if (!plan && checked) this.message = 'No corridor in the route data walks on the game map.';
+    return plan;
+  },
   // null means "use the leg fallback"; it is not an error.
   plan(from, to) {
     this.message = '';
@@ -2557,12 +5601,194 @@ const Route = {
     const start = this.nearest(graph, here.x, here.z), end = this.nearest(graph, there.x, there.z);
     if (!start || !end) { this.message = 'No route node near the character or the hunting spot.'; return null; }
     if (start.node === end.node) return null;
-    const path = this.astar(graph, start.node, end.node);
+    const path = this.astar(graph, start.node, end.node, this.banned.get(a.name));
     if (!path) { this.message = 'No walkable path in the route data.'; return null; }
     const thinned = this.thin(graph, path, from.y);
     if (!thinned.points.length) return null;
     return { source: 'navdata', area: a.name, points: thinned.points, length: thinned.length,
       nodes: path.length, snap: Math.max(start.distance, end.distance) };
+  },
+};
+
+
+// Checks a navdata corridor (lean-route.js) against the game's own collision before it is walked.
+// The converted navdata is another map's: here a slope it climbs can be a cliff (Hotan to the Karakoram
+// aircraft dock climbs out of the crater where the rim is a wall). The game's asset worker builds the collision
+// of any region on request, as it does for the region you stand in, and the game's clipper (lean-clipper.js)
+// walks each corridor edge: a straight line first, else a small lattice search. An edge it cannot walk is left
+// out of the area's graph (Route.ban) and the corridor is planned again, until every edge walks or none is left.
+// The asset worker's address is seen when the game starts it (the worker hook) or, when the userscript ran too late
+// for that, read from the page's own bootstrap module, which names it. Without it or the clipper the corridor is
+// walked unchecked, as before, and the log says so.
+const CHECK_CELL = 40;          // lattice cell, and the longest step checked in one clip
+const CHECK_REACH = 60;         // an edge walks when its far end is reached within this
+const CHECK_NODES = 1500;       // lattice search budget for an edge the straight line does not walk
+const CHECK_AROUND = 400;       // the search stays this close to the edge: a longer way round is the graph's to find
+const CHECK_SLICE_MS = 6;       // search time per slice; the game draws between slices
+const CHECK_ROUNDS = 60;        // corridors tried before giving up
+const CHECK_MS = 150000;        // whole check
+const CHECK_REGIONS = 6;        // regions kept in memory
+const CHECK_LOAD_MS = 30000;
+
+const RouteCheck = {
+  worker: null, queue: Promise.resolve(), regions: new Map(), message: '', locating: null,
+  bootstrap() { return W.document?.querySelector?.('script[type="module"][src*="/assets/"]')?.src || ''; },
+  available() { return typeof NativeClipper !== 'undefined' && (!!Hook.assetUrl || !!this.bootstrap()); },
+  locate() {
+    if (Hook.assetUrl) return Promise.resolve(Hook.assetUrl);
+    this.locating ||= (async () => {
+      const src = this.bootstrap();
+      if (!src) return '';
+      const text = await (await W.fetch(src, { credentials: 'same-origin' })).text();
+      const found = text.match(/new\s+Worker\(\s*new\s+URL\(\s*["']([^"']+)["'][^)]*\)\s*,\s*\{[^}]*name\s*:\s*["']sro-assets["']/);
+      if (found) Hook.assetUrl = new URL(found[1], src).href;
+      return Hook.assetUrl;
+    })().catch(() => '').finally(() => { this.locating = null; });
+    return this.locating;
+  },
+  // One region's collision, as the game's asset worker builds it (its 3x3 window), with a clipper installed on it.
+  region(regionId) {
+    if (this.regions.has(regionId)) {
+      const hit = this.regions.get(regionId);
+      this.regions.delete(regionId); this.regions.set(regionId, hit);
+      return hit;
+    }
+    const job = this.load(regionId).then(product => {
+      if (!product?.complete || product.regionId !== regionId) return null;
+      const clipper = NativeClipper.createNavigation();
+      clipper.install(product.regionId, product);
+      return { regionId, clipper };
+    }).catch(() => null);
+    this.regions.set(regionId, job);
+    while (this.regions.size > CHECK_REGIONS) this.regions.delete(this.regions.keys().next().value);
+    return job;
+  },
+  // One request at a time: the worker's replies carry no request this code could match.
+  load(regionId) {
+    const job = this.queue.then(() => new Promise((resolve, reject) => {
+      const worker = this.worker ||= new (Hook.NativeWorker || W.Worker)(Hook.assetUrl, { type: 'module', name: 'nix-collision' });
+      const timer = setTimeout(() => done(null, Error('Region collision timed out.')), CHECK_LOAD_MS);
+      const done = (product, error) => {
+        clearTimeout(timer); worker.onmessage = null; worker.onerror = null;
+        if (error) { worker.terminate(); if (this.worker === worker) this.worker = null; reject(error); } else resolve(product);
+      };
+      worker.onmessage = e => {
+        if (e.data?.kind === 'navigation') done(e.data.product);
+        else if (e.data?.kind === 'error') done(null, Error(String(e.data.error)));
+      };
+      worker.onerror = () => done(null, Error('Region collision worker failed.'));
+      const path = '/assets/world/outdoor/regions/region-' + regionId.toString(16).padStart(4, '0') + '.json#' + regionId;
+      worker.postMessage({ kind: 'request', id: 1, url: new URL(path, W.location.href).href, decode: 'navigation', limit: 128 << 20 });
+    }));
+    this.queue = job.catch(() => {});
+    return job;
+  },
+  release() {
+    this.regions.clear();
+    this.worker?.terminate(); this.worker = null;
+  },
+  // Every edge of the corridor from start to goal walks, or false when no corridor does; null when the check could
+  // not run. Bans stay for the area.
+  async verify(area, graph, start, goal) {
+    if (!await this.locate()) {
+      Log.warn('Route check (beta): the game\'s asset loader was not found, so the route data is walked unchecked.');
+      return null;
+    }
+    const walks = new Set(), deadline = now() + CHECK_MS, before = Route.bans(area).size / 2;
+    let unknown = 0, result = false;
+    try {
+      for (let round = 0; round < CHECK_ROUNDS && now() < deadline; round++) {
+        const path = Route.astar(graph, start, goal, Route.bans(area));
+        if (!path) break;
+        let blocked = false;
+        for (let i = 0; i + 1 < path.length && now() < deadline; i++) {
+          const u = path[i], v = path[i + 1];
+          if (walks.has(u + '>' + v)) continue;
+          this.message = 'checking the route against the game map (' + (i + 1) + '/' + (path.length - 1) + ')';
+          const walk = await this.edge(graph, u, v);
+          if (walk === false) { Route.ban(area, u, v); blocked = true; break; }
+          if (walk === null) unknown++;
+          walks.add(u + '>' + v);
+        }
+        if (!blocked) { result = now() < deadline; break; }
+      }
+      const left = Route.bans(area).size / 2 - before;
+      Log.info('Route check (beta): ' + (result ? 'the corridor walks on the game map' : 'no corridor walks on the game map') +
+        (left ? '; ' + left + ' step' + (left === 1 ? '' : 's') + ' left out' : '') + (unknown ? '; ' + unknown + ' without collision data' : '') + '.');
+      return result;
+    } finally { this.message = ''; this.release(); }
+  },
+  // true walks, false is blocked, null is unknown (no collision for that region): an unknown edge is walked as before.
+  async edge(graph, u, v) {
+    const from = Route.pose(graph.x[u], graph.z[u], graph.y[u]), to = Route.pose(graph.x[v], graph.z[v], graph.y[v]);
+    if (!from || !to) return null;
+    const region = await this.region(from.regionId);
+    if (!region) return null;
+    const c = region.clipper, origin = from.regionId;
+    const rel = p => [((p.regionId & 255) - (origin & 255)) * SECTOR + p.x, ((p.regionId >>> 8 & 127) - (origin >>> 8 & 127)) * SECTOR + p.z];
+    const at = (x, z, y) => {
+      const rx = Math.floor(x / SECTOR), rz = Math.floor(z / SECTOR);
+      return { regionId: ((origin >>> 8 & 127) + rz) << 8 | (origin & 255) + rx, x: x - rx * SECTOR, y, z: z - rz * SECTOR };
+    };
+    const step = (pose, x, z) => {
+      const got = c.clip({ ...pose, angle: 0 }, { ...at(x, z, pose.y), angle: 0 }, { slide: false });
+      if (!got) return null;
+      const [gx, gz] = rel(got);
+      return Math.hypot(gx - x, gz - z) <= 2 ? got : null;
+    };
+    const start = c.surface(from);
+    if (!c.available(start)) return null;
+    const [sx, sz] = rel(start), [tx, tz] = rel(to);
+    // The straight line, in steps of at most one cell.
+    const n = Math.max(1, Math.ceil(Math.hypot(tx - sx, tz - sz) / CHECK_CELL));
+    let pose = start;
+    for (let i = 1; i <= n && pose; i++) pose = step(pose, sx + (tx - sx) * i / n, sz + (tz - sz) * i / n);
+    if (pose) return true;
+    // A lattice search around whatever stands in the way, in slices.
+    const search = this.search(step, rel, start, tx, tz);
+    for (;;) {
+      const started = performance.now();
+      let result;
+      while ((result = search.next()).done === false && performance.now() - started < CHECK_SLICE_MS);
+      if (result.done) return result.value;
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+  },
+  *search(step, rel, start, gx, gz) {
+    const key = (i, j, y) => i + ',' + j + ',' + Math.round(y / 12), h = (i, j) => Math.hypot(i * CHECK_CELL - gx, j * CHECK_CELL - gz);
+    const [sx, sz] = rel(start), mx = (sx + gx) / 2, mz = (sz + gz) / 2;
+    const near = (a, b) => Math.hypot(a * CHECK_CELL - mx, b * CHECK_CELL - mz) <= CHECK_AROUND;
+    let i0 = Math.round(sx / CHECK_CELL), j0 = Math.round(sz / CHECK_CELL), first = null;
+    // A corridor node can stand on a rock edge: join the lattice at any corner around it.
+    for (const [di, dj] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
+      first = step(start, (i0 + di) * CHECK_CELL, (j0 + dj) * CHECK_CELL);
+      if (first) { i0 += di; j0 += dj; break; }
+    }
+    if (!first) return false;
+    const heap = [{ i: i0, j: j0, g: 0, f: h(i0, j0), pose: first }], closed = new Set(), scores = new Map();
+    let expanded = 0;
+    while (heap.length && expanded < CHECK_NODES) {
+      yield;
+      let m = 0;
+      for (let k = 1; k < heap.length; k++) if (heap[k].f < heap[m].f) m = k;
+      const node = heap[m];
+      heap[m] = heap[heap.length - 1]; heap.pop();
+      const k = key(node.i, node.j, node.pose.y);
+      if (closed.has(k)) continue;
+      closed.add(k); expanded++;
+      if (h(node.i, node.j) <= CHECK_REACH) return true;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+        const a = node.i + di, b = node.j + dj;
+        if (!near(a, b)) continue;
+        const pose = step(node.pose, a * CHECK_CELL, b * CHECK_CELL);
+        if (!pose) continue;
+        const kk = key(a, b, pose.y), cost = node.g + CHECK_CELL * Math.hypot(di, dj);
+        if (closed.has(kk) || (scores.get(kk) ?? Infinity) <= cost) continue;
+        scores.set(kk, cost);
+        heap.push({ i: a, j: b, g: cost, f: cost + 1.5 * h(a, b), pose });
+      }
+    }
+    return false;
   },
 };
 
@@ -2574,10 +5800,13 @@ const Route = {
 // walked in short legs: the game publishes collision data only for the 3x3
 // regions around the character, so each leg ends across the next region border.
 const WALK_LEG = 2400;           // game units; safely inside the 3x3 collision window
+const WALK_LEG_REACH = 240;  // a leg is done within this distance of its end
 const WALK_MAX_LEGS = 60;        // hard safety cap on chained legs for one return
 const WALK_MAX_MS = 30 * 60000;  // hard safety cap for the leg fallback
 const WALK_NAV_MS = 90 * 60000;  // absolute cap for a navdata route
 const WALK_PLAN_MS = 6000;       // wait this long for route data before falling back
+const WALK_NAV_REACH = 60;       // a navdata waypoint is passed within this: it may stand on a rock edge
+const WALK_NAV_SKIPS = 2;        // unreachable navdata waypoints skipped in a row before re-planning
 
 const WalkBack = {
   active: null,
@@ -2604,33 +5833,49 @@ const WalkBack = {
       if (nearest >= 0) route = recorded.slice(nearest).map(p => ({ ...p }));
     }
     route.push({ ...dest });
+    // Across water or between unconnected areas: teleports and ferries (lean-travel.js) take over.
+    if (Travel.begin(pose, dest, shouldResume)) return;
+    this.launch(dest, route, pose, shouldResume);
+  },
+  // Walk anywhere, not just to the hunting spot (Trade uses this between towns). The caller owns the safety checks
+  // that start() does for hunting; onDone runs on arrival and onFail(reason) when the walk gives up.
+  startTo(dest, { label = 'the destination', stop = 12, onDone, onFail } = {}) {
+    const pose = World.pose();
+    if (!dest || !pose || !World.inWorld() || World.isDead()) return false;
+    if (!Number.isFinite(dist2D(pose, dest))) { onFail?.('The destination is in another world or dungeon.'); return false; }
+    this.cancel();
+    this.launch(dest, [{ ...dest }], pose, false, { label, stop, onDone, onFail });
+    return !!this.active;
+  },
+  launch(dest, route, pose, shouldResume, opts = {}) {
     // The direct distance is a lower bound; a recorded route can be longer.
     let distance = 0, previous = pose;
     for (const point of route) { const leg = dist2D(previous, point); distance += Number.isFinite(leg) ? leg : 0; previous = point; }
     distance = Math.max(distance, dist2D(pose, dest) || 0);
     this.active = { destination: { ...dest }, legRoute: route, legRecorded: route.length > 1, distance,
+      label: opts.label || 'the hunting spot', stop: opts.stop || 12, onDone: opts.onDone || null, onFail: opts.onFail || null,
       route: null, recorded: false, source: '', index: 0, resume: shouldResume, totalLegs: Math.max(1, Math.ceil(distance / WALK_LEG)),
       legs: 0, leg: null, legTries: 0, navReplans: 0, routeArea: '', routeLength: 0,
       manualAt: Manual.lastAt, at: now(), progressAt: now(), lastPose: { ...pose }, sentAt: -Infinity, replans: 0, retryAt: 0,
       best: distance, bestAt: now(), maxMs: WALK_MAX_MS, plan: null };
-    UI.toast('Walking back to the hunting spot.', 'info', 2500);
+    if (!opts.label) UI.toast('Walking back to the hunting spot.', 'info', 2500);
     // The route graph is only worth a loading wait where the leg fallback would
     // have to chain (more than one leg), and only outdoors in one route area.
     const routeArea = typeof Route !== 'undefined' ? Route.commonArea(pose, dest) : null;
     const navWorth = distance > WALK_LEG && !!routeArea &&
       !(pose.regionId & DUNGEON) && !(dest.regionId & DUNGEON);
     if (!navWorth) return this.useLegs();
+    // With the game's asset worker the corridor is checked against the real collision first (lean-route-check.js).
+    const check = RouteCheck.available();
     let planned = null;
-    try { planned = Route.plan(pose, dest); } catch { planned = null; }
+    if (!check) { try { planned = Route.plan(pose, dest); } catch { planned = null; } }
     if (planned) return this.useNav(planned, pose);
     const a = this.active, token = {};
-    a.plan = { at: now(), token };
+    a.plan = { at: now(), token, limit: check ? CHECK_MS + 5000 : WALK_PLAN_MS };
     a.source = 'planning';
-    Log.info('Route: loading navdata for ' + routeArea.name + '.');
-    Route.ensure(pose, dest).then(ok => {
+    Log.info('Route: loading navdata for ' + routeArea.name + (check ? ' and checking it against the game map.' : '.'));
+    Route.checked(pose, dest).then(next => {
       if (this.active !== a || a.plan?.token !== token) return;
-      let next = null;
-      try { next = ok ? Route.plan(World.pose(), dest) : null; } catch { next = null; }
       if (next) this.useNav(next, World.pose());
       else this.useLegs();
     }, () => {
@@ -2639,9 +5884,11 @@ const WalkBack = {
   },
   cancel(reason = '', halt = true) {
     if (!this.active) return;
+    const failed = this.active.onFail;
     this.active = null;
     if (halt && World.inWorld() && !World.isDead()) Cmd.move(World.pose());
-    if (reason) UI.toast(reason, 'warn', 4000);
+    // A caller-owned walk reports its own failures; only a reasoned cancel is a failure, a plain cancel is the caller's.
+    if (failed && reason) failed(reason); else if (reason) UI.toast(reason, 'warn', 4000);
   },
   // Navdata corridor: its waypoints are short steps for the local collision A*.
   useNav(route, pose) {
@@ -2652,7 +5899,7 @@ const WalkBack = {
     a.source = 'navdata';
     a.routeArea = route.area;
     a.routeLength = route.length + (dist2D(route.points[route.points.length - 1], a.destination) || 0);
-    a.index = 0; a.travel = null; a.leg = null; a.legTries = 0;
+    a.index = 0; a.skips = 0; a.travel = null; a.leg = null; a.legTries = 0;
     a.progressAt = now(); a.lastPose = { ...pose }; a.best = dist2D(pose, a.destination); a.bestAt = now();
     a.maxMs = Math.max(WALK_MAX_MS, Math.min(WALK_NAV_MS, a.routeLength / 20 * 1000 * 2));
     a.plan = null;
@@ -2669,7 +5916,7 @@ const WalkBack = {
       return false;
     }
     a.route = a.legRoute; a.recorded = a.legRecorded; a.source = 'legs';
-    a.index = 0; a.travel = null; a.leg = null; a.legTries = 0;
+    a.index = 0; a.skips = 0; a.travel = null; a.leg = null; a.legTries = 0;
     a.totalLegs = Math.max(1, Math.ceil(a.distance / WALK_LEG)); a.legs = 0;
     a.maxMs = WALK_MAX_MS; a.plan = null;
     a.progressAt = now(); a.lastPose = { ...pose }; a.best = dist2D(pose, a.destination); a.bestAt = now();
@@ -2686,7 +5933,7 @@ const WalkBack = {
     try { route = Route.plan(pose, a.destination); } catch { return false; }
     if (!route?.points?.length) return false;
     a.route = [...route.points.map(p => ({ ...p })), { ...a.destination }];
-    a.index = 0; a.travel = null; a.leg = null; a.legTries = 0;
+    a.index = 0; a.skips = 0; a.travel = null; a.leg = null; a.legTries = 0;
     a.progressAt = now(); a.lastPose = { ...pose }; a.best = dist2D(pose, a.destination); a.bestAt = now();
     Log.info('Route: re-planned from the current position with ' + route.points.length + ' waypoints.');
     return true;
@@ -2695,15 +5942,15 @@ const WalkBack = {
   status() {
     const a = this.active;
     if (!a) return '';
-    if (a.source === 'planning') return 'Walking to the hunting spot: loading route data.';
+    if (a.source === 'planning') return 'Walking to ' + a.label + ': ' + (RouteCheck.message || 'loading route data') + '.';
     const left = dist2D(World.pose(), a.destination);
     const progress = Number.isFinite(left) && a.distance ? ' · ' + Math.round(left / 10) + ' m left' : '';
     if (a.source === 'navdata') {
       const at = Math.min(a.route.length, a.index + 1);
-      return 'Walking to the hunting spot: waypoint ' + at + '/' + a.route.length + progress + '.';
+      return 'Walking to ' + a.label + ': waypoint ' + at + '/' + a.route.length + progress + '.';
     }
     const leg = Number.isFinite(left) ? Math.max(1, Math.min(a.totalLegs, a.totalLegs - Math.ceil(left / WALK_LEG) + 1)) : 1;
-    return (a.totalLegs > 1 ? 'Walking to the hunting spot: leg ' + leg + '/' + a.totalLegs : 'Walking to the hunting spot') + progress + '.';
+    return (a.totalLegs > 1 ? 'Walking to ' + a.label + ': leg ' + leg + '/' + a.totalLegs : 'Walking to ' + a.label) + progress + '.';
   },
   // The straight leg end is unreachable. Try a snapped or slightly turned end of
   // the same rough length, rate-limited so a missing collision window can arrive.
@@ -2725,16 +5972,19 @@ const WalkBack = {
     if (!World.inWorld() || World.isDead()) return this.cancel('Walk back interrupted.', false);
     if (Manual.lastAt !== a.manualAt) return this.cancel('Manual control: walk back cancelled.', false);
     if (a.source === 'planning') {
-      if (now() - a.plan.at <= WALK_PLAN_MS) return;
+      if (now() - a.plan.at <= (a.plan.limit || WALK_PLAN_MS)) return;
       if (!this.useLegs()) return;
     }
     if (!a.route?.length) return;
     const pose = World.pose(), dest = a.route[a.index], distance = dist2D(pose, dest);
     if (!Number.isFinite(distance)) return this.cancel('Cannot walk to the saved hunting spot.');
-    if (distance <= 12) {
-      a.index++; a.leg = null; a.legTries = 0; a.progressAt = now(); a.lastPose = { ...pose }; a.travel = null;
+    // Only the last point may use the caller's wider arrival radius; waypoints on the way stay tight.
+    const last = a.index >= a.route.length - 1;
+    if (distance <= (last ? a.stop : a.source === 'navdata' ? WALK_NAV_REACH : 12)) {
+      a.index++; a.skips = 0; a.leg = null; a.legTries = 0; a.progressAt = now(); a.lastPose = { ...pose }; a.travel = null;
       if (a.index < a.route.length) return;
       this.active = null;
+      if (a.onDone) return a.onDone();
       UI.toast('Back at the hunting spot.', 'info', 2500);
       if (a.resume) Hunt.start();
       return;
@@ -2766,8 +6016,27 @@ const WalkBack = {
         Activity.emit({ category: 'movement', code: 'walk-leg', text: 'Walk back leg ' + a.legs + ' of about ' + a.totalLegs + '.', details: { leg: a.legs, legs: a.totalLegs } });
       }
     }
-    const move = Navigation.next(a, a.leg ? a.leg.target : dest, a.recorded);
+    // Standing against something the collision map does not know: route around the spot, then give up.
+    if (!World.isSitting()) {
+      const stall = Navigation.watch(a, pose, a.sentAt, a.travel?.route[a.travel.index] || a.leg?.target || dest);
+      if (stall === 'recover') Log.info('Walk back: stuck against an obstacle; trying another way round.');
+      else if (stall === 'giveup') {
+        if (a.source === 'navdata' && (this.replan(pose) || this.useLegs())) return;
+        return this.cancel('Walk back stopped: an obstacle blocks the way and I could not walk around it.');
+      }
+    }
+    // A leg end only gives the direction: its neighbourhood will do, which spares
+    // searching for a point that may lie on a slope or a rock.
+    // The last point may stand on something solid (an NPC): its stop radius is reach enough. A navdata waypoint only
+    // gives the way: its neighbourhood will do.
+    const waypoint = !last && a.source === 'navdata', reach = waypoint ? WALK_NAV_REACH : last && a.stop > 12 ? a.stop : 0;
+    const move = a.leg ? Navigation.next(a, a.leg.target, a.recorded, WALK_LEG_REACH, true) : Navigation.next(a, dest, a.recorded, reach, reach > 0);
     if (move.error && !move.waiting) {
+      if (waypoint && (a.skips || 0) < WALK_NAV_SKIPS) {
+        a.skips = (a.skips || 0) + 1; a.index++; a.travel = null; a.progressAt = now();
+        Log.info('Walk back: a route point is out of reach; going on to the next one.');
+        return;
+      }
       if (a.source === 'navdata') {
         if (this.replan(pose)) return;
         if (this.useLegs()) return;
@@ -2775,6 +6044,8 @@ const WalkBack = {
       if (this.detour(pose, dest)) return;
       return this.cancel(move.error);
     }
+    // The clipper is searching between frames: stand still, without counting it as no progress.
+    if (move.planning) { a.progressAt = now(); a.retryAt = now() + 250; return; }
     if (move.waiting) {
       // The leg can end early at the edge of the loaded window, before the
       // crossing that publishes the next one. Keep the progress made.
@@ -2857,7 +6128,7 @@ const Loot = {
     if (Hunt.running && World.gp.inventoryPending) return 'Pet waiting for pickup / inventory transaction to finish.';
     if (Hunt.running && this.pressed()) return 'Pet waiting briefly for potion use.';
     if (this.active?.petGid === pet.rec.gid) return 'Pet collecting: ' + (this.active.name || this.active.gid) + (this.active.retryAt ? ' (retry pending).' : '.');
-    return `Pet ready: ${Math.max(0, pet.rec.status - pet.rec.inventory.length)} empty slots. Collects while hunting; auto-grab stays off when stopped.`;
+    return `Pet ready: ${Math.max(0, pet.rec.status - pet.rec.inventory.length)} empty slots. Collects while hunting and while the bot is stopped.`;
   },
   items(petGid = 0) { return petGid ? World.gp?.cosRecords?.find(r => r.gid === petGid)?.inventory || [] : World.items(); },
   pickup(gid, petGid = 0) {
@@ -2939,7 +6210,7 @@ const Loot = {
     const H = Hunt.cfg(), P = H.pickup, skip = this.skips.get(e.gid);
     if (skip && (skip.bag !== null ? skip.bag === this.bagSignature(e) : skip.until > now())) return 'failed';
     if (!(dist2D(World.pose(), e) <= P.radius)) return 'far';
-    if (H.center && dist2D(H.center, e) > H.radius + P.radius) return 'area';
+    if (Hunt.running && H.center && dist2D(H.center, e) > H.radius + P.radius) return 'area';
     if (!this.owned(e)) return 'owner';
     const tf = e.groundItem.typeFlags ?? e.tidWord ?? 0, name = (e.name || '').toLowerCase(), rule = ItemRules.get(e.refObjId);
     if (rule && (rule.pick === 'no' || rule.act === 'drop')) return 'rule';
@@ -2985,7 +6256,7 @@ const Loot = {
         this.skips.delete(e.gid);
       }
       const d = dist2D(pose, e);
-      if (!Number.isFinite(d) || d > P.radius || H.center && dist2D(H.center, e) > H.radius + P.radius || !this.allowed(e)) continue;
+      if (!Number.isFinite(d) || d > P.radius || Hunt.running && H.center && dist2D(H.center, e) > H.radius + P.radius || !this.allowed(e)) continue;
       const who = this.collector(e);
       if (by && who !== by) continue;
       const travel = dist2D(who === 'pet' ? this.pet()?.ent : pose, e);
@@ -3053,6 +6324,18 @@ const Loot = {
     // Movement cancels the outstanding worker pickup intent. Resubmit on a later tick.
     if (a.petGid || Cmd.move(World.pose())) { a.retryAt = now() + 700; a.failure = ''; }
     return true;
+  },
+  // The pet keeps collecting while the bot is stopped. Pet settings are left alone: with auto-grab on the game collects
+  // natively (allowed() refuses), otherwise selective requests go out as during hunting. Character pickups stay bot-only.
+  idleTick() {
+    if (Hunt.running || !this.petMode() || !Hunt.cfg().pickup.enabled || World.isDead() || World.gp?.storage || Restock.activeShop() ||
+        now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000) {
+      if (this.active?.petGid) this.suspend();
+      return;
+    }
+    if (this.active) { if (this.active.petGid) this.tick(); else this.suspend(); return; }
+    const drop = this.choose('pet');
+    if (drop) this.begin(drop);
   },
   suspend() { this.active = null; Hunt.lootGid = 0; },
   reset() { this.suspend(); this.skips.clear(); this.failureCounts.clear(); this.petSetup = null; this.fullAlert = null; },
@@ -3252,6 +6535,23 @@ const Party = {
     this.answered = ''; this.registration = null; this.lastRegisterAt = -Infinity; this.message = 'Waiting for party state.';
     this.joinMessage = ''; this.joinedKey = ''; this.lastPageAt = this.lastJoinAt = this.scanDoneAt = -Infinity; this.wantPage = 1;
   },
+  // Comma or line separated character names; empty means everyone.
+  names(text) { return String(text || '').split(/[,;\n]/).map(n => n.trim().toLowerCase()).filter(Boolean); },
+  listed(name) { const list = this.names(Settings.profile.party.acceptNames); return !list.length || list.includes(String(name || '').trim().toLowerCase()); },
+  leaderName(social) { return social.members.find(m => m && m.id === social.leader)?.name || ''; },
+  // Alt accounts, optional: leave a party whose leader is not the named party leader (the join below then looks for theirs).
+  leaveWrongParty() {
+    const c = Settings.profile.party, leader = String(c.mainName || '').trim().toLowerCase(), social = World.gp?.social;
+    if (!c.joinMain || !c.leaveIfNotLeader || !leader || !social || !Array.isArray(social.members) || social.members.length < 2 || !social.leader) return;
+    const name = this.leaderName(social).toLowerCase();
+    if (!name || name === leader || String(social.localName || '').toLowerCase() === leader) return;
+    if (now() - this.lastLeaveAt < 10000 || !Cmd.spaced('party-leave')) return;
+    if (Cmd.raw({ kind: 'party-leave' }, 'Leave the party of ' + this.leaderName(social) + ' (leader is not ' + c.mainName.trim() + ')')) {
+      this.lastLeaveAt = now(); this.joinedKey = '';
+      UI.toast('Left the party: its leader is not ' + c.mainName.trim(), 'info', 3000);
+    }
+  },
+  lastLeaveAt: -Infinity,
   // Alt accounts: find the main account's party and join it. A party invitation from the main is accepted; otherwise the
   // party-matching board is paged for the main's listing and the bot applies to it (the main's Auto-recruit and
   // Auto-accept answer). Runs only while solo, so it never pulls the character out of another party.
@@ -3397,7 +6697,7 @@ const Party = {
     this.acceptResurrection();
     if (World.inWorld() && Settings.profile.party.acceptRes) this.helping();
     const c = Settings.profile.party;
-    if (World.inWorld()) this.joinMain(); else this.joinMessage = '';
+    if (World.inWorld()) { this.leaveWrongParty(); this.joinMain(); } else this.joinMessage = '';
     if (!World.inWorld() || (!c.autoAcceptMatching && !c.autoRecruit)) return;
     const gp = World.gp, matching = gp?.partyMatching, request = matching?.request, social = gp?.social;
     if (!matching || !social || !Array.isArray(social.members)) return;
@@ -3416,6 +6716,8 @@ const Party = {
     if (!Number.isFinite(sim) || !Number.isFinite(request.expires) || sim >= request.expires) return;
     if (![request.a, request.b].every(id => Number.isInteger(id) && id > 0 && id <= 0xffffffff)) return;
     const key = `${request.a}:${request.b}:${request.expires}`;
+    // A name list narrows who is accepted; an applicant outside it is left unanswered for the player.
+    if (!this.listed(request.member?.name)) { this.message = 'Applicant ' + (request.member?.name || '?') + ' is not on the accept list.'; return; }
     if (key === this.answered || !Cmd.spaced('party-match-answer')) return;
     // Same correlation and accept value as the game's matching approval button.
     if (Cmd.raw({ kind: 'party-match-answer', a: request.a, b: request.b, answer: 1 }, 'Auto-accept party-matching application')) {
@@ -3636,11 +6938,63 @@ const SpeedScroll = {
 };
 
 
+// Repair hammer: one use repairs all the equipment the character wears. Wear is Town.wear(): the most worn
+// repairable equipped item against its own maximum. Success needs that wear to improve, not the dispatch.
+const RepairHammer = {
+  pending: null, attempts: 0, nextAt: 0, message: 'Repair hammer off.',
+  reset() { this.pending = null; this.attempts = 0; this.nextAt = 0; this.message = 'Waiting for automation.'; },
+  cfg() { return Settings.profile.potion.repairHammer; },
+  // Known by its codename, or by its name when the catalogue is not loaded yet.
+  hammer() {
+    if (!Items.data.size) Items.ready().catch(() => {});
+    return World.items().find(i => (i.quantity ?? 1) > 0 &&
+      (/REPAIR_HAMMER/i.test(i.codename || Items.data.get(i.refObjId)?.code || '') || /repair hammer/i.test(i.name || Items.data.get(i.refObjId)?.name || '')));
+  },
+  tick() {
+    const c = this.cfg();
+    if (Town.trip) { this.message = 'Waiting for town services to finish.'; return false; }
+    if (!c.on) { this.message = 'Repair hammer off.'; return false; }
+    if (!World.inWorld() || World.isDead()) { this.message = 'Waiting for a living character in the world.'; return false; }
+    const worn = Town.wear();
+    if (this.pending && (!worn || worn.pct > this.pending.pct)) {
+      this.pending = null; this.attempts = 0; this.nextAt = 0;
+      Log.info('Repair hammer used: equipment repaired.');
+    }
+    if (!worn || worn.pct >= c.pct) { this.message = worn ? `Gear durability fine (lowest ${Math.floor(worn.pct)}%).` : 'No worn repairable gear.'; return false; }
+    if (!(Hunt.running || WalkBack.active)) { this.message = 'Waiting for hunting.'; return false; }
+    const blocked = World.gp.inventoryPending ? 'Waiting for the inventory transaction to finish.' :
+      World.gp.returnScroll ? 'Waiting for return-scroll travel.' :
+      Resurrect.holdUntil > now() ? 'Waiting for the resurrection cast to finish.' :
+      World.isSitting() ? 'Waiting for the character to stand.' :
+      World.local()?.mountedOn ? 'Waiting for the character to dismount.' :
+      Restock.activeShop() || World.gp.storage ? 'Waiting for the shop or storage to close.' :
+      Restock.recording ? 'Waiting for route recording to finish.' :
+      now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000 ? 'Waiting for the manual-control pause.' : '';
+    if (blocked) { this.message = blocked; return false; }
+    if (this.pending) {
+      if (now() - this.pending.at < 8000) { this.message = 'Waiting for the repair to show on the gear.'; return false; }
+      this.pending = null; this.nextAt = now() + 30000 * this.attempts;
+      this.message = 'Repair was not confirmed. Backing off before retrying.';
+      Log.warn(this.message);
+    }
+    if (this.attempts >= 3) { this.message = 'Repair not confirmed after 3 attempts. Check the game and toggle this option to retry.'; return false; }
+    if (now() < this.nextAt) return false;
+    const item = this.hammer();
+    if (!item) { this.message = `${worn.name} at ${Math.floor(worn.pct)}%, but no repair hammer in your bag.`; return false; }
+    if (!Cmd.itemUse(item.slot)) { this.message = 'Waiting for item-use availability (potions have priority).'; return false; }
+    this.attempts++; this.pending = { at: now(), pct: worn.pct };
+    this.message = `${worn.name} at ${Math.floor(worn.pct)}%: repair hammer used, waiting for the repair.`;
+    return true;
+  },
+};
+
+
 // Generated by gen-towns.py from the server data. Do not edit by hand.
-const TOWN_TABLE = [{"key":"EU","name":"Constantinople","arrival":{"regionId":26959,"x":950.0,"y":84.0,"z":1070.0},"services":{"storage":{"refObjId":7503,"regionId":26959,"x":1348.9,"y":80.0,"z":845.88},"vendor":{"refObjId":7497,"regionId":26959,"x":1338.79,"y":84.09,"z":1400.89},"smith":{"refObjId":7495,"regionId":26959,"x":784.69,"y":83.46,"z":1532.71},"gate":{"refObjId":19074,"regionId":26959,"x":700.0,"y":80.0,"z":886.0}}},{"key":"WC","name":"Donwhang","arrival":{"regionId":26265,"x":957.0,"y":-80.0,"z":1508.0},"services":{"storage":{"refObjId":2058,"regionId":26265,"x":1260.35,"y":-105.81,"z":696.9},"vendor":{"refObjId":2053,"regionId":26265,"x":597.25,"y":-106.46,"z":1134.97},"smith":{"refObjId":2051,"regionId":26265,"x":1197.69,"y":-106.67,"z":1217.7},"gate":{"refObjId":2095,"regionId":26521,"x":962.0,"y":-105.81,"z":8.0}}},{"key":"KT","name":"Hotan","arrival":{"regionId":23687,"x":1138.0,"y":250.0,"z":153.0},"services":{"storage":{"refObjId":2083,"regionId":23687,"x":1134.28,"y":243.75,"z":610.79},"vendor":{"refObjId":2074,"regionId":23687,"x":832.16,"y":243.86,"z":1093.64},"smith":{"refObjId":2072,"regionId":23687,"x":501.58,"y":243.58,"z":766.27},"gate":{"refObjId":2096,"regionId":23687,"x":1131.0,"y":243.75,"z":488.0}}},{"key":"CH","name":"Jangan","arrival":{"regionId":25000,"x":969.0,"y":0.0,"z":1369.0},"services":{"storage":{"refObjId":2014,"regionId":25000,"x":980.35,"y":-32.52,"z":989.19},"vendor":{"refObjId":2005,"regionId":25000,"x":1584.08,"y":0.0,"z":1407.29},"smith":{"refObjId":2003,"regionId":25000,"x":332.73,"y":0.0,"z":1406.7},"gate":{"refObjId":2094,"regionId":25000,"x":1254.0,"y":-32.52,"z":1374.0}}},{"key":"CA","name":"Samarkand","arrival":{"regionId":27244,"x":270.0,"y":180.0,"z":1421.0},"services":{"storage":{"refObjId":7537,"regionId":27244,"x":563.43,"y":180.0,"z":1131.66},"vendor":{"refObjId":7532,"regionId":27243,"x":1426.07,"y":180.0,"z":1851.0},"smith":{"refObjId":7530,"regionId":27499,"x":1762.61,"y":180.0,"z":809.78},"gate":{"refObjId":19075,"regionId":27499,"x":1917.0,"y":180.0,"z":108.0}}}];
+const TOWN_TABLE = [{"key":"EU","name":"Constantinople","arrival":{"regionId":26959,"x":950.0,"y":84.0,"z":1070.0},"services":{"storage":{"refObjId":7503,"regionId":26959,"x":1348.9,"y":80.0,"z":845.88},"vendor":{"refObjId":7497,"regionId":26959,"x":1338.79,"y":84.09,"z":1400.89},"smith":{"refObjId":7495,"regionId":26959,"x":784.69,"y":83.46,"z":1532.71},"trade":{"refObjId":7500,"regionId":26959,"x":351.01,"y":80.4,"z":228.24},"gate":{"refObjId":19074,"regionId":26959,"x":700.0,"y":80.0,"z":886.0}}},{"key":"WC","name":"Donwhang","arrival":{"regionId":26265,"x":957.0,"y":-80.0,"z":1508.0},"services":{"storage":{"refObjId":2058,"regionId":26265,"x":1260.35,"y":-105.81,"z":696.9},"vendor":{"refObjId":2053,"regionId":26265,"x":597.25,"y":-106.46,"z":1134.97},"smith":{"refObjId":2051,"regionId":26265,"x":1197.69,"y":-106.67,"z":1217.7},"trade":{"refObjId":2059,"regionId":26265,"x":393.06,"y":-106.62,"z":1560.31},"gate":{"refObjId":2095,"regionId":26521,"x":962.0,"y":-105.81,"z":8.0}}},{"key":"KT","name":"Hotan","arrival":{"regionId":23687,"x":1138.0,"y":250.0,"z":153.0},"services":{"storage":{"refObjId":2083,"regionId":23687,"x":1134.28,"y":243.75,"z":610.79},"vendor":{"refObjId":2074,"regionId":23687,"x":832.16,"y":243.86,"z":1093.64},"smith":{"refObjId":2072,"regionId":23687,"x":501.58,"y":243.58,"z":766.27},"trade":{"refObjId":2077,"regionId":23687,"x":1515.55,"y":243.99,"z":904.55},"gate":{"refObjId":2096,"regionId":23687,"x":1131.0,"y":243.75,"z":488.0}}},{"key":"CH","name":"Jangan","arrival":{"regionId":25000,"x":969.0,"y":0.0,"z":1369.0},"services":{"storage":{"refObjId":2014,"regionId":25000,"x":980.35,"y":-32.52,"z":989.19},"vendor":{"refObjId":2005,"regionId":25000,"x":1584.08,"y":0.0,"z":1407.29},"smith":{"refObjId":2003,"regionId":25000,"x":332.73,"y":0.0,"z":1406.7},"trade":{"refObjId":2010,"regionId":25000,"x":1760.32,"y":11.0,"z":480.22},"gate":{"refObjId":2094,"regionId":25000,"x":1254.0,"y":-32.52,"z":1374.0}}},{"key":"CA","name":"Samarkand","arrival":{"regionId":27244,"x":270.0,"y":180.0,"z":1421.0},"services":{"storage":{"refObjId":7537,"regionId":27244,"x":563.43,"y":180.0,"z":1131.66},"vendor":{"refObjId":7532,"regionId":27243,"x":1426.07,"y":180.0,"z":1851.0},"smith":{"refObjId":7530,"regionId":27499,"x":1762.61,"y":180.0,"z":809.78},"trade":{"refObjId":7535,"regionId":27244,"x":837.14,"y":180.0,"z":1823.25},"gate":{"refObjId":19075,"regionId":27499,"x":1917.0,"y":180.0,"z":108.0}}}];
 
 
 // Town service owns the whole recall -> warehouse -> shop -> smith -> reverse trip.
+// Without a reverse scroll (or with Back to the hunting spot: Walk) the trip ends after the services and WalkBack walks back.
 // Native travel-gate type 5 spends the reverse scroll: choice 2 recalls, choice 3 returns to death.
 // See OpenSRO action/reversereturn.go, 6FEF10 and 5DA1B0's choice rows.
 const TOWN_REVERSE = { recall: 2, death: 3 };
@@ -3719,7 +7073,10 @@ const Town = {
     return [['arrow', 62], ['bolt', 10376]].filter(([kind]) => a?.[kind]?.on).map(([kind, refObjId]) => ({ kind, refObjId, low: a[kind].low, target: a[kind].target }));
   },
   ammoCount(ref) { return (World.gp?.inventory || []).filter(i => i.refObjId === ref).reduce((n, i) => n + (i.quantity ?? 1), 0); },
-  supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: s.kind === 'hp' ? 8 : s.kind === 'mp' ? 15 : s.refObjId })); },
+  // Low-level towns do not sell X-Large potions: the tier found there is remembered per kind, so the low-stock
+  // check and the refill count the same potion.
+  tier: {},
+  supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: this.tier[s.kind] || (s.kind === 'hp' ? 8 : s.kind === 'mp' ? 15 : s.refObjId) })); },
   status() {
     if (this.trip) return this.message + (this.trip.why ? ` (reason: ${this.trip.why})` : '');
     if (this.message.startsWith('Town cycle stopped:')) return this.message;
@@ -3827,7 +7184,7 @@ const Town = {
         splitList(c.keep).some(s => name.includes(s))) return false;
     // Native rarity 2 covers seal tiers. Plus and blue options do not protect
     // ordinary gear; unknown rarity still means keep it rather than guess.
-    if (ItemType.isEquipment(tf) && (![0, 1].includes(item.tooltip?.fields?.rarity) ||
+    if (ItemType.isEquipment(tf) && !(c.sellStar && Items.soxOf(item) === 1) && (![0, 1].includes(item.tooltip?.fields?.rarity) ||
         /_(RARE|MAGIC|LEGEND|MYTH)(?:_HONOR)?$/i.test(item.codename || ''))) return false;
     return true;
   },
@@ -3855,6 +7212,7 @@ const Town = {
   // alchemy (checked by bag slot, so only for items from the character bag).
   depositItem(item, fromBag = false) {
     const c = this.cfg(), act = ItemRules.get(item.refObjId)?.act;
+    if (ItemRules.guarded(item)) return false; // the chosen primary / secondary gear stays put
     // An item rule decides first. Store: any kind of item, except from the bag what the trip itself needs
     // (potions, pills, return/reverse/speed scrolls, the supplies it buys). Sell, keep or drop: never deposited.
     if (act && act !== 'store') return false;
@@ -3866,7 +7224,7 @@ const Town = {
     }
     if (!Number.isInteger(item.typeFlags) || !ItemType.isEquipment(item.typeFlags)) return false;
     const level = this.requiredLevel(item);
-    if (!(c.storeSox && Items.soxOf(item) > 0) && !(level !== null && this.levelRanges().some(([a, b]) => level >= a && level <= b))) return false;
+    if (!(c.storeSox && !(c.sellStar && Items.soxOf(item) === 1) && Items.soxOf(item) > 0) && !(level !== null && this.levelRanges().some(([a, b]) => level >= a && level <= b))) return false;
     if (splitList(c.keep).some(s => (item.name || '').toLowerCase().includes(s))) return false;
     const key = BuffGear.key(item);
     if (BuffGear.cfg().buffSets.some(s => s.weapon === key || s.shield === key)) return false;
@@ -3887,23 +7245,42 @@ const Town = {
   // Pet loot, and the character bag when "Sell items from the character bag" is on. A Sell rule sells it; keep, store and drop rules never do.
   sellable(item) {
     // itemdata CanSell 0 (quest and event items): the merchant refuses the sale with inventory code 2.
-    if (item.tooltip?.fields?.canSell === 0) return false;
+    if (item.tooltip?.fields?.canSell === 0 || ItemRules.guarded(item)) return false;
+    // Pet summon scrolls and flutes (TID1 3, TID2 2): the pet itself. The merchant buys every one of them, and players
+    // keep other pets' scrolls in the pickup pet, so they are never sold, not even with a Sell rule.
+    if (!Number.isInteger(item.typeFlags) || (item.typeFlags & 124) === 76) return false;
     const act = ItemRules.get(item.refObjId)?.act;
     if (act) return act === 'sell';
     return this.disposable(item) && !this.kept.includes(Loot.category(item.typeFlags));
   },
   // From the bag, never what the trip itself needs, the weapon chosen for alchemy or a saved buff set's gear.
+  // The bag holds the player's own things, not just drops: without a Sell rule only ordinary Chinese / European
+  // weapons, armour, shields and accessories are sold. Pet summon scrolls, avatars, devil spirits, job suits,
+  // fortress weapons, item mall and event items, tablets, powders and anything with an unknown codename stay.
   sellableBag(item) {
     if (this.needed(item) || Alchemy.selected && Alchemy.selected.slot === item.slot) return false;
     const key = BuffGear.key(item);
     if (BuffGear.cfg().buffSets.some(s => s.weapon === key || s.shield === key)) return false;
-    return this.sellable(item);
+    if (!this.sellable(item)) return false;
+    return ItemRules.get(item.refObjId)?.act === 'sell' || this.plainGear(item);
   },
+  // Ordinary race gear: equipment of TID3 1-6 or 9-12 (garments to accessories; 7 is job suits, 13 avatars and
+  // devil spirits) with an ITEM_CH_ / ITEM_EU_ codename.
+  // The codename comes from the item catalogue; until it has loaded nothing is sold from the bag.
+  plainGear(item) {
+    Loot.ensureCatalogue();
+    const tf = item.typeFlags, code = item.codename || Items.data?.get(item.refObjId)?.code || '';
+    return Number.isInteger(tf) && ItemType.isEquipment(tf) && [1, 2, 3, 4, 5, 6, 9, 10, 11, 12].includes((tf >>> 7) & 15) &&
+      /^ITEM_(CH|EU)_/.test(code);
+  },
+  // Whether a trip could empty any of the pet's slots (sell or store something). A pet full of protected items would
+  // otherwise send the bot to town again and again for nothing.
+  petClearable(pet) { return pet.rec.inventory.some(i => this.sellable(i) || this.eligible(i)); },
   autoRevive() { return this.cfg().enabled && this.cfg().revive; },
   reason() {
     const c = this.cfg(), pet = Loot.pet();
     if (World.freeBagSlots() <= 1) return 'character bag nearly full';
-    if (c.petFull && pet && pet.rec.status - pet.rec.inventory.length <= c.petFree) return 'pickup pet nearly full';
+    if (c.petFull && pet && pet.rec.status - pet.rec.inventory.length <= c.petFree && this.petClearable(pet)) return 'pickup pet nearly full';
     if (this.supplies().some(s => Restock.count(s.refObjId) <= s.low)) return 'potions running low';
     if (this.ammoSupplies().some(s => this.ammoCount(s.refObjId) <= s.low)) return 'ammunition running low';
     if (c.broken && this.weaponBroken()) return 'weapon broken';
@@ -3939,12 +7316,17 @@ const Town = {
     if (key !== this.xpKey) { this.xpKey = key; this.lastXpAt = now(); }
   },
   restartClocks() { this.lastXpAt = this.cycleFrom = now(); },
+  // Already standing in a known town (all four services in range): no return scroll is needed or wanted.
+  inTown(revival = false) { return !revival && !!World.pose() && !!this.detect(World.pose()); },
+  // The way back after the services: the reverse scroll when that is the choice and one is carried, otherwise a walk.
+  walks() { return this.cfg().returnBy === 'walk'; },
+  reverses() { return !this.walks() && !!this.scroll(0x19ec); },
   validate(revival = false) {
     const c = this.cfg(), supplies = this.supplies();
-    const missing = [['arrival', 'arrival point'], ['vendor', 'potion merchant'], ['smith', 'repair merchant'], ['gate', 'world statue / teleport'], ...(c.petFull ? [['storage', 'warehouse']] : [])].filter(([key]) => !c[key]).map(([, label]) => label);
+    const missing = [['arrival', 'arrival point'], ['vendor', 'potion merchant'], ['smith', 'repair merchant'], ...(this.walks() ? [] : [['gate', 'world statue / teleport']]), ...(c.petFull ? [['storage', 'warehouse']] : [])].filter(([key]) => !c[key]).map(([, label]) => label);
     if (missing.length) return 'Save missing town services: ' + missing.join(', ') + '.';
     if (!supplies.length || supplies.some(s => !s.refObjId || !Number.isInteger(s.low) || !Number.isInteger(s.target) || s.low < 0 || s.target <= s.low || s.target > 10000)) return 'Choose potions and valid low-stock/refill quantities.';
-    if ((!revival && !this.scroll(0x09ec)) || !this.scroll(0x19ec)) return revival ? 'Carry a reverse return scroll for revival return.' : 'Carry a return scroll and a reverse return scroll before hunting.';
+    if (!revival && !this.inTown() && !this.scroll(0x09ec)) return 'Carry a return scroll before hunting.';
     if (toBigInt(World.gp.progression?.gold ?? 0) <= 0n) return 'Carry gold for potions, storage and repairs.';
     return '';
   },
@@ -3973,8 +7355,11 @@ const Town = {
     const H = Hunt.cfg(), deathInArea = !!(this.deathPoint && H.center && dist2D(this.deathPoint, H.center) <= H.radius);
     const reverseChoice = revival && this.cfg().deathReturn === 'death' && deathInArea ? TOWN_REVERSE.death : TOWN_REVERSE.recall;
     if (revival && this.cfg().deathReturn === 'death' && !deathInArea) Log.info('Died outside the hunting area: reversing to the last return-scroll point so hunting can start again.');
-    const origin = revival ? (reverseChoice === TOWN_REVERSE.death ? this.deathPoint || Hunt.cfg().center : this.lastScrollPoint || Hunt.cfg().center) : World.pose();
-    if (!origin) return this.fail('No saved hunting point for revival return.');
+    // Started in town: the pose is the town, not the hunt. The reverse scroll goes back to the last scroll point.
+    const inTown = this.inTown(revival);
+    const origin = revival || inTown ? (reverseChoice === TOWN_REVERSE.death ? this.deathPoint || Hunt.cfg().center : this.lastScrollPoint || Hunt.cfg().center) : World.pose();
+    if (!origin) return this.fail(inTown ? 'No saved hunting point to return to; set the hunting area first.' : 'No saved hunting point for revival return.');
+    if (!this.walks() && !this.scroll(0x19ec)) Log.info('No reverse return scroll: unless one is bought in town, the trip walks back to the hunting spot after the services.');
     if (revival) Hunt.running = true;
     Restock.trip = null;
     Resurrect.cancelTrip('', true); Resurrect.holdUntil = 0; Loot.suspend();
@@ -3982,40 +7367,88 @@ const Town = {
     // Say why, once: the trigger is only visible before departure, and people ask why the bot went to town.
     const why = revival ? 'returning after a death' : this.reason() || 'started by you';
     this.lastTrip = { why, at: now() };
-    this.trip = { phase: 'recall', at: now(), started: now(), origin: { ...origin }, revival, reverseChoice, why,
-      huntArea: revival && !(reverseChoice === TOWN_REVERSE.death && this.deathPoint) && Hunt.cfg().center ? { center: { ...Hunt.cfg().center }, radius: Hunt.cfg().radius } : null,
+    this.trip = { phase: 'recall', at: now(), started: now(), origin: { ...origin }, revival, inTown, reverseChoice, why,
+      huntArea: (revival || inTown) && !(reverseChoice === TOWN_REVERSE.death && this.deathPoint) && Hunt.cfg().center ? { center: { ...Hunt.cfg().center }, radius: Hunt.cfg().radius } : null,
       manualAt: Manual.lastAt, character: World.charName, petRef: Loot.pet()?.rec.refObjId,
       config: JSON.stringify(this.cfg()), supplies: this.supplies(), sellFirst: !!this.cfg().sellBag };
     Hunt.targetGid = Hunt.lootGid = 0;
+    // Bag selling reads codenames from the item catalogue: start loading it now, well before the merchant.
+    if (this.trip.sellFirst) Loot.ensureCatalogue();
     // Stop the worker's repeating attack/movement as well as the bot's next tick.
     // Pending inventory work still settles before item-use is admitted below.
     this.trip.haltSent = Cmd.move(World.pose());
     this.trip.haltAt = now();
     this.trip.haltAttempts = this.trip.haltSent ? 1 : 0;
+    // Started in town: skip the return scroll and go straight to the services.
+    if (inTown) { this.arrived(); return; }
     if (revival) this.enter('revive-arrival');
     else this.message = 'Using return scroll; recall must be bound to your town.';
   },
   arrived() {
-    this.trip.scrollAttempts = 0; this.trip.scrollRequest = null;
+    const t = this.trip, full = World.freeBagSlots() < 1;
+    t.scrollAttempts = 0; t.scrollRequest = null;
     // With bag selling on, the trip sells first, so a full bag can still make room for refills.
-    if (World.freeBagSlots() < 1 && !this.trip.sellFirst) return this.fail('Returned to town; free a character bag slot for storage and refills.');
-    if (this.cfg().petFull && this.reason() === 'pickup pet nearly full' && !Loot.pet()?.rec.inventory.some(i => this.disposable(i) || this.eligible(i))) return this.fail('Returned to town; pet is full of protected items. Empty it manually.');
-    this.enter(this.cfg().storage ? 'walk-storage' : this.trip.sellFirst ? 'walk-smith' : 'walk-vendor');
+    if (full && !t.sellFirst) return this.fail('Returned to town; free a character bag slot for storage and refills.');
+    t.order = this.order(full);
+    this.enter('walk-' + t.order[0]);
   },
-  // The merchant to walk to after closing a window: potions come before repair and selling, unless bag selling is on,
-  // which sells and repairs first so a full bag has room to buy.
-  closeNext(phase) {
+  // The services in visiting order. Potions come before repair and selling, unless bag selling is on, which sells and
+  // repairs first so a full bag has room to buy. A full bag also sells before the warehouse: pet loot reaches the
+  // warehouse through a free bag slot.
+  order(full) {
     const sellFirst = this.trip?.sellFirst;
-    return { 'close-storage': sellFirst ? 'walk-smith' : 'walk-vendor', 'close-smith': sellFirst ? 'walk-vendor' : 'walk-gate', 'close-vendor': sellFirst ? 'walk-gate' : 'walk-smith' }[phase];
+    const order = !sellFirst ? ['storage', 'vendor', 'smith', 'gate'] : full ? ['smith', 'storage', 'vendor', 'gate'] : ['storage', 'smith', 'vendor', 'gate'];
+    return order.filter(role => (role !== 'storage' || this.cfg().storage) && (role !== 'gate' || !this.walks()));
+  },
+  // The service to walk to after closing a window. After the last one: the world statue to reverse, or the walk back
+  // when no reverse scroll is carried (none was bought in town either).
+  closeNext(phase) {
+    const order = this.trip?.order || this.order(false), role = phase.replace(/^close-/, ''), next = order[order.indexOf(role) + 1] || 'gate';
+    return next === 'gate' && !this.reverses() ? 'leave' : 'walk-' + next;
+  },
+  // Walk back instead of reversing: the trip ends here and WalkBack, which resumes hunting on arrival, takes over.
+  // A trapped-character recovery trip stops in town instead, as it does before a reverse (lean-trap.js).
+  leave() {
+    const t = this.trip, gp = World.gp;
+    if (t.recovery) {
+      this.trip = null;
+      Hunt.stop('Recovery town services completed. Check the hunting spot before returning.');
+      return;
+    }
+    if (gp.inventoryPending || World.isCasting()) return;
+    if (t.supplies.some(s => Restock.count(s.refObjId) < s.target) || this.damaged().length || !t.revival && !this.scroll(0x09ec)) return this.fail('Final supply, repair or travel-scroll check failed.');
+    if (World.freeBagSlots() <= 1) return this.fail('Returned to town; free at least two character bag slots before hunting again.');
+    if (!Hunt.cfg().center) return this.fail('No saved hunting spot to walk back to.');
+    this.trip = null; Hunt.targetGid = Hunt.lootGid = 0; this.restartClocks();
+    WalkBack.start(true);
+    if (!WalkBack.active && !Travel.active) { this.message = 'Town cycle stopped: the walk back to the hunting spot did not start.'; Hunt.stop(this.message); return; }
+    this.message = 'Town service complete; walking back to the hunting spot.';
+    Log.info(this.message); UI.toast(this.message);
   },
   enter(phase) {
     const t = this.trip;
     t.phase = phase; t.at = now(); t.sent = false; t.pending = null; t.transition = false;
-    t.travel = null; t.lastPose = null; t.progressAt = now(); t.movedAt = -Infinity; t.retryAt = 0;
+    t.travel = null; t.lastPose = null; t.progressAt = now(); t.movedAt = -Infinity; t.retryAt = 0; t.stall = null; t.avoid = [];
     this.message = 'Town cycle: ' + phase;
   },
   // Plain wording for the service being approached (never an NPC name), for messages and bug reports.
-  role(phase) { return { storage: 'warehouse', vendor: 'potion merchant', smith: 'repair merchant', gate: 'world statue' }[String(phase).replace(/^(walk|open|close)-/, '')] || 'service point'; },
+  role(phase) { return { storage: 'warehouse', vendor: 'potion merchant', smith: 'repair merchant', gate: 'world statue', arrival: 'town start' }[String(phase).replace(/^(walk|open|close)-/, '')] || 'service point'; },
+  viaArrival() {
+    const t = this.trip, c = this.cfg();
+    if (t.phase === 'walk-arrival') {
+      this.enter(t.resume);
+      this.message = 'Town cycle: the town start is out of reach too; trying the ' + this.role(t.phase) + ' again.';
+      Log.info(this.message);
+      return true;
+    }
+    if (!c.arrival || t.viaArrival === t.phase || !(dist2D(World.pose(), c.arrival) > 60)) return false;
+    const resume = t.phase;
+    this.enter('walk-arrival');
+    t.resume = t.viaArrival = resume;
+    this.message = 'Town cycle: no way to the ' + this.role(resume) + ' from here; going to the town start first.';
+    Log.info(this.message);
+    return true;
+  },
   walk(dest) {
     const t = this.trip, pose = World.pose();
     // Permit a reachable nearby approach, but always stay in service range.
@@ -4029,7 +7462,20 @@ const Town = {
       this.message = 'Town movement to the ' + this.role(t.phase) + ': blocked route (no progress for 20 s); retrying.';
       return false;
     }
+    if (!World.isSitting() && Navigation.watch(t, pose, t.movedAt, t.travel?.route[t.travel.index] || dest) === 'giveup') {
+      if (this.viaArrival()) return false;
+      // The warehouse is optional: a blocked walk to it skips the deposit so the potions, repairs and the way back still happen.
+      if (t.phase === 'walk-storage') {
+        this.enter(this.closeNext('close-storage'));
+        this.message = 'Warehouse skipped: blocked on the way, I could not walk around the obstacle.';
+        UI.toast(this.message, 'warn', 6000);
+        return false;
+      }
+      this.fail('Blocked on the way to the ' + this.role(t.phase) + '; I could not walk around the obstacle.');
+      return false;
+    }
     const step = Navigation.next(t, dest, false, radius);
+    if (step.error && !step.waiting && this.viaArrival()) return false;
     if (step.waiting || step.error) {
       t.travel = null; t.retryAt = now() + 5000; t.progressAt = now();
       this.message = 'Town movement to the ' + this.role(t.phase) + ': waiting; retrying collision route. ' + (step.error || 'Waiting for collision coverage.');
@@ -4143,7 +7589,7 @@ const Town = {
     const bagItem = !petItem && t.sellFirst ? World.items().find(i => this.sellableBag(i) && !unsold('bag:', i)) : null;
     const item = petItem || bagItem;
     if (!item) {
-      if (this.cfg().petFull && pet && pet.rec.status - pet.rec.inventory.length <= this.cfg().petFree) return this.fail('Protected pet items still fill the bag.');
+      // Protected items may still fill the pet; the trip carries on and goes back to hunting rather than stopping in town.
       this.enter(this.ammoSupplies().length ? 'ammo' : 'repair'); return;
     }
     const quantity = item.quantity ?? 1;
@@ -4180,26 +7626,41 @@ const Town = {
     const t = this.trip, gp = World.gp, shop = Restock.activeShop();
     if (!shop || shop.npc !== this.npc('vendor')?.gid || shop.error) return this.fail(shop?.error || 'Potion merchant selection changed.');
     if (!this.pendingDone(p => Restock.count(p.ref) >= p.before + p.quantity) || !this.trip || gp.inventoryPending) return;
-    let s = t.supplies.find(s => Restock.count(s.refObjId) < s.target);
+    t.buySkipped ||= [];
+    let s = t.supplies.find(s => !t.buySkipped.includes(s.refObjId) && Restock.count(s.refObjId) < s.target);
     if (!s) {
-      // Refill held travel scrolls from gold offers only. Never buy from Item Mall.
-      for (const type of [0x09ec, 0x19ec]) {
+      // Refill held travel scrolls from gold offers only. Never buy from Item Mall. A missing reverse scroll is not an
+      // error: the trip walks back instead.
+      for (const type of this.walks() ? [0x09ec] : [0x09ec, 0x19ec]) {
         const count = World.items().filter(i => (i.typeFlags & 0xfffc) === type).reduce((n, i) => n + (i.quantity ?? 1), 0);
         if (count >= 2) continue;
         const offer = shop.offers.find(o => (o.currency === undefined || o.currency === 1) &&
           (o.items || o.previews || []).some(i => i.refObjId === o.refObjId && (i.typeFlags & 0xfffc) === type) &&
           (!o.contents?.length || o.contents.length === 1 && o.contents[0].refObjId === o.refObjId && o.contents[0].quantity === 1));
         if (offer) { s = { kind: 'scroll', refObjId: offer.refObjId, target: Restock.count(offer.refObjId) + 2 - count }; break; }
-        if (!count) return this.fail('Travel scrolls unavailable at this merchant. Carry spares.');
+        if (!count && type === 0x09ec) return this.fail('Travel scrolls unavailable at this merchant. Carry spares.');
       }
     }
     if (!s) { this.enter('close-vendor'); return; }
     const offer = shop.offers.find(o => o.refObjId === s.refObjId && (s.kind === 'scroll' || Restock.offerKind(o) === s.kind));
+    if (!offer && (s.kind === 'hp' || s.kind === 'mp')) {
+      // No X-Large here: buy the largest potion of this kind the merchant sells instead of stopping the town cycle.
+      const price = o => toBigInt(o.price);
+      const best = shop.offers.filter(o => Restock.offerKind(o) === s.kind && o.maxStack > 0).sort((x, y) => price(y) > price(x) ? 1 : price(y) < price(x) ? -1 : 0)[0];
+      if (best) { this.tier[s.kind] = s.refObjId = best.refObjId; return; }
+    }
     if (!offer || !(offer.maxStack > 0)) return this.fail(s.kind === 'scroll' ? 'Selected scroll is unavailable here.' : s.kind === 'cure' ? 'Special Universal Pill (small) is unavailable here.' : s.kind === 'vigor' ? 'The selected vigor potion size is unavailable here; choose another size in Supplies.' : 'X-Large ' + s.kind.toUpperCase() + ' potion is unavailable here.');
     const before = Restock.count(s.refObjId), room = World.items().filter(i => i.refObjId === s.refObjId).reduce((n, i) => n + Math.max(0, offer.maxStack - (i.quantity ?? 1)), 0);
-    const quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, room + Math.max(0, World.freeBagSlots() - 1) * offer.maxStack);
+    let quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, room + Math.max(0, World.freeBagSlots() - 1) * offer.maxStack);
     if (quantity < 1) return this.fail('Not enough bag space for refill and a spare transfer slot.');
-    if (gp.progression?.gold === undefined || toBigInt(offer.price) * BigInt(quantity) > toBigInt(gp.progression.gold)) return this.fail('Not enough gold for potion refill.');
+    if (gp.progression?.gold === undefined) return this.fail('Not enough gold for potion refill.');
+    // Short on gold: buy what the gold covers and carry on, instead of ending the trip in the shop.
+    const price = toBigInt(offer.price), gold = toBigInt(gp.progression.gold);
+    if (price > 0n && price * BigInt(quantity) > gold) quantity = Number(gold / price);
+    if (quantity < 1) {
+      if (before > 0) { t.buySkipped.push(s.refObjId); this.message = 'Not enough gold to top up ' + s.kind + '; buying what is left.'; UI.toast(this.message, 'warn', 6000); return; }
+      return this.fail('Not enough gold for potion refill.');
+    }
     if (Cmd.raw({ kind: 'shop-buy', tab: offer.tab, slot: offer.slot, quantity }, 'Town: refill ' + s.kind)) t.pending = { ref: s.refObjId, before, quantity, at: now() };
   },
   maximum(item) {
@@ -4303,7 +7764,7 @@ const Town = {
       // After death the game's last scroll point need not equal the saved
       // hunt center (or an older remembered scroll point). Accept the saved
       // hunting area too, but only after confirmed, settled world travel.
-      const inHuntArea = t.phase === 'reverse-wait' && t.revival && t.huntArea &&
+      const inHuntArea = t.phase === 'reverse-wait' && (t.revival || t.inTown) && t.huntArea &&
         dist2D(World.pose(), t.huntArea.center) <= t.huntArea.radius;
       if (t.transition && (distance <= radius || inHuntArea) && !gp.inventoryPending && !gp.returnScroll) {
         if (t.phase === 'recall-wait') { this.lastScrollPoint = { ...t.origin }; this.arrived(); }
@@ -4319,7 +7780,8 @@ const Town = {
       }
     } else if (t.phase.startsWith('walk-')) {
       const role = t.phase.slice(5);
-      if (this.walk(c[role]) && this.trip) this.enter('open-' + role);
+      if (role === 'arrival') { if (this.walk(c.arrival) && this.trip) this.enter(t.resume); }
+      else if (this.walk(c[role]) && this.trip) this.enter('open-' + role);
     } else if (t.phase.startsWith('open-')) {
       const role = t.phase.slice(5), kind = role === 'storage' ? 'storage-open' : role === 'gate' ? 'npc-talk' : 'shop-open';
       if (this.open(role, kind) && this.trip) this.enter({ storage: 'store', vendor: 'buy', smith: 'sell', gate: 'reverse' }[role]);
@@ -4328,6 +7790,7 @@ const Town = {
     else if (t.phase === 'sell') this.sell();
     else if (t.phase === 'ammo') this.ammo();
     else if (t.phase === 'repair') this.repair();
+    else if (t.phase === 'leave') this.leave();
     else if (t.phase.startsWith('close-')) {
       if (now() - t.at > 15000) this.fail('NPC window did not close.');
       else this.close(this.closeNext(t.phase));
@@ -4356,10 +7819,12 @@ const Town = {
 // registers an offer while the stall is still closed, stall-open {open, network} opens it for business and can
 // list it on the stall network, stall-close tears it down. World.gp.stall is undefined while no stall is open,
 // otherwise { phase: 'none'|'naming'|'owner'|'visitor', owner, title, open, offers: [{slot, item, bagSlot,
-// quantity, price}], visitors }. A sale shows as the offer disappearing while gold rises; a dispatch is never
-// proof, every step waits for its state change and is never resent.
+// quantity, price}], visitors }. A sale shows as the offer disappearing and then gold rising (0x3260 reports the
+// sold slot, the gold comes on its own update); a dispatch is never proof, every step waits for its state change
+// and is never resent.
 const STALL_MAX_OFFERS = 10;
 const STALL_STEP_TIMEOUT_MS = 15000;
+const STALL_SALE_WAIT_MS = 30000;
 const Stall = {
   run: null, pending: null, message: 'Idle. Price items on this page, stand in town and open the stall.',
   started: false,
@@ -4406,7 +7871,7 @@ const Stall = {
     const list = this.candidates();
     if (!list.length) return reject('No priced bag items to offer. Give items a price on this page first.');
     this.run = { phase: 'name', character: World.charName, config: JSON.stringify(c), manualAt: Manual.lastAt,
-      skip: new Set(), refusals: 0, sold: 0, earned: 0n, openedAt: 0, lastGold: toBigInt(gp.progression?.gold), offersAt: null };
+      skip: new Set(), refusals: 0, sold: 0, earned: 0n, openedAt: 0, lastGold: toBigInt(gp.progression?.gold), offersAt: null, vanished: [] };
     this.pending = null;
     this.message = 'Opening the stall.';
     Activity.emit({ category: 'stall', code: 'stall-started', text: 'Stall session started: offering ' + list.length + ' priced item' + (list.length === 1 ? '' : 's') + '.', outcome: 'requested' });
@@ -4415,8 +7880,8 @@ const Stall = {
   // so a world reset never sends a command the worker would refuse); `quiet` drops it without any command.
   stop(reason = 'Stall session stopped.', quiet = false) {
     const r = this.run; this.run = null; this.pending = null;
-    this.message = reason;
     if (!r) return;
+    this.message = reason;
     if (r.phase === 'done') return;
     Activity.emit({ category: 'stall', code: 'stall-stopped', level: 'warn', text: reason, outcome: 'cancelled' });
     if (quiet) return;
@@ -4475,27 +7940,34 @@ const Stall = {
     this.pending = { kind, at: now(), ...extra };
     return true;
   },
-  // A sale: an offer disappears while gold rises. Nothing else moves gold while the session owns the character,
-  // so an offer vanishing without a gold gain is not claimed as a sale.
+  // A sale: an offer disappears, then gold rises. The game reports the two separately, so a vanished offer waits
+  // up to STALL_SALE_WAIT_MS for gold above what the character had before it vanished. Nothing else moves gold
+  // while the session owns the character; an offer vanishing without a gold gain is not claimed as a sale.
   observeSales(r, gp) {
-    const stall = gp.stall;
-    if (!stall || stall.phase !== 'owner') return;
-    const gold = toBigInt(gp.progression?.gold);
-    if (r.offersAt === null) { r.offersAt = stall.offers.map(o => ({ ...o })); r.lastGold = gold; return; }
-    const before = r.offersAt, after = stall.offers;
-    for (const old of before) {
-      const kept = after.find(o => o.slot === old.slot);
-      const quantity = old.quantity - (kept ? Math.min(kept.quantity, old.quantity) : 0);
-      if (quantity <= 0 || gold <= r.lastGold) continue;
-      const value = BigInt(old.price) * BigInt(quantity);
-      r.sold += quantity; r.earned += value;
-      r.saleNoteAt = now();
-      this.message = 'Sold ' + quantity + ' × ' + (old.item?.name || Items.name(old.item?.refObjId) || 'item') + ' for ' + value.toLocaleString('en-US') + ' gold.';
-      Activity.emit({ category: 'stall', code: 'stall-sale', text: this.message, outcome: 'confirmed',
-        details: { refObjId: old.item?.refObjId, quantity, price: old.price, slot: old.slot } });
+    const stall = gp.stall, gold = toBigInt(gp.progression?.gold);
+    if (stall?.phase === 'owner') {
+      if (r.offersAt === null) { r.offersAt = stall.offers.map(o => ({ ...o })); r.lastGold = gold; return; }
+      const after = stall.offers;
+      for (const old of r.offersAt) {
+        const kept = after.find(o => o.slot === old.slot);
+        const quantity = old.quantity - (kept ? Math.min(kept.quantity, old.quantity) : 0);
+        if (quantity > 0) r.vanished.push({ old, quantity, at: now(), gold: r.lastGold });
+      }
+      r.offersAt = after.map(o => ({ ...o }));
     }
-    r.offersAt = after.map(o => ({ ...o }));
+    r.vanished = r.vanished.filter(sale => {
+      if (gold > sale.gold) { this.claimSale(r, sale); return false; }
+      return now() - sale.at < STALL_SALE_WAIT_MS;
+    });
     r.lastGold = gold;
+  },
+  claimSale(r, { old, quantity }) {
+    const value = BigInt(old.price) * BigInt(quantity);
+    r.sold += quantity; r.earned += value;
+    r.saleNoteAt = now();
+    this.message = 'Sold ' + quantity + ' × ' + (old.item?.name || Items.name(old.item?.refObjId) || 'item') + ' for ' + value.toLocaleString('en-US') + ' gold.';
+    Activity.emit({ category: 'stall', code: 'stall-sale', text: this.message, outcome: 'confirmed',
+      details: { refObjId: old.item?.refObjId, quantity, price: old.price, slot: old.slot } });
   },
   watchSelling(r, gp) {
     this.observeSales(r, gp);
@@ -4564,6 +8036,7 @@ const Stall = {
     }
     if (r.phase === 'selling') { this.watchSelling(r, gp); return true; }
     if (r.phase === 'close') {
+      this.observeSales(r, gp);
       if (!stall) return this.finish('Stall closed. Sold ' + r.sold + ' item' + (r.sold === 1 ? '' : 's') + ' for ' + r.earned.toLocaleString('en-US') + ' gold.'), true;
       this.message = 'Stall: closing.';
       this.send('close', { kind: 'stall-close' }, 'close the stall');
@@ -4582,7 +8055,15 @@ const Stall = {
     if (this.started) return; this.started = true;
     // Any manual native gameplay command can interfere with the stall; our own Cmd.raw bypasses these observers.
     Hook.observers.push(command => { if (command.kind === 'gameplay' && this.run) this.stop('Stall stopped by manual game control.'); });
-    bus.on('game-error', text => { if (this.run && /stall|inventory/i.test(String(text))) this.stop('Stall stopped after a game refusal; wait for the state to settle.'); });
+    // A refused offer skips that item, as an unconfirmed one does; any other stall refusal ends the session. Potion
+    // and other inventory refusals are not ours: the controller keeps potions running while the stall is open.
+    bus.on('game-error', text => {
+      if (!this.run) return;
+      if (this.pending?.kind === 'add') {
+        this.run.skip.add(this.pending.bagSlot); this.run.refusals++; this.pending = null;
+        this.message = 'Stall: the game refused one item; skipping it.';
+      } else if (/stall/i.test(String(text))) this.stop('Stall stopped after a game refusal; wait for the state to settle.');
+    });
     // A world reset clears the stall server-side too; drop the session without sending anything.
     bus.on('reset', () => this.stop('Stall stopped after world reset.', true));
   },
@@ -4621,7 +8102,7 @@ const Stall = {
     const unnamed = [...new Map(World.items().filter(i => this.price(i.refObjId) === 0 && i.tooltip?.fields?.canSell !== 0).map(i => [i.refObjId, i])).values()];
     if (unnamed.length) prices.append(UI.select('Add a bag item to sell', () => [[0, 'Choose an item'], ...unnamed.map(i => [i.refObjId, (i.name || Items.name(i.refObjId)) + ' ×' + (i.quantity ?? 1)])],
       () => 0, v => { const id = Number(v); if (id) { this.setPrice(id, 100); UI.draw(); } }));
-    prices.append(el('p', 'Prices are per exact item and saved with this character, so the same drop sells at the same price on the next stall. A new entry starts at 100 gold; change it to what the item is worth. Items the merchant cannot sell are not offered. Items already in a stall you keep open in the game are left alone.', 'muted'));
+    prices.append(el('p', 'Prices are per exact item and saved with this character, so the same drop sells at the same price on the next stall. A new entry starts at 100 gold; change it to what the item is worth. Items the merchant cannot sell are not offered.', 'muted'));
     UI.pane.append(prices);
   },
   refresh() {
@@ -4631,9 +8112,190 @@ const Stall = {
 };
 
 
+// Generated by gen-travel.py from the client's teleportData.json and npcpos.json. Do not edit by hand.
+const TRAVEL_TABLE = {"nodes":[{"id":1,"refObjId":2094,"name":"SN_ZONE_22001"},{"id":2,"refObjId":2095,"name":"SN_ZONE_22002"},{"id":3,"refObjId":2011,"name":"SN_ZONE_21002","regionId":24993,"x":362.3,"y":72.48,"z":1761.33},{"id":4,"refObjId":2119,"name":"SN_ZONE_21003","regionId":24734,"x":330.34,"y":61.89,"z":1606.66},{"id":5,"refObjId":2031,"name":"SN_ZONE_13002","regionId":25000,"x":1009.54,"y":0.0,"z":1902.64},{"id":6,"refObjId":2034,"name":"SN_ZONE_14022","regionId":25001,"x":1387.17,"y":-0.07,"z":1765.02},{"id":7,"refObjId":2037,"name":"SN_ZONE_14031","regionId":25000,"x":930.07,"y":-0.41,"z":30.66},{"id":8,"refObjId":2035,"name":"SN_ZONE_14025","regionId":25255,"x":334.99,"y":-0.28,"z":34.18},{"id":9,"refObjId":2056,"name":"SN_ZONE_21004","regionId":25761,"x":513.16,"y":89.61,"z":1281.35},{"id":10,"refObjId":2120,"name":"SN_ZONE_21005","regionId":25244,"x":919.72,"y":69.37,"z":366.88},{"id":11,"refObjId":2096,"name":"SN_ZONE_22003"},{"id":12,"refObjId":2046,"name":"SN_ZONE_25022","regionId":24999,"x":647.53,"y":15.92,"z":367.55},{"id":13,"refObjId":2197,"name":"SN_ZONE_25022"},{"id":16,"refObjId":3826,"name":"SN_ZONE_25029_2","regionId":23436,"x":1189.4,"y":-22.49,"z":1324.57},{"id":17,"refObjId":3827,"name":"SN_ZONE_25029_1","regionId":23180,"x":1644.16,"y":-32.06,"z":752.79},{"id":18,"refObjId":3824,"name":"SN_ZONE_25028_2","regionId":23439,"x":323.36,"y":17.89,"z":1747.85},{"id":19,"refObjId":3825,"name":"SN_ZONE_25028_1","regionId":23183,"x":275.92,"y":-25.64,"z":888.49},{"id":20,"refObjId":5901,"name":"SN_ZONE_25031_1","regionId":24185,"x":615.54,"y":2134.74,"z":27.1},{"id":21,"refObjId":5902,"name":"SN_ZONE_25031_2","regionId":22137,"x":851.51,"y":2064.43,"z":1033.44},{"id":22,"refObjId":5910,"name":"SN_ZONE_25033_1","regionId":24438,"x":1120.72,"y":2552.81,"z":313.19},{"id":23,"refObjId":5911,"name":"SN_ZONE_25033_2","regionId":22134,"x":919.97,"y":2545.55,"z":1902.6},{"id":24,"refObjId":19071,"name":"SN_ZONE_25033_3","regionId":24424,"x":1661.63,"y":3892.83,"z":582.68},{"id":25,"refObjId":19074,"name":"SN_ZONE_22004"},{"id":26,"refObjId":7524,"name":"SN_ZONE_21009","regionId":25163,"x":958.05,"y":-155.04,"z":98.97},{"id":27,"refObjId":7522,"name":"SN_ZONE_25022","regionId":26704,"x":652.34,"y":-27.6,"z":1690.06},{"id":28,"refObjId":7526,"name":"SN_ZONE_14043","regionId":27471,"x":1349.25,"y":82.7,"z":412.72},{"id":29,"refObjId":19519,"name":"SN_ZONE_11043","regionId":26959,"x":568.86,"y":83.63,"z":1116.58},{"id":30,"refObjId":19072,"name":"SN_ZONE_14044","regionId":26957,"x":1650.2,"y":83.87,"z":1332.48},{"id":31,"refObjId":7527,"name":"SN_ZONE_21007","regionId":26457,"x":1330.52,"y":26.27,"z":908.75},{"id":32,"refObjId":7528,"name":"SN_ZONE_21008","regionId":25945,"x":1323.33,"y":26.93,"z":999.61},{"id":33,"refObjId":7529,"name":"SN_ZONE_25033_4","regionId":24934,"x":1503.91,"y":626.55,"z":70.9},{"id":34,"refObjId":19075,"name":"SN_ZONE_22005"},{"id":35,"refObjId":7545,"name":"SN_ZONE_25044_03","regionId":27000,"x":1195.11,"y":598.15,"z":1826.79},{"id":36,"refObjId":7546,"name":"SN_ZONE_25044_04","regionId":26232,"x":1489.76,"y":185.39,"z":1842.94},{"id":37,"refObjId":7547,"name":"SN_ZONE_25033_5","regionId":25975,"x":1368.73,"y":324.81,"z":1335.88},{"id":38,"refObjId":7548,"name":"SN_ZONE_25044_01","regionId":26237,"x":158.16,"y":393.61,"z":614.88},{"id":39,"refObjId":7549,"name":"SN_ZONE_25044_02","regionId":25469,"x":183.18,"y":256.87,"z":437.25},{"id":40,"refObjId":23285,"name":"SN_ZONE_40008"},{"id":41,"refObjId":23286,"name":"SN_ZONE_40000"},{"id":42,"refObjId":23287,"name":"SN_ZONE_40009"},{"id":43,"refObjId":22574,"name":"SN_ZONE_41008"},{"id":44,"refObjId":22575,"name":"SN_ZONE_41009"},{"id":45,"refObjId":22576,"name":"SN_ZONE_41010"},{"id":46,"refObjId":22577,"name":"SN_ZONE_41004"},{"id":47,"refObjId":22578,"name":"SN_ZONE_41005"},{"id":48,"refObjId":22579,"name":"SN_ZONE_41006"}],"links":[[1,2,5000],[2,1,5000],[2,11,5000],[3,9,500],[4,10,500],[5,6,10],[5,7,10],[5,8,10],[6,5,10],[6,7,10],[6,8,10],[7,5,10],[7,6,10],[7,8,10],[8,5,10],[8,6,10],[8,7,10],[9,3,500],[10,4,500],[11,2,5000],[11,34,5000],[12,13,0],[16,18,500],[17,19,500],[18,16,500],[19,17,500],[20,22,500],[20,23,500],[20,37,500],[21,22,500],[21,23,500],[22,20,500],[22,21,500],[22,37,500],[23,20,500],[23,21,500],[24,33,500],[25,34,5000],[26,31,500],[26,32,500],[27,13,0],[28,29,10],[28,30,10],[29,28,10],[29,30,10],[30,28,10],[30,29,10],[31,26,500],[32,26,500],[33,24,500],[34,11,5000],[34,25,5000],[35,38,500],[36,39,500],[37,20,500],[37,22,500],[38,35,500],[39,36,500],[40,43,0],[40,44,0],[40,45,0],[41,43,0],[41,44,0],[41,45,0],[42,43,0],[42,44,0],[42,45,0],[43,40,0],[43,41,0],[43,42,0],[44,40,0],[44,41,0],[44,42,0],[45,40,0],[45,41,0],[45,42,0],[46,47,0],[46,48,0],[47,46,0],[47,48,0],[48,1,0],[48,46,0],[48,47,0]]};
+
+
+// Teleporters and ferries for a walk that cannot be made on foot (lean-travel-data.js). The route areas
+// (lean-route.js) say where walking connects; a teleport or ferry link joins two places for its fee. Every walk
+// between them is still a WalkBack walk, and each hop is the game's own portal menu: select the teleporter, wait for
+// its menu, send travel-gate type 2 with the destination's teleport id, and confirm the arrival.
+const TRAVEL_HOP = 3000;        // a hop (menu and load screen) weighs like this much walking
+const TRAVEL_WALK = 1.3;        // a walk is longer than the straight line
+const TRAVEL_REACH = 150;       // stop this close to the teleporter: it stands on a dock or a ship; the game talks within 20 m
+const TRAVEL_FIND = 300;        // the teleporter stands within this of its table position
+const TRAVEL_STEP_MS = 15000;   // selecting, the menu, and the hop starting
+const TRAVEL_ARRIVE_MS = 90000;
+const TRAVEL_LAND = 900;        // the arrival lands within this of the destination teleporter
+const TRAVEL_REPLANS = 3;
+const TRAVEL_PORTAL = 0x80;     // target capability: the teleport menu
+
+const Travel = {
+  active: null, message: '', places: null,
+  on() { return Settings.profile.hunt.travel !== false; },
+  // Teleporters with a known position. Town world statues are buildings: their position comes from the town table.
+  nodes() {
+    if (this.places) return this.places;
+    const gates = new Map((typeof TOWN_TABLE !== 'undefined' ? TOWN_TABLE : []).map(t => [t.services.gate?.refObjId, { town: t.name, ...t.services.gate }]));
+    this.places = new Map();
+    for (const row of typeof TRAVEL_TABLE !== 'undefined' ? TRAVEL_TABLE.nodes : []) {
+      const gate = gates.get(row.refObjId), at = Number.isInteger(row.regionId) ? row : gate;
+      if (!at) continue;
+      this.places.set(row.id, { id: row.id, refObjId: row.refObjId, label: gate ? 'the ' + gate.town + ' world statue' : 'the teleporter',
+        pose: { regionId: at.regionId, x: at.x, y: at.y, z: at.z } });
+    }
+    return this.places;
+  },
+  links() { return typeof TRAVEL_TABLE !== 'undefined' ? TRAVEL_TABLE.links : []; },
+  walkable(a, b) {
+    const d = dist2D(a, b);
+    return Number.isFinite(d) && (d <= WALK_LEG || !!Route.commonArea(a, b));
+  },
+  // Cheapest mix of walks and hops (Dijkstra over the start, the goal and every teleporter). Steps alternate between
+  // { kind: 'walk', to } and { kind: 'hop', from, to, fee }; null when no mix reaches the goal.
+  plan(from, to, banned = new Set()) {
+    if (!from || !to || ((from.regionId | to.regionId) & DUNGEON)) return null;
+    const nodes = [...this.nodes().values()], gold = toBigInt(World.gp?.progression?.gold ?? 0);
+    const points = [{ pose: from }, { pose: to }, ...nodes.map(node => ({ pose: node.pose, node }))];
+    const index = new Map(nodes.map((node, i) => [node.id, i + 2])), hops = new Map();
+    for (const [source, destination, fee] of this.links()) {
+      if (!index.has(source) || !index.has(destination) || banned.has(source + '>' + destination) || BigInt(fee) > gold) continue;
+      if (!hops.has(source)) hops.set(source, []);
+      hops.get(source).push({ destination, fee });
+    }
+    const cost = points.map(() => Infinity), came = [], done = [];
+    cost[0] = 0;
+    for (;;) {
+      let i = -1;
+      for (let j = 0; j < points.length; j++) if (!done[j] && cost[j] < Infinity && (i < 0 || cost[j] < cost[i])) i = j;
+      if (i < 0 || i === 1) break;
+      done[i] = true;
+      const relax = (j, value, step) => { if (value < cost[j]) { cost[j] = value; came[j] = { from: i, step }; } };
+      for (let j = 1; j < points.length; j++) {
+        if (j !== i && !done[j] && this.walkable(points[i].pose, points[j].pose)) relax(j, cost[i] + dist2D(points[i].pose, points[j].pose) * TRAVEL_WALK, { kind: 'walk' });
+      }
+      for (const hop of points[i].node ? hops.get(points[i].node.id) || [] : []) {
+        const j = index.get(hop.destination);
+        relax(j, cost[i] + TRAVEL_HOP + hop.fee, { kind: 'hop', fee: hop.fee });
+      }
+    }
+    if (cost[1] === Infinity) return null;
+    const steps = [];
+    for (let j = 1; j !== 0; j = came[j].from) {
+      const step = came[j].step;
+      steps.unshift(step.kind === 'walk' ? { kind: 'walk', to: points[j].pose, node: points[j].node || null }
+        : { kind: 'hop', from: points[came[j].from].node, to: points[j].node, fee: step.fee });
+    }
+    return steps;
+  },
+  // WalkBack asks first: true when the walk needs a teleport or a ferry and the trip has started here instead.
+  begin(pose, dest, resume) {
+    if (!this.on() || !Number.isFinite(dist2D(pose, dest)) || this.walkable(pose, dest)) return false;
+    const steps = this.plan(pose, dest);
+    if (!steps?.some(s => s.kind === 'hop')) return false;
+    this.active = { dest: { ...dest }, resume, steps, index: 0, phase: '', at: now(), banned: new Set(), replans: 0, manualAt: Manual.lastAt };
+    const hops = steps.filter(s => s.kind === 'hop'), fees = hops.reduce((n, s) => n + s.fee, 0);
+    Log.info('Travel: the hunting spot needs ' + hops.length + ' teleport' + (hops.length === 1 ? '' : 's') + ' or ferr' + (hops.length === 1 ? 'y' : 'ies') + (fees ? ' (' + fees + ' gold)' : '') + '.');
+    this.next();
+    return true;
+  },
+  next() {
+    const a = this.active, step = a?.steps[a.index];
+    if (!a) return;
+    if (!step) {
+      this.active = null; this.message = 'Back at the hunting spot.';
+      UI.toast(this.message, 'info', 2500);
+      if (a.resume) Hunt.start();
+      return;
+    }
+    a.phase = step.kind === 'walk' ? 'walk' : 'select'; a.at = now(); a.gid = 0; a.talked = false; a.transition = false; a.refused = '';
+    if (step.kind === 'hop') { this.message = 'Travel: using ' + step.from.label + (step.fee ? ' (' + step.fee + ' gold).' : '.'); return; }
+    const last = a.index === a.steps.length - 1, label = last ? 'the hunting spot' : step.node?.label || 'the teleporter';
+    this.message = 'Travel: walking to ' + label + '.';
+    WalkBack.startTo(step.to, { label, stop: last ? 12 : TRAVEL_REACH,
+      onDone: () => { if (this.active === a) { a.index++; this.next(); } },
+      onFail: reason => { if (this.active === a) this.fail(reason); } });
+    if (this.active === a && !WalkBack.active) this.fail('the walk to ' + label + ' did not start');
+  },
+  entity(node) {
+    return [...World.ents.values()].find(e => (e.kind === 'npc' || e.kind === 'teleport') && e.refObjId === node.refObjId && dist2D(e, node.pose) <= TRAVEL_FIND);
+  },
+  tick() {
+    const a = this.active;
+    if (!a || a.phase === 'walk' || !World.inWorld()) return;
+    if (Manual.lastAt !== a.manualAt) return this.fail('manual control');
+    if (World.isDead()) return this.fail('the character died');
+    const step = a.steps[a.index], gp = World.gp;
+    if (a.phase === 'select') {
+      if (now() - a.at > TRAVEL_STEP_MS) return this.fail(step.from.label + ' could not be selected');
+      const npc = this.entity(step.from);
+      if (!npc || gp.targetPending || gp.inventoryPending) return;
+      if (gp.target !== npc.gid) { if (Cmd.spaced('select')) Cmd.select(npc.gid); return; }
+      if (!(gp.targetCapabilities & TRAVEL_PORTAL)) return this.fail(step.from.label + ' offers no teleport');
+      a.gid = npc.gid; a.phase = 'menu'; a.at = now();
+    }
+    if (a.phase === 'menu') {
+      if (gp.target !== a.gid) return this.fail('the teleporter selection changed');
+      if (!(gp.npcConversation?.phase === 'menu' && gp.npcConversation.gid === a.gid)) {
+        if (!a.talked && now() - a.at > 2000 && Cmd.raw({ kind: 'npc-talk' }, 'Travel: open the teleport menu')) a.talked = true;
+        if (now() - a.at > TRAVEL_STEP_MS) this.fail('the teleport menu did not open');
+        return;
+      }
+      if (BigInt(step.fee) > toBigInt(gp.progression?.gold ?? 0)) return this.fail('not enough gold for the ' + step.fee + ' gold fee');
+      if (Cmd.raw({ kind: 'travel-gate', gid: a.gid, type: 2, target: step.to.id }, 'Travel: ' + step.from.label + ' to teleport ' + step.to.id)) {
+        a.phase = 'arrive'; a.at = now(); a.refused = ''; a.landedAt = 0;
+        Log.info('Travel: taking ' + step.from.label + (step.fee ? ' (' + step.fee + ' gold).' : '.'));
+      }
+      return;
+    }
+    if (a.phase === 'arrive') {
+      if (a.refused || !a.transition && now() - a.at > TRAVEL_STEP_MS) return this.refused(step, a.refused);
+      if (now() - a.at > TRAVEL_ARRIVE_MS) return this.fail('the arrival timed out');
+      if (!a.transition || !World.local() || gp.inventoryPending) return;
+      // The landing is usually beside the destination teleporter; a settled landing elsewhere still walks on from there.
+      a.landedAt ||= now();
+      if (dist2D(World.pose(), step.to.pose) <= TRAVEL_LAND || now() - a.landedAt > 5000) { a.index++; this.next(); }
+    }
+  },
+  // A refused hop (fee, level, trade cart...) is left out and the rest is planned again from here.
+  refused(step, key) {
+    const a = this.active;
+    a.banned.add(step.from.id + '>' + step.to.id);
+    const why = /NOT_ENOUGH_MONEY/.test(key) ? 'not enough gold' : /LEVEL/.test(key) ? 'level too low' : key ? 'refused by the game' : 'no answer from the game';
+    Log.warn('Travel: ' + step.from.label + ' did not take you (' + why + ').');
+    const steps = a.replans < TRAVEL_REPLANS ? this.plan(World.pose(), a.dest, a.banned) : null;
+    if (!steps) return this.fail(step.from.label + ': ' + why);
+    a.replans++; a.steps = steps; a.index = 0;
+    if (Cmd.raw({ kind: 'npc-close' }, 'Travel: close the teleport menu')) this.next(); else this.fail('the teleport menu did not close');
+  },
+  notice(n) {
+    const a = this.active;
+    if (a && !a.transition && a.phase === 'arrive' && /INTERACTION_FAIL|TELEPORT/.test(String(n?.key || ''))) a.refused = String(n.key);
+  },
+  // The hop's own load screen is expected; any other world change ends the trip (lean-boot.js).
+  phase(phase) {
+    const a = this.active;
+    if (!a) return false;
+    if (phase === 'entering-world' && a.phase === 'arrive' && !a.refused && now() - a.at < TRAVEL_ARRIVE_MS) { a.transition = true; return true; }
+    this.fail('unexpected travel or disconnect');
+    return false;
+  },
+  fail(reason) {
+    if (!this.active) return;
+    this.active = null;
+    WalkBack.cancel('', false);
+    this.message = 'Travel stopped: ' + reason + '.';
+    Log.warn(this.message); UI.toast(this.message, 'warn', 6000);
+  },
+  cancel() { this.active = null; },
+  status() { return this.active ? this.message : ''; },
+};
+bus.on('notice', n => Travel.notice(n));
+
+
 // Confirm every native inventory move before casting or restoring combat gear.
 const BuffGear = {
-  run: null, recovery: null, message: 'Buff weapon swapping off.', skipped: new Map(), waiting: '', started: false,
+  run: null, recovery: null, autoRestore: false, message: 'Buff weapon swapping off.', skipped: new Map(), waiting: '', started: false, bad: new Set(),
   cfg() { return Settings.profile.macro; },
   items() { return World.gp?.inventory || []; },
   at(slot) { return this.items().find(i => i.slot === slot) || null; },
@@ -4645,9 +8307,60 @@ const BuffGear = {
     const matches = this.items().filter(i => this.key(i) === key);
     return matches.length === 1 ? matches[0] : null;
   },
-  setup() { return { weapon: this.key(this.at(6)), shield: this.key(this.at(7)) }; },
+  // Identical copies are interchangeable, so a skill-driven (auto) set accepts any copy: the equipped one first, then the lowest slot.
+  findAny(key) {
+    if (!key) return null;
+    const matches = this.items().filter(i => this.key(i) === key).sort((a, b) => (a.slot > 7) - (b.slot > 7) || a.slot - b.slot);
+    return matches[0] || null;
+  },
+  lookup(set, key) { return set.auto ? this.findAny(key) : this.find(key); },
+  kind(i) { return i ? i.typeFlags >>> 11 & 31 : 0; },
+  KIND_NAMES: { 2: 'sword', 3: 'blade', 4: 'spear', 5: 'glaive', 6: 'bow', 7: 'sword', 8: 'two-handed sword', 9: 'axe', 10: 'dark staff', 11: 'staff', 12: 'crossbow', 13: 'dagger', 14: 'harp', 15: 'staff' },
+  kindName(kinds) { return [...new Set(kinds.map(k => this.KIND_NAMES[k] || 'weapon type ' + k))].join(' or '); },
+  oneHanded(kind) { return [10, 15, 2, 3, 7, 13].includes(kind); },
+  // Weapon types the game says this skill needs (admit.weaponKinds: 255 = any, 1 = bare hands), or null when any weapon works.
+  // Skills gated by required items (reqi) are judged by the server on those items instead, so they are left alone.
+  need(id) {
+    const admit = World.skill(id)?.admit;
+    if (!admit || admit.reqi || !Array.isArray(admit.weaponKinds)) return null;
+    const kinds = admit.weaponKinds.filter(k => k !== 255 && k !== 1);
+    return kinds.length ? kinds : null;
+  },
+  // The skill needs a weapon type the equipped weapon is not.
+  mismatch(id) {
+    const kinds = this.need(id), w = this.at(6);
+    return kinds && this.weapon(w) ? !kinds.includes(this.kind(w)) : false;
+  },
+  // The skill needs a shield in the off-hand (fire shield and the like), judged from its required item or its name.
+  shieldSkill(id) {
+    const info = World.skill(id), admit = info?.admit;
+    if (!info) return false;
+    return !!(admit?.shield || admit?.reqShield || admit?.reqi && /shield/i.test(JSON.stringify(admit.reqi)) || /_SHIELD_/i.test(String(info.code || info.codename || info.name || '')));
+  },
+  // A shield skill is due while no shield is worn, or a two-handed weapon is.
+  shieldMissing(id) { return this.shieldSkill(id) && !this.shield(this.at(7)); },
+  // The bag shield to wear for a shield skill: the primary / secondary shield picked on the Items page first.
+  pickShield() {
+    const gp = World.gp, list = this.items().filter(i => i.slot >= (gp.equipmentSlotCount || 13) && this.shield(i) && (i.durability ?? 1) > 0 && !this.bad.has(this.key(i)));
+    list.sort((a, b) => (ItemRules.guarded(b) ? 1 : 0) - (ItemRules.guarded(a) ? 1 : 0) || (b.plus ?? 0) - (a.plus ?? 0) || a.slot - b.slot);
+    return list[0] || null;
+  },
+  auto() { const c = this.cfg(); return !!(c.buffSwap && c.buffAuto); },
+  // Buffs the gear cycle owns for the weapon they need, not the weapon someone assigned.
+  owns(b) { return this.auto() && !!b.enabled && !b.gearSet && (this.mismatch(Combat.resolve(b)) || this.shieldMissing(Combat.resolve(b))); },
+  // The bag weapon to wear for this skill: the highest plus the character can wield, or why there is none.
+  pick(kinds) {
+    const gp = World.gp, level = gp?.progression?.level;
+    const list = this.items().filter(i => i.slot >= (gp.equipmentSlotCount || 13) && this.weapon(i) && kinds.includes(this.kind(i)) &&
+      (i.durability ?? 1) > 0 && !this.bad.has(this.key(i)) && !(level >= 0 && Town.requiredLevel(i) > level));
+    // The secondary weapon chosen on the Items page comes first, then the highest plus.
+    const chosen = i => ItemRules.guarded(i) ? 1 : 0;
+    list.sort((a, b) => chosen(b) - chosen(a) || (b.plus ?? 0) - (a.plus ?? 0) || a.slot - b.slot);
+    return list[0] || null;
+  },
+  setup() { return { weapon: this.key(this.at(6)), shield: this.key(this.at(7)), auto: true }; },
   matches(set) { return set.weapon === this.key(this.at(6)) && set.shield === this.key(this.at(7)); },
-  signature() { return JSON.stringify([this.cfg().buffSwap, this.cfg().buffSets, this.cfg().buffs]); },
+  signature() { return JSON.stringify([this.cfg().buffSwap, this.cfg().buffAuto, this.cfg().buffSets, this.cfg().buffs]); },
   init() {
     if (this.started) return;
     this.started = true;
@@ -4670,13 +8383,18 @@ const BuffGear = {
     Settings.saveProfile(); UI.draw();
   },
   reset() {
-    this.run = this.recovery = null; this.skipped.clear();
+    this.run = this.recovery = null; this.skipped.clear(); this.bad.clear();
     this.message = 'Buff gear reset. Check equipped weapons after reconnecting.';
   },
-  interrupt(text) {
-    if (this.run) this.fail(text);
+  // Dying or changing world mid-swap is not a failure: remember the combat gear and put it back on once alive again.
+  interrupt(text, soft = false) {
+    if (!this.run) return;
+    if (!soft) return this.fail(text);
+    this.recovery = this.run.home; this.autoRestore = true; this.run = null;
+    this.message = text + ' Combat gear is restored once the character is back.';
   },
   fail(text) {
+    this.autoRestore = false;
     if (this.run) this.recovery = this.run.home;
     this.run = null;
     if (Hunt.running && World.inWorld() && !World.isDead()) Hunt.stop(text);
@@ -4689,19 +8407,23 @@ const BuffGear = {
     this.run.restoring = true; this.run.queue = []; this.run.cancelled = true;
     this.message = 'Stopping buffs; restoring combat gear.';
   },
-  restore() {
+  // Called every tick: a swap cut short by death or a world change puts the combat weapon back by itself.
+  resume() {
+    if (this.autoRestore && this.recovery && !this.run) this.restore(true);
+  },
+  restore(auto = false) {
     if (this.run || !this.recovery || !World.inWorld() || World.isDead() || World.gp?.inventoryPending || World.isCasting()) return;
-    if (Hunt.running || Town.trip || WalkBack.active || Restock.trip || Alchemy.run || Alchemy.pending) return UI.toast('Stop hunting and travel before restoring gear.', 'warn');
-    this.run = this.create(this.recovery, []); this.run.restoring = true; this.recovery = null;
+    if (!auto && Hunt.running || Town.trip || WalkBack.active || Restock.trip || Alchemy.run || Alchemy.pending) return UI.toast('Stop hunting and travel before restoring gear.', 'warn');
+    this.run = this.create(this.recovery, []); this.run.restoring = true; this.recovery = null; this.autoRestore = false;
   },
   create(home, queue) {
     return { home, queue, restoring: false, pending: null, cast: null, effects: [],
       at: now(), manualAt: Manual.lastAt, character: World.charName, profile: Settings.profile, signature: this.signature() };
   },
-  due(b) {
-    if (!b.enabled || !b.gearSet) return 0;
+  due(b, auto) {
+    if (!b.enabled || !b.gearSet && !auto) return 0;
     const id = Combat.resolve(b), info = World.skill(id);
-    if (!id || !info || info.targetRequired || Combat.blocked(id) || !Cmd.canCast(id) || !Combat.mpOk(id, World.me())) return 0;
+    if (!id || !info || info.targetRequired && !(info.targets & 1) || Combat.blocked(id) || !Cmd.canCast(id) || !Combat.mpOk(id, World.me())) return 0;
     const skip = this.skipped.get(b.group);
     if (skip) { if (skip.signature === this.signature() && now() < skip.until) return 0; this.skipped.delete(b.group); }
     const remaining = World.buffRemaining(id);
@@ -4721,20 +8443,49 @@ const BuffGear = {
       const buffs = this.cfg().buffs.filter(b => Number(b.gearSet) === set.id).map(b => ({ b, id: this.due(b) })).filter(b => b.id);
       if (buffs.length) queue.push({ set, buffs });
     }
-    if (!queue.length) { this.waiting = ''; return false; }
-    // A buff is due, so say why the swap cannot start instead of waiting silently.
+    // Buffs without an assigned set wear whichever bag weapon their skill requires; buffs sharing a weapon share one swap.
     const wait = text => { this.waiting = text; return false; };
     const home = this.setup();
+    let note = '';
+    if (this.auto()) {
+      const byWeapon = new Map();
+      for (const b of this.cfg().buffs) {
+        if (!this.owns(b)) continue;
+        const id = this.due(b, true);
+        if (!id) continue;
+        const wantShield = this.shieldMissing(id);
+        let kinds = this.need(id), weapon;
+        if (wantShield) {
+          // A shield only goes with a one-handed weapon: keep the worn one if it is, otherwise wear a one-handed bag weapon.
+          const worn = this.at(6);
+          kinds = kinds ? kinds.filter(k => this.oneHanded(k)) : [];
+          weapon = this.weapon(worn) && this.oneHanded(this.kind(worn)) && (!kinds.length || this.need(id)?.includes(this.kind(worn))) ? worn : this.pick(kinds.length ? kinds : [10, 15, 2, 3, 7, 13]);
+          if (!this.pickShield()) { note = `${World.skillName(id)} needs a shield, and none you can use is in your bag.`; continue; }
+        } else weapon = this.pick(kinds);
+        if (!weapon) { note = `${World.skillName(id)} needs a ${this.kindName(kinds)}, and none you can use is in your bag.`; continue; }
+        const key = this.key(weapon) + (wantShield ? ':shield' : '');
+        if (!byWeapon.has(key)) {
+          const shield = wantShield ? this.key(this.pickShield()) : this.oneHanded(this.kind(weapon)) && this.shield(this.at(7)) ? home.shield : null;
+          byWeapon.set(key, { set: { id: 'auto:' + key, name: weapon.name || Items.name(weapon.refObjId), auto: true, weapon: this.key(weapon), shield }, buffs: [] });
+        }
+        byWeapon.get(key).buffs.push({ b, id });
+      }
+      queue.push(...byWeapon.values());
+    }
+    if (!queue.length) { this.waiting = note; return false; }
+    // A buff is due, so say why the swap cannot start instead of waiting silently.
     if (!this.weapon(this.at(6))) return wait('Equip your combat weapon before hunting.');
     for (const set of [home, ...queue.map(q => q.set)]) {
-      const name = set === home ? 'your combat gear' : 'the saved set "' + set.name + '"';
-      if (!this.find(set.weapon)) return wait(`Cannot find ${name}: its weapon is not in your bag or equipped (or two copies look identical). Save the buff set again.`);
-      if (!this.weapon(this.find(set.weapon))) return wait(`${name} is not a weapon any more. Save the buff set again.`);
-      if (set.shield && (!this.find(set.shield) || set !== home && !this.shield(this.find(set.shield)))) return wait(`Cannot find the shield of ${name} (or two copies look identical). Save the buff set again.`);
+      const name = set === home ? 'your combat gear' : set.auto ? set.name : 'the saved set "' + set.name + '"';
+      if (!this.lookup(set, set.weapon)) return wait(`Cannot find ${name}: its weapon is not in your bag or equipped (or two copies look identical). Save the buff set again.`);
+      if (!this.weapon(this.lookup(set, set.weapon))) return wait(`${name} is not a weapon any more. Save the buff set again.`);
+      if (set.shield && (!this.lookup(set, set.shield) || set !== home && !this.shield(this.lookup(set, set.shield)))) return wait(`Cannot find the shield of ${name} (or two copies look identical). Save the buff set again.`);
     }
-    // One free bag slot permits explicit shield removal before two-handed swaps.
-    if (World.freeBagSlots() < 1) return wait('Buff swaps need one free bag slot.');
-    this.waiting = '';
+    // A weapon swaps places with its bag copy, so it needs no space. Only taking the off-hand item off (shield, arrows) needs one free bag slot.
+    let offhand = this.key(this.at(7)), stash = false;
+    for (const set of [...queue.map(q => q.set), home]) { if (offhand && offhand !== set.shield) stash = true; offhand = set.shield; }
+    if (stash && World.freeBagSlots() < 1) return wait('Buff swaps need one free bag slot to take off your shield.');
+    this.waiting = note;
     if (!Cmd.move(World.pose())) return false;
     Loot.suspend(); Hunt.state = 'buff'; this.run = this.create(home, queue);
     this.message = 'Pausing combat for buff gear.';
@@ -4749,7 +8500,7 @@ const BuffGear = {
   },
   equip(set) {
     if (this.matches(set)) return true;
-    const weapon = this.find(set.weapon), shield = this.find(set.shield);
+    const weapon = this.lookup(set, set.weapon), shield = this.lookup(set, set.shield);
     if (!weapon || !this.weapon(weapon) || set.shield && (!shield || set !== this.run.home && !this.shield(shield))) { this.fail('Required equipment missing or ambiguous.'); return false; }
     if (this.at(7) && this.key(this.at(7)) !== set.shield) {
       const gp = World.gp;
@@ -4766,14 +8517,28 @@ const BuffGear = {
     if (!this.run) return this.begin();
     const r = this.run, gp = World.gp;
     if (r.character !== World.charName || r.profile !== Settings.profile) { this.reset(); return false; }
-    if (!World.inWorld() || World.isDead()) { this.interrupt('World change or death interrupted buff swaps.'); return false; }
+    if (!World.inWorld() || World.isDead()) { this.interrupt('World change or death interrupted buff swaps.', true); return false; }
     if (Manual.lastAt !== r.manualAt) { this.fail('Manual control interrupted buff swaps.'); return true; }
     if (now() - r.at > 120000) { this.fail('Buff gear cycle timed out.'); return true; }
     if (!Hunt.running || r.signature !== this.signature()) this.cancel();
     if (r.pending) {
       const p = r.pending;
       if (!gp.inventoryPending && this.key(this.at(p.destination)) === p.from && this.key(this.at(p.source)) === p.to) r.pending = null;
-      else { if (now() - p.at > 15000) this.fail('Equipment move unconfirmed; no retry sent.'); return true; }
+      else {
+        const item = this.at(p.source) || this.at(p.destination), what = item ? item.name || Items.name(item.refObjId) : 'an item';
+        // Nothing moved and nothing is pending: the game refused it (level, class). Skip that weapon, put gear back, carry on.
+        const refused = !gp.inventoryPending && now() - p.at > 2000 && this.key(this.at(p.source)) === p.from && this.key(this.at(p.destination)) === p.to;
+        if (refused && !r.restoring && r.queue[0]?.set.auto && p.destination === 6) {
+          this.bad.add(p.from); r.pending = null; r.queue.shift();
+          r.refused = `The game would not equip ${what}; another weapon is tried next time.`; this.message = r.refused + ' Restoring combat gear.';
+          return true;
+        }
+        if (now() - p.at > 15000) {
+          if (r.queue[0]?.set.auto && p.destination === 6) this.bad.add(p.from);
+          this.fail(`Equipment move unconfirmed (${what}, slot ${p.source} to ${p.destination}); no retry sent.`);
+        }
+        return true;
+      }
     }
     if (r.cast) {
       const p = r.cast, remaining = World.buffRemaining(p.id);
@@ -4793,7 +8558,7 @@ const BuffGear = {
         this.skipped.set(p.group, { signature: r.signature, until: Infinity, why: 'it ended when the weapon changed back, so it stays with your combat weapon until buff settings change' });
         this.message = 'A buff ended after changing weapons; skipped until buff settings change.';
       }
-      if (this.message === 'Restoring combat gear.') this.message = 'Combat gear restored.';
+      if (this.message === 'Restoring combat gear.') this.message = (r.refused ? r.refused + ' ' : '') + 'Combat gear restored.';
       this.run = null; this.recovery = null; return true;
     }
     const q = r.queue[0];
@@ -4801,8 +8566,8 @@ const BuffGear = {
     if (!this.equip(q.set)) return true;
     const entry = q.buffs[0];
     if (!entry) { r.queue.shift(); return true; }
-    if (!this.due(entry.b)) { q.buffs.shift(); return true; }
-    if (Combat.cast(entry.id, 0)) {
+    if (!this.due(entry.b, q.set.auto)) { q.buffs.shift(); return true; }
+    if (Combat.cast(entry.id, World.skill(entry.id)?.targetRequired ? World.localGid() : 0)) {
       Combat.buffCastAt.set(entry.b.group, now()); q.buffs.shift();
       r.cast = { id: entry.id, group: entry.b.group, at: now(), until: now() + Math.max(1000, World.skill(entry.id)?.actionMs || 6000) + 500, accepted: false, visible: false };
       this.message = 'Casting buff; waiting before changing weapons.';
@@ -4816,13 +8581,27 @@ const BuffGear = {
       return { name: World.skillName(id || b.id), left: id ? World.buffRemaining(id) : 0, learned: !!id && World.learned(id), skip: this.skipped.get(b.group) };
     });
   },
+  // Enabled buffs the cycle wears a weapon for on its own, with the bag weapon it would pick.
+  autoList() {
+    if (!this.auto()) return [];
+    return this.cfg().buffs.filter(b => this.owns(b)).map(b => {
+      const id = Combat.resolve(b), kinds = this.need(id), w = this.pick(kinds);
+      return { name: World.skillName(id), left: World.buffRemaining(id), kinds: this.kindName(kinds), weapon: w && (w.name || Items.name(w.refObjId)), skip: this.skipped.get(b.group) };
+    });
+  },
   status() {
     if (this.run || this.recovery) return this.message;
     if (!this.cfg().buffSwap) return 'Buff weapon swapping off.';
-    const sets = this.cfg().buffSets, list = this.assigned();
-    if (!sets.length) return 'Buff weapon swapping is on, but no buff set is saved yet. Equip the buff weapon and press Save equipped buff set.';
-    if (!list.length) return 'Buff weapon swapping is on, but no buff skill is assigned to a set yet. Use Gear for <skill> under your buffs.';
+    const sets = this.cfg().buffSets, list = this.assigned(), auto = this.autoList();
+    if (!auto.length && !sets.length) return 'Buff weapon swapping is on, but no buff set is saved yet. Equip the buff weapon and press Save equipped buff set.' + (this.cfg().buffAuto ? ' Buffs that need a different weapon than yours are swapped automatically; none do right now.' : '');
+    if (!auto.length && !list.length) return 'Buff weapon swapping is on, but no buff skill is assigned to a set yet. Use Gear for <skill> under your buffs.';
     const lines = [];
+    for (const a of auto) {
+      if (a.skip && a.skip.signature === this.signature() && now() < a.skip.until) lines.push(`${a.name}: skipped because ${a.skip.why}.`);
+      else if (!a.weapon) lines.push(`${a.name}: needs a ${a.kinds}, and none you can use is in your bag.`);
+      else if (a.left > 0) lines.push(`${a.name}: active, ${Math.ceil(a.left / 1000)} s left; your ${a.weapon} is worn for it when it is about to end.`);
+      else lines.push(`${a.name}: due now; your ${a.weapon} is worn for it.`);
+    }
     for (const a of list) {
       if (!a.learned) lines.push(`${a.name}: not learned on this character, so it is never cast.`);
       else if (a.skip && a.skip.signature === this.signature() && now() < a.skip.until) lines.push(`${a.name}: skipped because ${a.skip.why}.`);
@@ -4833,8 +8612,9 @@ const BuffGear = {
   },
   draw(parent) {
     const box = UI.group('Buff weapon sets');
-    box.append(UI.check('Swap weapons for assigned buffs', () => this.cfg().buffSwap, v => this.cfg().buffSwap = v),
-      el('p', 'Equip a buff weapon and optional shield, save the set, then put your combat gear back on. Assign each buff below to its set. Multiple sets run in turn while hunting; original combat gear is restored afterward. Keep one bag slot free. Buffs tied to the removed weapon may end.', 'muted'));
+    box.append(UI.check('Swap weapons for buffs', () => this.cfg().buffSwap, v => this.cfg().buffSwap = v),
+      UI.check('Wear the weapon each buff needs (from your bag)', () => this.cfg().buffAuto, v => this.cfg().buffAuto = v),
+      el('p', 'With both on, a buff your weapon cannot cast is cast with a matching weapon from your bag, then your combat weapon and shield come back. Saved sets below are only for buffs you assign to one. Keep one bag slot free. Buffs tied to the removed weapon may end.', 'muted'));
     const name = el('input'); name.type = 'text'; name.maxLength = 40; name.value = 'Buff set ' + (this.cfg().buffSets.length + 1);
     box.append(UI.field('New buff set name', name), UI.button('Save equipped buff set', () => this.save(name.value)));
     for (const set of this.cfg().buffSets) {
@@ -4858,7 +8638,7 @@ const normalBuffs = Combat.buffs;
 Combat.buffs = function (hunting) {
   // Assigned buffs are owned exclusively by the gear cycle, including when off.
   const original = Settings.profile.macro.buffs;
-  Settings.profile.macro.buffs = original.filter(b => !b.gearSet);
+  Settings.profile.macro.buffs = original.filter(b => !b.gearSet && !BuffGear.owns(b));
   try { return normalBuffs.call(this, hunting); }
   finally { Settings.profile.macro.buffs = original; }
 };
@@ -4940,7 +8720,7 @@ const Support = {
     if (World.isCasting() || World.isSitting() || World.local()?.mountedOn || World.gp.inventoryPending || World.gp.targetPending ||
       now() - Combat.lastCastAt < Settings.profile.macro.castGapMs) return false;
     const members = this.members(), party = members.filter(m => !m.self);
-    if (!party.length && !c.heal.self) { this.message = 'Not in a party.'; return false; }
+    if (!party.length && !c.heal.self && !c.buffs.length) { this.message = 'Not in a party.'; return false; }
     const living = members.filter(m => m.alive && m.inRange && (!m.self || c.heal.self));
     // 1. Group heal when enough members are low.
     const groupId = this.skillOf(c.group);
@@ -4960,8 +8740,9 @@ const Support = {
       const id = this.skillOf(b);
       if (!id || !this.ready(id)) continue;
       const only = splitList(b.only || '');
-      for (const m of party) {
-        if (!m.alive || !m.inRange || only.length && !only.includes(m.name.toLowerCase())) continue;
+      // The caster comes last: friendly buffs such as Body Deity and Soul Deity can be cast on oneself too.
+      for (const m of [...party, ...members.filter(x => x.self)]) {
+        if (!m.alive || !m.inRange || only.length && !only.includes(String(m.name || '').toLowerCase())) continue;
         const key = m.name + ':' + b.group, sent = this.sent.get(key), miss = this.misses.get(key) || { n: 0, until: 0 };
         if (this.has(m.gid, id)) { this.misses.delete(key); this.sent.delete(key); continue; }
         if (t < miss.until) continue;
@@ -5114,6 +8895,12 @@ const Team = {
   status() {
     if (!this.cfg().enabled) return 'Team relay off.';
     if (this.state === 'online') return 'Connected as ' + this.name + '; ' + this.peers.size + (this.peers.size === 1 ? ' peer' : ' peers') + ' in the room.';
+    return this.message;
+  },
+  // The diagnostics line: same information, without the character name (reports omit names).
+  diag() {
+    if (!this.cfg().enabled) return '';
+    if (this.state === 'online') return 'online, ' + this.peers.size + (this.peers.size === 1 ? ' peer' : ' peers') + ' in the room';
     return this.message;
   },
   peerRows() {
@@ -5421,13 +9208,422 @@ Team.on('welcome', () => {
 Team.on('kv-value', m => TeamKnowledge.hydrate(m?.value));
 
 
+// Automatic trading. Buys specialty goods into the summoned transport at one town's trade merchant, walks to another
+// town (the long-range route graph of WalkBack) and sells them there. The rules are the server's: a trader job suit,
+// a summoned transport within 100 m of the merchant and goods bought by this character. This module only drives them
+// and stops with a plain message when one is not met. Potions keep working on the road because Potion.tick runs in
+// every Controller mode; at each town the potion merchant tops up the Supplies page targets first.
+const TRADE_NEAR = 200;           // merchant service range, game units
+const TRADE_STOP = 120;           // walk until this close, well inside the service range
+const TRADE_STEP_MS = 12000;      // an unconfirmed purchase or sale ends the run, nothing is repeated
+const TRADE_OPEN_MS = 15000;
+const TRADE_SUMMON_MS = 15000;
+const TRADE_VEHICLE_BAND = 2;     // cos record band of a transport (type word TID4 2)
+const TRADE_JOB_SLOT = 8;         // inventory slot of the job suit
+const TRADE_GOODS_MASK = 0x7fe, TRADE_GOODS_TYPE = 0x46c; // TID 3/3/8, as the server's inventory.IsTradeGoods
+const TRADE_VEHICLE_NAME = /horse|donkey|mule|camel|ostrich|pegasus|unicorn|transport|wagon|cart/i;
+const isTradeGoods = tf => ((tf >>> 0) & TRADE_GOODS_MASK) === TRADE_GOODS_TYPE;
+
+const Trade = {
+  run: null, message: 'Auto trade off.', note: null,
+  cfg() { return Settings.profile.trade; },
+  towns() { return TOWN_TABLE.filter(t => t.services.trade); },
+  town(key) { return TOWN_TABLE.find(t => t.key === key && t.services.trade) || null; },
+  vehicle() { return (World.gp?.cosRecords || []).find(r => r && r.band === TRADE_VEHICLE_BAND && !r.dead && r.hp > 0) || null; },
+  goods(rec) { return (rec?.inventory || []).filter(i => isTradeGoods(i.typeFlags)); },
+  held(ref) { return (this.vehicle()?.inventory || []).filter(i => i.refObjId === ref).reduce((n, i) => n + (i.quantity ?? 1), 0); },
+  jobSuit() {
+    const item = World.gp?.inventory?.find(i => i.slot === TRADE_JOB_SLOT);
+    return !!item && wdJobMode(item.typeFlags) && wdTid4(item.typeFlags) === 1;
+  },
+  // The transport's summon item: a ITEM_COS_C_ codename, or by name until the item catalogue has loaded.
+  scroll() {
+    return World.gp?.inventory?.find(i => {
+      const code = i.codename || Items.data?.get(i.refObjId)?.code || '';
+      return code ? /^ITEM_COS_C_/.test(code) : /summon/i.test(i.name || '') && TRADE_VEHICLE_NAME.test(i.name || '');
+    }) || null;
+  },
+  supplies() { return Restock.supplies().filter(s => s.refObjId && s.target > 0); },
+  gold() { try { return toBigInt(World.gp?.progression?.gold ?? 0); } catch { return 0n; } },
+  tell(text) { this.message = text; UI.toast(text, 'info', 5000); this.refresh(); },
+
+  start() {
+    if (this.run) return;
+    const c = this.cfg(), from = this.town(c.from), to = this.town(c.to);
+    if (!from || !to || from.key === to.key) return this.tell('Choose two different towns that have a trade merchant.');
+    if (Hunt.running || Town.trip || WalkBack.active || Restock.trip || Restock.recording || Alchemy.run || Alchemy.pending || BuffGear.run) {
+      return this.tell('Stop hunting and any other trip first.');
+    }
+    if (!World.inWorld() || World.isDead() || !World.local()) return this.tell('Enter the world with a living character first.');
+    Items.ready?.()?.catch?.(() => {});
+    this.run = { stage: 'prep', src: from.key, dst: to.key, here: from.key, trips: 0, deliveries: 0, at: now(), manualAt: Manual.lastAt,
+      pend: null, open: null, summonAt: 0, followed: false, startGold: 0n, booked: false, skip: new Set() };
+    Log.info('Auto trade: ' + from.name + ' to ' + to.name + '.');
+    this.message = 'Auto trade: checking the transport.';
+    this.refresh();
+  },
+  cancel(reason = '') {
+    if (!this.run) return;
+    this.run = null;
+    if (WalkBack.active?.onDone) WalkBack.cancel('', true);
+    if (Restock.activeShop() || World.gp?.storage) Cmd.raw({ kind: 'npc-close' }, 'Auto trade: close merchant');
+    if (World.inWorld() && !World.isDead()) Cmd.move(World.pose());
+    this.message = reason || 'Auto trade stopped.';
+    this.refresh();
+  },
+  fail(reason) {
+    const run = this.run;
+    if (!run) return;
+    Log.warn('Auto trade: ' + reason);
+    this.cancel('Auto trade stopped: ' + reason);
+    UI.toast('Auto trade stopped: ' + reason, 'warn', 6000);
+  },
+  finish() {
+    const r = this.run;
+    this.cancel('Auto trade finished: ' + r.deliveries + (r.deliveries === 1 ? ' delivery' : ' deliveries') + '.');
+    UI.toast(this.message, 'info', 6000);
+  },
+
+  // Walk to a merchant and open its shop. Returns the open shop once the merchant has answered, otherwise null:
+  // the run is still walking or waiting. A failure ends the run.
+  visit(spec, label) {
+    const r = this.run, d = dist2D(World.pose(), spec);
+    if (!Number.isFinite(d)) { this.fail('The ' + label + ' is in another world.'); return null; }
+    if (d > TRADE_NEAR) {
+      r.open = null;
+      this.message = 'Auto trade: walking to the ' + label + '.';
+      if (!WalkBack.startTo(spec, { label: 'the ' + label, stop: TRADE_STOP, onDone: () => {}, onFail: reason => this.fail(reason) }) && this.run) this.fail('Cannot walk to the ' + label + '.');
+      return null;
+    }
+    const gp = World.gp;
+    if (!r.open || r.open.ref !== spec.refObjId) r.open = { ref: spec.refObjId, at: now(), sent: false, revision: 0, ready: false };
+    const o = r.open;
+    if (!o.ready && now() - o.at > TRADE_OPEN_MS) { this.fail('The ' + label + ' did not open the shop.'); return null; }
+    const npc = [...World.ents.values()].filter(e => e.kind === 'npc' && e.refObjId === spec.refObjId && dist2D(e, spec) < TRADE_NEAR)
+      .sort((a, b) => dist2D(World.pose(), a) - dist2D(World.pose(), b))[0];
+    if (!npc || gp.targetPending) return null;
+    if (gp.target !== npc.gid) { Cmd.select(npc.gid); return null; }
+    if (!o.sent && !gp.inventoryPending && Cmd.raw({ kind: 'shop-open', gid: npc.gid }, 'Auto trade: open merchant')) { o.sent = true; o.revision = gp.shopCompletionRevision; }
+    // A cached catalogue must not count as a fresh shop-open acknowledgement.
+    if (!o.sent || gp.inventoryPending || gp.shop?.npc !== npc.gid || (!o.ready && gp.shopCompletionRevision === o.revision)) return null;
+    const shop = Restock.activeShop();
+    if (!shop) return null;
+    if (shop.error || gp.error && !o.ready) { this.fail(shop.error || gp.error); return null; }
+    o.ready = true;
+    this.message = 'Auto trade: at the ' + label + '.';
+    return shop;
+  },
+  closeShop(next) {
+    const r = this.run;
+    if (Restock.activeShop() && !Cmd.raw({ kind: 'npc-close' }, 'Auto trade: close merchant')) return;
+    r.open = null; r.stage = next;
+  },
+  // A sent purchase or sale is only settled by the inventory change it should cause. Never resend before that.
+  settle() {
+    const p = this.run.pend, gp = World.gp;
+    if (!p) return false;
+    if (now() - p.at > TRADE_STEP_MS) { this.fail(p.what + ' was not confirmed' + (gp.error ? ' (' + gp.error + ')' : '') + '; nothing was repeated.'); return true; }
+    if (gp.inventoryPending || now() - p.at < 500 || !p.done()) return true;
+    this.run.pend = null;
+    return false;
+  },
+  offerGoods(o) {
+    const rows = o.items || o.previews || [];
+    const item = rows.find(i => i.refObjId === o.refObjId);
+    return isTradeGoods(item?.typeFlags ?? 0) && (o.currency === undefined || o.currency === 1);
+  },
+  // The goods that earn the most per transport slot: the dearest offer the purse can pay for at least once.
+  pickOffer(shop) {
+    const gold = this.gold(), c = this.cfg();
+    const offers = shop.offers.filter(o => this.offerGoods(o) && toBigInt(o.price) <= gold);
+    return offers.find(o => o.refObjId === c.goods) || offers.sort((a, b) => Number(toBigInt(b.price) - toBigInt(a.price)))[0] || null;
+  },
+
+  tick() {
+    const r = this.run;
+    if (!r) return false;
+    if (!World.inWorld() || !World.gp || !World.local()) return true;
+    if (World.isDead()) { this.fail('the character died.'); return true; }
+    if (Manual.lastAt !== r.manualAt) { this.fail('manual control interrupted the run.'); return true; }
+    if (WalkBack.active) { WalkBack.tick(); return true; }
+    if (World.gp.inventoryPending && r.stage === 'prep') return true;
+    if (this[r.stage + 'Stage']) this[r.stage + 'Stage']();
+    return true;
+  },
+
+  // Job suit and transport. A missing transport is summoned from its scroll and told to follow.
+  prepStage() {
+    const r = this.run, gp = World.gp;
+    if (!this.jobSuit()) return this.fail('wear your trader job suit first.');
+    const v = this.vehicle();
+    if (!v) {
+      if (!r.summonAt) {
+        const s = this.scroll();
+        if (!s) return this.fail('no transport is summoned and no transport scroll was found in the bag.');
+        if (Cmd.itemUse(s.slot)) { r.summonAt = now(); this.message = 'Auto trade: summoning the transport.'; }
+      } else if (now() - r.summonAt > TRADE_SUMMON_MS) this.fail('the transport did not appear.');
+      return;
+    }
+    if (!r.followed && !gp.inventoryPending) { if (Cmd.raw({ kind: 'cos-follow', gid: v.gid }, 'Auto trade: transport follows')) r.followed = true; return; }
+    r.stage = 'potions';
+  },
+  // The potion merchant of the town the run stands in, only while something on the Supplies page is short.
+  potionsStage() {
+    const r = this.run, town = this.town(r.here);
+    const short = this.cfg().potions ? this.supplies().filter(s => !r.skip.has(s.kind) && Restock.count(s.refObjId) < s.target) : [];
+    if (!town || !short.length) return this.closeShop('buy');
+    const shop = this.visit(town.services.vendor, 'potion merchant');
+    if (!shop || this.settle() || !this.run) return;
+    const gp = World.gp;
+    if (gp.inventoryPending) return;
+    const s = short[0], offer = shop.offers.find(o => o.refObjId === s.refObjId && Restock.offerKind(o) === s.kind);
+    const before = Restock.count(s.refObjId);
+    const room = World.items().filter(i => i.refObjId === s.refObjId).reduce((n, i) => n + Math.max(0, (offer?.maxStack ?? 0) - (i.quantity ?? 1)), 0);
+    const quantity = offer ? Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, room + World.freeBagSlots() * offer.maxStack,
+      Number(this.gold() / (toBigInt(offer.price) || 1n))) : 0;
+    if (quantity < 1) { r.skip.add(s.kind); Log.warn('Auto trade: cannot buy ' + s.kind + ' potions here (not sold, no room or no gold).'); return; }
+    if (Cmd.raw({ kind: 'shop-buy', tab: offer.tab, slot: offer.slot, quantity }, `Auto trade: ${offer.name} x${quantity}`)) {
+      r.pend = { what: 'Potion purchase', at: now(), done: () => Restock.count(s.refObjId) > before };
+    }
+  },
+  // Fill the transport with the dearest goods, one stack per purchase.
+  buyStage() {
+    const r = this.run, town = this.town(r.src);
+    r.here = r.src;
+    const shop = this.visit(town.services.trade, town.name + ' trade merchant');
+    if (!shop || this.settle() || !this.run) return;
+    const gp = World.gp, v = this.vehicle();
+    if (!v) return this.fail('the transport is gone.');
+    if (shop.cosGid !== v.gid) return this.fail('the merchant is not linked to your transport. Summon it next to you.');
+    if (gp.inventoryPending) return;
+    const offer = this.pickOffer(shop), used = v.inventory.length, free = v.status - used;
+    const room = offer ? v.inventory.filter(i => i.refObjId === offer.refObjId).reduce((n, i) => n + Math.max(0, offer.maxStack - (i.quantity ?? 1)), 0) : 0;
+    const quantity = offer ? Math.min(offer.purchaseLimit ?? offer.maxStack, 65535, room + free * offer.maxStack, Number(this.gold() / (toBigInt(offer.price) || 1n))) : 0;
+    if (quantity < 1) {
+      if (!this.goods(v).length) return this.fail(offer ? 'the transport has no room.' : 'not enough gold for any goods.');
+      return this.closeShop('carry');
+    }
+    const before = this.held(offer.refObjId);
+    if (!r.booked) { r.startGold = this.gold(); r.booked = true; }
+    if (Cmd.raw({ kind: 'cos-shop-buy', gid: v.gid, tab: offer.tab, slot: offer.slot, quantity }, `Auto trade: ${offer.name} x${quantity}`)) {
+      r.pend = { what: 'Goods purchase', at: now(), done: () => this.held(offer.refObjId) > before };
+    }
+  },
+  // Deliver: walk to the other town and sell every trade item in the transport.
+  carryStage() {
+    const r = this.run, town = this.town(r.dst);
+    const shop = this.visit(town.services.trade, town.name + ' trade merchant');
+    if (!shop || this.settle() || !this.run) return;
+    const gp = World.gp, v = this.vehicle();
+    if (!v) return this.fail('the transport is gone.');
+    if (shop.cosGid !== v.gid) return this.fail('the merchant is not linked to your transport. Summon it next to you.');
+    if (gp.inventoryPending) return;
+    r.here = r.dst;
+    const item = this.goods(v)[0];
+    if (!item) {
+      r.deliveries++;
+      const gain = this.gold() - r.startGold;
+      Log.info('Auto trade: delivery ' + r.deliveries + ' sold, gold change ' + gain + '.');
+      this.message = 'Auto trade: delivery ' + r.deliveries + ' done (' + (gain >= 0n ? '+' : '') + gain + ' gold).';
+      const trips = this.cfg().trips;
+      if (trips > 0 && r.deliveries >= trips) return this.finish();
+      // Round trip: buy the local goods here and carry them back.
+      [r.src, r.dst] = [r.dst, r.src];
+      r.booked = false; r.skip.clear();
+      return this.closeShop('potions');
+    }
+    const slot = item.slot, quantity = item.quantity ?? 1;
+    if (Cmd.raw({ kind: 'cos-shop-sell', gid: v.gid, slot, quantity }, `Auto trade: sell ${item.name || item.refObjId} x${quantity}`)) {
+      r.pend = { what: 'Sale', at: now(), done: () => { const row = this.vehicle()?.inventory.find(i => i.slot === slot && i.refObjId === item.refObjId); return !row || (row.quantity ?? 1) < quantity; } };
+    }
+  },
+
+  refresh() {
+    if (this.note) this.note.textContent = this.message;
+  },
+  draw() {
+    const c = () => this.cfg(), towns = () => this.towns().map(t => [t.key, t.name]);
+    const group = UI.group('Auto trade',
+      UI.select('Buy goods in', towns, () => c().from, v => c().from = v),
+      UI.select('Sell goods in', towns, () => c().to, v => c().to = v),
+      UI.number('Deliveries (0 = until stopped)', () => c().trips, n => c().trips = n, 0, 999),
+      UI.check('Refill potions at each town first', () => c().potions, v => c().potions = v),
+      UI.row(UI.button('Start trading', () => this.start()), UI.button('Stop trading', () => this.cancel())));
+    this.note = el('p', this.message, 'muted');
+    group.append(this.note, el('p', 'Fully automatic: wear your trader job suit, keep a transport scroll in the bag (or summon the transport yourself) and carry enough gold. The bot summons the transport, buys the dearest goods it can afford at the first town\'s trade merchant, walks to the second town, sells them, and with more than one delivery buys the second town\'s goods and carries them back. Potions are used on the road as usual and refilled at each town from the Supplies page targets. Walking only, no teleports. Bandits are not fought; the run stops if the character dies.', 'muted'));
+    UI.pane.append(group);
+  },
+};
+
+
+// Lure: a tank pulls monsters to the party instead of hunting. It walks to each saved pull point in turn, taunts the
+// nearest monster there, walks back to the hunting spot and holds a few seconds so the damage dealers take over,
+// then goes to the next point. On the way back with monsters it stops every few metres so they keep up. It never attacks. The area taunt is cast whenever it is ready and a monster is near,
+// except while holding at the spot. No stuck handling yet: a point without a walkable route stops hunting.
+const LURE_ARRIVAL = 30;      // 3 m
+const LURE_TAUNT_MS = 10000;  // give up on a pull point's target after this long and walk back
+const Lure = {
+  phase: 'back', index: -1, holdUntil: 0, phaseAt: 0, target: 0, pulled: false, sentAt: -Infinity, travel: null, message: 'Lure off.',
+  legFrom: null, pauseUntil: 0, halted: false, hurry: false,
+  cfg() { return Settings.profile.lure; },
+  on() { return !!this.cfg().enabled && this.cfg().points.length > 0; },
+  // Every start begins at the hunting spot, with no hold since nothing was pulled yet; the next point is then A.
+  reset() { this.enter('back'); this.index = -1; this.pulled = false; },
+  enter(phase) { this.phase = phase; this.phaseAt = now(); this.target = 0; this.travel = null; this.sentAt = -Infinity; this.legFrom = null; this.pauseUntil = 0; this.hurry = false; },
+  addPoint() {
+    const p = World.pose();
+    if (!World.inWorld() || !p) return UI.toast('Enter the game first.', 'warn');
+    if (this.cfg().points.length >= 26) return UI.toast('Up to 26 pull points (A to Z).', 'warn');
+    this.cfg().points.push({ regionId: p.regionId, x: p.x, y: p.y, z: p.z });
+    this.reset(); Settings.saveProfile(); UI.draw();
+  },
+  removePoint(i) { this.cfg().points.splice(i, 1); this.reset(); Settings.saveProfile(); UI.draw(); },
+  skill(entry) { return entry?.group ? World.bestOfGroup(entry.group, entry.id) || entry.id : 0; },
+  ready(id) { return !!id && !Combat.blocked(id) && Cmd.canCast(id) && Combat.mpOk(id, World.me()); },
+  // The living monster closest to `from` within the search radius.
+  nearest(from) {
+    const radius = (Number(this.cfg().radius) || 15) * 10;
+    let best = null, bestD = Infinity;
+    for (const e of World.ents.values()) {
+      if (!isAttackableMob(e)) continue;
+      const d = dist2D(from, e);
+      if (d <= radius && d < bestD) { best = e; bestD = d; }
+    }
+    return best;
+  },
+  // Living monsters already inside the training area (the hunting spot's radius): the ones pulled earlier, still being fought.
+  atSpot() {
+    const home = Settings.profile.hunt.center, radius = Settings.profile.hunt.radius;
+    if (!home) return 0;
+    let n = 0;
+    for (const e of World.ents.values()) if (isAttackableMob(e) && dist2D(home, e) <= radius) n++;
+    return n;
+  },
+  // One step towards `destination`; true once there.
+  walk(destination, arrival = LURE_ARRIVAL) {
+    if (dist2D(World.pose(), destination) <= arrival) return true;
+    const move = Navigation.next(this, destination, false, arrival);
+    if (move.error && !move.waiting) { this.message = 'Lure: ' + move.error; Hunt.stop(this.message); return false; }
+    if (move.waiting) { this.message = move.error || 'Waiting for the route.'; return false; }
+    if (now() - this.sentAt >= 900 && Cmd.move(move.point)) this.sentAt = now();
+    return false;
+  },
+  areaTaunt() {
+    const id = this.skill(this.cfg().area);
+    if (this.phase === 'hold' || !this.ready(id) || !this.nearest(World.pose())) return false;
+    if (!Combat.cast(id, 0)) return false;
+    if (this.phase !== 'back') this.pulled = true;
+    return true;
+  },
+  tick() {
+    const c = this.cfg(), home = Settings.profile.hunt.center, point = c.points[this.index];
+    Hunt.state = 'lure';
+    if (!home) { this.message = 'Lure: save a hunting spot first.'; return Hunt.stop(this.message); }
+    if (!point && (this.phase === 'out' || this.phase === 'taunt')) this.reset();
+    if (World.isCasting() || now() - Combat.lastCastAt < (Settings.profile.macro.castGapMs ?? 250)) return;
+    if (this.areaTaunt()) return;
+    if (this.phase !== 'back' && this.phase !== 'hold' && World.me().hpPct < c.returnHpPct) {
+      this.enter('back'); this.hurry = true; this.message = 'Low HP: back to the party.'; Log.info('Lure: ' + this.message);
+    }
+    if (this.phase === 'out' && c.stopAt > 0 && this.atSpot() >= c.stopAt) {
+      this.message = 'Enough monsters at the spot (' + this.atSpot() + '); waiting before the next pull.';
+      if (!this.halted && Cmd.move(World.pose())) this.halted = true;
+      return;
+    }
+    if (this.phase === 'out') {
+      this.halted = false;
+      this.message = 'Walking to pull point ' + String.fromCharCode(65 + this.index) + '.';
+      if (this.walk(point)) this.enter('taunt');
+      return;
+    }
+    if (this.phase === 'taunt') return this.taunt(point);
+    if (this.phase === 'back') {
+      this.message = this.hurry ? 'Low HP: back to the party.' : 'Bringing monsters back to the party.';
+      if (this.pause(home)) return;
+      if (!this.walk(home)) return;
+      if (!this.pulled) return this.next();
+      this.enter('hold'); this.holdUntil = now() + (Number(c.holdS) || 0) * 1000;
+    }
+    if (this.phase === 'hold') {
+      this.message = 'Holding while the party takes over.';
+      if (now() >= this.holdUntil) this.next();
+    }
+  },
+  // Bringing monsters back: stand still for a few seconds after every stretch so they keep up. Not when hurrying back on low HP.
+  pause(home) {
+    const c = this.cfg(), every = (Number(c.pauseEveryM) || 0) * 10, p = World.pose();
+    if (!this.pulled || this.hurry || every <= 0 || !(Number(c.pauseS) > 0) || !p) return false;
+    if (now() < this.pauseUntil) {
+      this.message = 'Waiting for the monsters to follow.';
+      if (!this.halted && Cmd.move(p)) this.halted = true;
+      return true;
+    }
+    if (!this.legFrom) this.legFrom = { ...p };
+    if (dist2D(p, home) <= LURE_ARRIVAL || dist2D(p, this.legFrom) < every) return false;
+    this.legFrom = { ...p }; this.pauseUntil = now() + Number(c.pauseS) * 1000; this.halted = false;
+    return this.pause(home);
+  },
+  next() { this.index = (this.index + 1) % this.cfg().points.length; this.pulled = false; this.enter('out'); },
+  // Pick the monster nearest the point, select it, get into range and cast the single-target taunt on it.
+  taunt(point) {
+    const id = this.skill(this.cfg().taunt);
+    if (!id || now() - this.phaseAt > LURE_TAUNT_MS) { this.enter('back'); return; }
+    let e = World.ents.get(this.target);
+    if (!e || !isAttackableMob(e)) {
+      e = this.nearest(point);
+      if (!e) { this.message = 'No monster at this pull point.'; this.enter('back'); return; }
+      this.target = e.gid; this.travel = null;
+    }
+    this.message = 'Taunting ' + (e.name || 'a monster') + '.';
+    const range = Math.max(10, (World.skill(id)?.range || 150) - 5);
+    if (dist2D(World.pose(), e) > range) { this.walk(e, range); return; }
+    if (!Cmd.select(e.gid) || World.gp.target !== e.gid || World.gp.targetPending || !this.ready(id)) return;
+    if (Combat.cast(id, e.gid)) { this.pulled = true; this.enter('back'); }
+  },
+  status() {
+    const c = this.cfg();
+    if (!c.enabled) return 'Lure off.';
+    if (!c.points.length) return 'Add at least one pull point.';
+    if (!this.skill(c.taunt) && !this.skill(c.area)) return 'Choose a taunt skill.';
+    return Hunt.running ? this.message : 'Start the bot to lure.';
+  },
+  draw(host) {
+    const c = () => this.cfg(), letter = i => String.fromCharCode(65 + i);
+    const pick = key => v => { const id = Number(v); c()[key] = { id, group: id ? World.skill(id)?.group ?? id : 0 }; };
+    const options = buff => () => [[0, 'None'], ...UI.learnedSkills(buff).map(s => [s.id, s.name || '#' + s.id])];
+    const box = UI.group('Lure',
+      UI.check('Lure instead of hunting', () => c().enabled, v => { c().enabled = v; this.reset(); }),
+      el('p', 'For a tank. Walks to each pull point in turn, taunts the nearest monster, brings it back to the hunting spot, pausing on the way so the monsters keep up (0 m = no pauses; none when coming back on low HP), and holds while the party takes over. Never attacks. The area taunt goes out whenever it is ready and a monster is near, except while holding.', 'muted'),
+      UI.select('Single-target taunt', options(false), () => this.skill(c().taunt) || 0, pick('taunt')),
+      UI.select('Area taunt', options(true), () => this.skill(c().area) || 0, pick('area')),
+      UI.number('Hold at the spot (s)', () => c().holdS, v => c().holdS = v, 0, 30),
+      UI.number('On the way back, pause every (m)', () => c().pauseEveryM, v => c().pauseEveryM = v, 0, 50),
+      UI.number('Pause length (s)', () => c().pauseS, v => c().pauseS = v, 0, 30),
+      UI.number('Search radius at a point (m)', () => c().radius, v => c().radius = v, 3, 50),
+      UI.number('Stop pulling at this many monsters in the training area (0 = off)', () => c().stopAt, v => c().stopAt = v, 0, 50),
+      UI.number('Back to the party below HP (%)', () => c().returnHpPct, v => c().returnHpPct = v, 0, 95),
+      UI.button('Add pull point here', () => this.addPoint()));
+    const center = Settings.profile.hunt.center;
+    c().points.forEach((p, i) => {
+      const d = center ? dist2D(center, p) : NaN;
+      box.append(UI.row(el('span', 'Point ' + letter(i) + ': ' + (Number.isFinite(d) ? Math.round(d / 10) + ' m from the spot' : 'another region')),
+        UI.button('Remove point ' + letter(i), () => this.removePoint(i))));
+    });
+    if (!center) box.append(el('p', 'Save a hunting spot first: the lure brings monsters back there.', 'muted'));
+    this.note = el('p', this.status(), 'muted'); box.append(this.note); host.append(box);
+  },
+};
+
+
 // Single owner for movement/combat/pickup. Potion use remains a separate emergency lane.
 const startHunting = Hunt.start;
 Hunt.start = function (...args) {
   if (BuffGear.run || BuffGear.recovery) return UI.toast('Restore or review combat gear before hunting.', 'warn');
   if (Alchemy.run || Alchemy.pending) return UI.toast('Stop alchemy and wait for its result before hunting.', 'warn');
+  if (Trade.run) return UI.toast('Stop auto trade before hunting.', 'warn');
   if (Stall.run) return UI.toast('Stop the stall session before hunting.', 'warn');
   if (World.gp?.stall?.phase && World.gp.stall.phase !== 'none') return UI.toast('Close the stall before hunting.', 'warn');
+  Lure.reset();
   return startHunting.apply(this, args);
 };
 Hunt.lootAllowed = e => Loot.allowed(e);
@@ -5475,7 +9671,7 @@ Hunt.tick = function () {
     return;
   }
   if (this.deathAt) {
-    this.deathAt = 0; this.revived = false; this.targetGid = 0;
+    this.deathAt = 0; this.revived = false; this.targetGid = 0; Lure.reset();
     if (H.center && dist2D(World.pose(), H.center) > H.radius) { Controller.returnAfterRevive(); return; }
   }
   if (Restock.activeShop() || gp.storage || now() - Manual.lastAt < H.manualPauseS * 1000) {
@@ -5509,10 +9705,13 @@ Hunt.tick = function () {
     this.state = 'resting'; return;
   }
   if (Combat.buffs(true)) { this.state = 'buff'; return; }
+  if (Lure.on()) return Lure.tick();
   const target = this.threat(current) || current || this.teamTarget(current) || this.chooseTarget();
   if (target) { this.engage(target); return; }
   this.targetGid = 0; this.state = Loot.active?.petGid ? 'loot' : 'search';
   if (H.returnToCenter && H.center && dist2D(World.pose(), H.center) > Math.max(40, H.radius * 0.5) && now() - this.lastMoveAt > 2500) {
+    // Hunting from town (dead at login and woken in town): the town cycle's own trip (services, then reverse or walk).
+    if (!(dist2D(World.pose(), H.center) <= Math.max(H.radius * 1.5, 600)) && Controller.townReturn()) return;
     if (!Number.isFinite(dist2D(World.pose(), H.center))) return this.stop('hunt area is in another region');
     if (Cmd.move(H.center)) this.lastMoveAt = now();
     this.state = 'return';
@@ -5520,8 +9719,10 @@ Hunt.tick = function () {
 };
 
 function stopAll() {
+  AutoStart.cancel('Auto-start cancelled.');
   Town.record('stop');
   Alchemy.stop();
+  Trade.cancel();
   Stall.stop();
   BuffGear.cancel();
   const townActive = !!Town.trip;
@@ -5529,7 +9730,8 @@ function stopAll() {
   Resurrect.cancelTrip('', true);
   Resurrect.holdUntil = 0;
   Controller.resumeAfterRevive = false;
-  const active = townActive || Hunt.running || Restock.trip || WalkBack.active || Loot.active;
+  const active = townActive || Hunt.running || Restock.trip || WalkBack.active || Travel.active || Loot.active;
+  Travel.cancel();
   WalkBack.cancel('', false);
   if (Hunt.running) Hunt.stop();
   Restock.trip = null;
@@ -5565,8 +9767,10 @@ Combat.fight = function (target) {
   return fightBetweenCasts.call(this, target);
 };
 // Berserk fires when the gauge is full and the target's class is ticked in Combat options.
+// A party Giant has its own switch; other party monsters share the Party monsters one.
 Combat.berserk = function (cls) {
-  if (!Settings.profile.macro.berserkClasses?.[cls] || World.berserkGauge < 5) return false;
+  const key = cls === 'party' && RARITY[World.ents.get(World.gp.target)?.rarity] === 'giant' ? 'giantParty' : cls;
+  if (!Settings.profile.macro.berserkClasses?.[key] || World.berserkGauge < 5) return false;
   if (World.local()?.appearanceState?.[2] === 1) return false;
   return Cmd.berserk();
 };
@@ -5579,15 +9783,33 @@ const Controller = {
       return false;
     }
   },
-  // Start hunting again after an interruption, but only where that is safe: at the hunting spot it just starts,
-  // otherwise it walks back. WalkBack first tries the navdata corridor and falls back to short legs; its own caps
-  // refuse a spot that is too far. Returns 'started', 'walking' or 'stopped'.
+  // Start hunting again after an interruption, but only where that is safe: at the hunting spot it just starts; in
+  // the town of the saved services it does the town cycle and goes back (townReturn); otherwise it walks back.
+  // WalkBack first tries the navdata corridor and falls back to short legs; its own caps refuse a spot that is too
+  // far. Returns 'started', 'town', 'walking' or 'stopped'.
   resumeHunting(prefix) {
     const H = Hunt.cfg(), pose = World.pose(), distance = H.center && pose ? dist2D(pose, H.center) : Infinity;
     if (Number.isFinite(distance) && distance <= Math.max(H.radius * 1.5, 600)) { UI.toast(prefix + '; resuming hunting.', 'info', 4000); Hunt.start(); return 'started'; }
-    if (Number.isFinite(distance)) { UI.toast(prefix + '; walking back to the hunting spot.', 'info', 4000); WalkBack.start(true); return WalkBack.active ? 'walking' : 'stopped'; }
+    if (this.townReturn()) { UI.toast(prefix + ', in town: doing town services, then ' + (Town.reverses() ? 'reversing' : 'walking') + ' to the hunting spot.', 'info', 4000); return 'town'; }
+    if (Number.isFinite(distance)) { UI.toast(prefix + '; walking back to the hunting spot.', 'info', 4000); WalkBack.start(true); return WalkBack.active || Travel.active ? 'walking' : 'stopped'; }
     UI.toast(prefix + ', but not at the hunting spot. Use Return & hunt when ready.', 'warn', 6000);
     return 'stopped';
+  },
+  // Far from the hunting spot while standing in the town of the saved services: a character that was dead at login
+  // and woke up in town, or a revive the game did by itself. Do the town services first, as after a death in the
+  // field, then reverse, or walk back without a reverse scroll. True when the town cycle took over (or stopped hunting
+  // with a reason); false when not in that town or the town cycle is off.
+  townReturn() {
+    const c = Town.cfg();
+    if (!c.enabled) return false;
+    const here = Town.detect(), home = Town.detect(c.vendor || c.storage || c.arrival || {});
+    if (!here || !home || here.key !== home.key) return false;
+    Log.info('Far from the hunting spot, in town: doing town services before going back.');
+    WalkBack.cancel('', false);
+    Hunt.deathAt = 0; Hunt.revived = false; Hunt.targetGid = 0;
+    Town.begin(true);
+    if (Town.trip?.phase === 'revive-arrival') Town.arrived();
+    return true;
   },
   returnAfterRevive() {
     this.resumeAfterRevive = false;
@@ -5599,9 +9821,11 @@ const Controller = {
   tick() {
     try {
       this.guard('Reconnect', () => Reconnect.tick());
+      this.guard('Auto-start', () => AutoStart.tick());
       this.guard('Team', () => { Team.tick(); TeamIntel.tick(); TeamKnowledge.tick(); TeamArbiter.tick(); });
       Restock.sample();
       Alchemy.tick();
+      BuffGear.resume();
       if (BuffGear.run) {
         if (World.inWorld()) { Party.tick(); Potion.tick(); }
         if (BuffGear.tick()) { this.mode = 'buff gear'; return; }
@@ -5633,24 +9857,27 @@ const Controller = {
       AutoMastery.tick();
       StatPoints.tick();
       Potion.tick();
-      ItemRules.dropTick();
+      if (!ItemRules.dropTick()) ItemRules.balanceTick();
       Loot.checkPetFull();
       if (Town.tick()) { this.mode = 'town service'; return; }
       if (Trap.tick()) { this.mode = 'escape'; return; }
       if (Chase.tick()) { this.mode = 'obstacle pursuit'; return; }
       if (BuffGear.tick()) { this.mode = 'buff gear'; return; }
       if (SpeedScroll.tick()) { this.mode = 'speed scroll'; return; }
-      if (!WalkBack.active && !Restock.trip && !Restock.recording && !Controller.resumeAfterRevive &&
+      if (this.guard('Repair hammer', () => RepairHammer.tick())) { this.mode = 'repair hammer'; return; }
+      if (Trade.tick()) { this.mode = 'trading'; return; }
+      if (!WalkBack.active && !Travel.active && !Restock.trip && !Restock.recording && !Controller.resumeAfterRevive &&
           !Restock.activeShop() && !World.gp.storage && Resurrect.tick()) {
         this.mode = 'resurrect'; return;
       }
-      if (!WalkBack.active && !Restock.trip && !Restock.recording && !Restock.activeShop() && !World.gp.storage && Support.tick()) {
+      if (!WalkBack.active && !Travel.active && !Restock.trip && !Restock.recording && !Restock.activeShop() && !World.gp.storage && Support.tick()) {
         this.mode = 'party support'; return;
       }
       if (WalkBack.active) { this.mode = 'returning'; WalkBack.tick(); }
+      else if (Travel.active) { this.mode = 'travelling'; Travel.tick(); }
       else if (Restock.recording) this.mode = 'recording';
       else if (Hunt.running) { if (!Trace.tick()) Hunt.tick(); this.mode = Restock.trip ? 'shopping' : Hunt.state; }
-      else this.mode = 'idle';
+      else { this.guard('Idle pet pickup', () => Loot.idleTick()); this.mode = 'idle'; }
     } catch (e) {
       stopAll();
       if (now() - this.lastErrorAt > 5000) { this.lastErrorAt = now(); Log.error(e.message || String(e)); UI.toast('Bot stopped: ' + e.message, 'warn'); }
@@ -6723,13 +10950,14 @@ Hook.observers.push( command => {
 // cancels everything, and so does logging in or entering a character by hand.
 // When the game itself fails to load ("Unable to finish loading") the page is reloaded after a short wait. The character
 // and whether hunting was running are kept in localStorage across the reload; the game restores the login from its own
-// session cookie, then the same reconnect steps below enter the world and resume hunting. At most 3 reloads per 30 minutes.
+// session cookie, then the same reconnect steps below enter the world and resume hunting. Each reload in a row waits twice
+// as long as the one before (up to 30 minutes, plus a small random delay); after 12 hours of reloads it gives up.
 const Reconnect = {
   intent: null, attempts: 0, nextAt: 0, waitUntil: 0, backAt: 0, message: '',
   DELAYS: [4000, 10000, 20000, 30000], GIVE_UP_MS: 12 * 3600 * 1000,
-  STORE_KEY: 'sro-lean-reload', LOAD_WAIT_MS: 15000, MAX_RELOADS: 3, RELOAD_WINDOW_MS: 30 * 60000, PENDING_MS: 10 * 60000, LOGIN_GRACE_MS: 60000,
-  restored: false, failedAt: 0, expiredAt: 0, EXPIRED_WAIT_MS: 30000, snapAt: 0, gaveUp: false, retryAt: 0,
-  // What survives a page reload: the last in-world snapshot, the reload times and the one reload waiting to be resumed.
+  STORE_KEY: 'sro-lean-reload', LOAD_WAIT_MS: 15000, RELOAD_MAX_MS: 30 * 60000, SNAP_MS: 30 * 60000, PENDING_MS: 10 * 60000, LOGIN_GRACE_MS: 60000,
+  restored: false, failedAt: 0, failedWait: 0, expiredAt: 0, expiredWait: 0, EXPIRED_WAIT_MS: 30000, snapAt: 0, gaveUp: false,
+  // What survives a page reload: the last in-world snapshot, the reloads in a row and the one reload waiting to be resumed.
   load() { try { return JSON.parse(window.localStorage.getItem(this.STORE_KEY)) || {}; } catch { return {}; } },
   save(data) { try { window.localStorage.setItem(this.STORE_KEY, JSON.stringify(data)); } catch {} },
   // The game's own loading screen says when it gave up; its label is only changed to this text on a failure.
@@ -6744,8 +10972,19 @@ const Reconnect = {
     if (!World.inWorld() || !World.charName || now() - this.snapAt < 5000) return;
     this.snapAt = now();
     const data = this.load();
-    this.save({ ...data, snap: { character: World.charName, hunting: !!(Hunt.running || Town.trip || WalkBack.active || this.intent?.hunting), at: Date.now() } });
+    this.gaveUp = false;
+    this.save({ ...data, reloads: null, snap: { character: World.charName, hunting: !!(Hunt.running || Town.trip || WalkBack.active || this.intent?.hunting), at: Date.now() } });
   },
+  reloadStreak() {
+    const r = this.load().reloads;
+    return r && Number.isInteger(r.count) && r.count > 0 && Number.isFinite(r.first) && Number.isFinite(r.last) ? r : null;
+  },
+  jitter() { return Math.random() * 0.2; },
+  reloadWait(base) {
+    const n = this.reloadStreak()?.count || 0;
+    return Math.round(Math.min(base * 2 ** n, this.RELOAD_MAX_MS) * (1 + this.jitter()));
+  },
+  waitText(ms) { return ms < 90000 ? Math.max(1, Math.ceil(ms / 1000)) + ' s' : Math.round(ms / 60000) + ' min'; },
   // Right after a reload: pick the character up again exactly as after a lost connection.
   restore() {
     this.restored = true;
@@ -6758,33 +10997,33 @@ const Reconnect = {
     this.message = 'The page was reloaded; restoring ' + p.character + '.';
     Log.warn('The game failed to load earlier; page reloaded, restoring ' + p.character + '.');
   },
-  // Save what to resume, then reload. Shared by a failed load and an expired session; limited to 3 per 30 minutes.
+  // Save what to resume, then reload. Shared by a failed load and an expired session; the wait before it grows with
+  // every reload in a row (reloadWait), and reloading stops after 12 hours without getting back into the game.
   reloadPage() {
-    const data = this.load(), times = (data.times || []).filter(t => Date.now() - t < this.RELOAD_WINDOW_MS);
-    if (times.length >= this.MAX_RELOADS) {
+    const data = this.load(), streak = this.reloadStreak();
+    if (streak && Date.now() - streak.first > this.GIVE_UP_MS) {
       if (!this.gaveUp) {
-        this.gaveUp = true; this.retryAt = Math.min(...times) + this.RELOAD_WINDOW_MS + 1000; this.message = 'Reloaded the page ' + this.MAX_RELOADS + ' times in 30 minutes; not reloading again for now; trying again when the oldest reload is 30 minutes old.';
+        this.gaveUp = true; this.message = 'Reloaded the page ' + streak.count + ' times over 12 hours without getting back in; not reloading again. Reload the page yourself when the server is back.';
         Log.warn(this.message); UI.toast(this.message, 'warn', 8000);
       }
       return false;
     }
-    const known = this.intent ? { character: this.intent.character, hunting: this.intent.hunting } : data.snap && Date.now() - data.snap.at < this.RELOAD_WINDOW_MS ? data.snap : null;
-    this.save({ snap: data.snap, times: [...times, Date.now()], pending: known ? { character: known.character, hunting: !!known.hunting, at: Date.now() } : null });
+    const known = this.intent ? { character: this.intent.character, hunting: this.intent.hunting } : data.snap && Date.now() - data.snap.at < this.SNAP_MS ? data.snap : null;
+    this.save({ snap: data.snap, reloads: { count: (streak?.count || 0) + 1, first: streak?.first || Date.now(), last: Date.now() },
+      pending: known ? { character: known.character, hunting: !!known.hunting, at: Date.now() } : null });
     this.doReload();
     return true;
-  },
-  // The reload limit is a pause, not the end: once the oldest reload is 30 minutes old another one is allowed (a server
-  // that is down for hours must not leave the bot stuck for the night).
-  capped() {
-    if (this.gaveUp && Date.now() >= this.retryAt) { this.gaveUp = false; this.failedAt = this.failedAt ? now() : 0; this.expiredAt = this.expiredAt ? now() : 0; }
-    return this.gaveUp;
   },
   watchLoad() {
     const text = this.loadFailure();
     if (!text) { this.failedAt = 0; return; }
-    if (!this.failedAt) { this.failedAt = now(); this.gaveUp = false; Log.warn('The game failed to load (' + text + '); reloading the page shortly.'); }
-    if (this.capped()) return;
-    if (now() - this.failedAt < this.LOAD_WAIT_MS) { this.message = 'The game failed to load; reloading the page shortly.'; return; }
+    if (!this.failedAt) {
+      this.failedAt = now(); this.failedWait = this.reloadWait(this.LOAD_WAIT_MS);
+      Log.warn('The game failed to load (' + text + '); reloading the page in ' + this.waitText(this.failedWait) + '.');
+    }
+    if (this.gaveUp) return;
+    const left = this.failedWait - (now() - this.failedAt);
+    if (left > 0) { this.message = 'The game failed to load; reloading the page in ' + this.waitText(left) + '.'; return; }
     this.reloadPage();
   },
 
@@ -6829,8 +11068,10 @@ const Reconnect = {
     // failed the login behind them is stale as well, so it gets the same treatment: enter afresh, then reload the page.
     const expired = phase === 'disconnected' && (/session ended while the connection was gone|could not resume/i.test(String(World.session?.disconnectMessage || '') + ' ' + error) || this.attempts >= 4);
     if (expired) {
-      if (!this.expiredAt) { this.expiredAt = now(); Log.warn('The game session is gone (' + (this.attempts >= 4 ? 'reconnect attempts failed' : 'session ended') + '); entering the character again, then reloading the page.'); }
-      else if (now() - this.expiredAt > this.EXPIRED_WAIT_MS && !this.capped()) { this.message = 'Still not back; reloading the page.'; if (this.reloadPage()) return; }
+      if (!this.expiredAt) {
+        this.expiredAt = now(); this.expiredWait = this.reloadWait(this.EXPIRED_WAIT_MS);
+        Log.warn('The game session is gone (' + (this.attempts >= 4 ? 'reconnect attempts failed' : 'session ended') + '); entering the character again, then reloading the page in ' + this.waitText(this.expiredWait) + '.');
+      } else if (now() - this.expiredAt > this.expiredWait && !this.gaveUp) { this.message = 'Still not back; reloading the page.'; if (this.reloadPage()) return; }
     }
     if (now() < this.nextAt || now() < this.waitUntil) return;
     const n = this.attempts++;
@@ -6855,12 +11096,16 @@ const Reconnect = {
       this.clear(i.hunting && World.isDead() ? 'Back in the game, but the character is dead; hunting was not resumed.' : 'Back in the game.');
       return UI.toast(this.message, 'info', 4000);
     }
-    // Back in town (a death while disconnected respawns there, or the drop came during a town trip) and far from the
-    // hunting spot: do the town services and reverse, as after a death, instead of walking.
+    // Back in the town of the saved services (a death while disconnected respawns there, or the drop came during a
+    // town trip) and far from the hunting spot: do the town services first, as after a death, then reverse or walk back.
+    // The character may stand anywhere in town, so the services start from here instead of waiting at the scroll's
+    // landing spot. Another town has none of the saved services: walk-back handles that.
     const H = Hunt.cfg(), spot = H.center && World.pose() ? dist2D(World.pose(), H.center) : NaN;
-    if (Town.autoRevive() && Number.isFinite(spot) && spot > Math.max(H.radius * 1.5, 600) && Town.detect()) {
-      UI.toast('Back in the game, in town; doing town services and reversing to the hunting spot.', 'info', 4000);
+    const c = Town.cfg(), here = Town.detect(), home = Town.detect(c.vendor || c.storage || c.arrival || {});
+    if (Town.autoRevive() && Number.isFinite(spot) && spot > Math.max(H.radius * 1.5, 600) && here && home && here.key === home.key) {
+      UI.toast('Back in the game, in town; doing town services, then ' + (Town.reverses() ? 'reversing' : 'walking') + ' to the hunting spot.', 'info', 4000);
       Controller.returnAfterRevive();
+      if (Town.trip?.phase === 'revive-arrival') Town.arrived();
       return this.clear(Town.trip ? '' : 'Back in the game, but the town cycle could not start: ' + Town.message);
     }
     const outcome = Controller.resumeHunting('Back in the game');
@@ -6871,6 +11116,74 @@ bus.on('phase', phase => {
   if (['disconnected', 'failed', 'reconnecting'].includes(phase)) Reconnect.lost();
 });
 Hook.observers.push(command => Reconnect.manual(command?.kind));
+
+
+const AUTO_START_SETTLE_MS = 5000;
+const AUTO_START_NAV_MS = 20000;
+const AUTO_START_GIVE_UP_MS = 120000;
+const AutoStart = {
+  armed: true, entry: null, message: '',
+  on() { return !!Settings.profile.hunt.autoStart; },
+  pending() { return !!this.entry && this.on(); },
+  status() {
+    if (!this.on()) return 'Off.';
+    return this.message || 'Waits for the next time this character enters the game.';
+  },
+  cancel(reason = '') {
+    if (!this.entry) return;
+    this.entry = null;
+    if (reason) { this.message = reason; Log.info(reason); }
+  },
+  waiting(entry) {
+    const gp = World.gp;
+    if (!World.local() || !Array.isArray(gp?.inventory) || gp.inventoryPending) return 'waiting for the character to load.';
+    const left = AUTO_START_SETTLE_MS - (now() - entry.at);
+    if (left > 0) return 'starting in ' + Math.ceil(left / 1000) + ' s.';
+    if (now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000) return 'waiting for the manual-control pause.';
+    const pose = World.pose();
+    if (!Navigation.scene && pose && !(pose.regionId & DUNGEON) && now() - entry.at < AUTO_START_NAV_MS) return 'waiting for collision data.';
+    return '';
+  },
+  tick() {
+    if (!World.inWorld()) return;
+    if (this.armed) { this.armed = false; this.entry = { at: now() }; }
+    const entry = this.entry;
+    if (!entry) return;
+    if (Reconnect.active()) return this.cancel('Auto-start skipped: reconnect is bringing the bot back.');
+    if (Hunt.running || Town.trip || WalkBack.active || Travel.active || Trade.run || Alchemy.run || Alchemy.pending || Restock.recording) return this.cancel();
+    if (now() - entry.at > AUTO_START_GIVE_UP_MS) return this.cancel('Auto-start gave up: the game did not settle within 2 minutes.');
+    if (World.charName && Settings.profileKey !== 'profile:' + World.charName) { this.message = 'Auto-start: waiting for the character settings.'; return; }
+    if (!this.on()) { this.entry = null; return; }
+    if (!Hunt.cfg().center) {
+      this.cancel('Auto-start: no hunting spot is saved. Set one in Combat → Hunt area (Training place in the Classic window).');
+      return UI.toast(this.message, 'warn', 6000);
+    }
+    const wait = this.waiting(entry);
+    if (wait) {
+      this.message = 'Auto-start: ' + wait;
+      return;
+    }
+    this.entry = null;
+    if (World.isDead()) {
+      if (!Town.autoRevive() && Hunt.cfg().onDeath === 'stop') {
+        this.message = 'Auto-start: the character is dead and On death is set to Stop, so the bot was not started.';
+        Log.info(this.message); UI.toast(this.message, 'warn', 6000);
+        return;
+      }
+      Hunt.start();
+      this.message = Hunt.running ? 'Auto-start: started. The character is dead, so it revives and returns first.' : 'Auto-start: the bot could not start.';
+      Log.info(this.message);
+      return;
+    }
+    Controller.resumeHunting('Auto-start');
+    this.message = Town.trip ? 'Auto-start: in town. Doing town services, then back to the hunting spot.'
+      : WalkBack.active || Travel.active ? 'Auto-start: walking to the hunting spot.'
+      : Hunt.running ? 'Auto-start: hunting started at the hunting spot.'
+      : 'Auto-start: the bot could not start. ' + (Town.message.startsWith('Town cycle stopped:') ? Town.message : 'Check the log.');
+    Log.info(this.message);
+  },
+};
+bus.on('phase', (phase, previous, left) => { if (left) { AutoStart.armed = true; AutoStart.entry = null; } });
 
 
 // Spends skill points automatically, one confirmed training at a time: first the masteries you tick, then
@@ -7235,12 +11548,12 @@ const ProfileShare = {
   personal(p) {
     const r = p.potion.restock, t = r.town;
     return this.clone({ center: p.hunt.center, vendor: r.vendor, route: r.route, offers: r.offers,
-      town: { arrival: t.arrival, storage: t.storage, vendor: t.vendor, smith: t.smith, gate: t.gate }, buffSets: p.macro.buffSets, wardrobe: p.wardrobe, follow: p.trace.name });
+      town: { arrival: t.arrival, storage: t.storage, vendor: t.vendor, smith: t.smith, gate: t.gate }, buffSets: p.macro.buffSets, wardrobe: p.wardrobe, follow: p.trace.name, pullPoints: p.lure.points });
   },
   restore(p, own) {
     const r = p.potion.restock, t = r.town;
     p.hunt.center = own.center; r.vendor = own.vendor; r.route = own.route; r.offers = own.offers;
-    Object.assign(t, own.town); p.macro.buffSets = own.buffSets; p.wardrobe = own.wardrobe; p.trace.name = own.follow;
+    Object.assign(t, own.town); p.macro.buffSets = own.buffSets; p.wardrobe = own.wardrobe; p.trace.name = own.follow; p.lure.points = own.pullPoints;
     // A buff assigned to a weapon set means nothing without the sets.
     for (const b of p.macro.buffs) if (b && !p.macro.buffSets.some(s => s.id === Number(b.gearSet))) b.gearSet = 0;
     return p;
@@ -7493,7 +11806,7 @@ const Setup = {
     const error = T.enabled ? Town.validate() : '';
     out.push(T.enabled
       ? { id: 'town', icon: 'item\\etc\\mall_return_scroll', state: error ? 'bad' : 'ok', title: 'Town trips', text: error || 'Ready: the bot returns to town to repair and restock, then comes back.', action: { label: error ? 'Fix' : 'Review', run: () => this.open('Town') } }
-      : { id: 'town', icon: 'item\\etc\\mall_return_scroll', state: 'warn', title: 'Town trips', text: 'Off. Pick your town below to let the bot repair, restock potions and store loot by itself (needs return and reverse return scrolls).', action: { label: 'Set up town', run: () => this.setupTown() } });
+      : { id: 'town', icon: 'item\\etc\\mall_return_scroll', state: 'warn', title: 'Town trips', text: 'Off. Pick your town below to let the bot repair, restock potions and store loot by itself (needs return scrolls; reverse return scrolls are optional).', action: { label: 'Set up town', run: () => this.setupTown() } });
     out.push(Loot.pet()
       ? { id: 'pet', icon: 'action\\icon_cha_helper', state: 'ok', title: 'Pet', text: 'A pet is out. ' + (Loot.petMode() ? 'It collects the drops.' : 'You collect the drops yourself.'), action: { label: 'Change', run: () => this.open('Loot') } }
       : { id: 'pet', icon: 'action\\icon_cha_helper', state: 'warn', title: 'Pet', text: 'No pet is out. A pickup pet collects drops for you (optional).' });
@@ -7650,7 +11963,7 @@ Potion.tick = function () {
 
 
 const LEAN_SKIN = {"f_lu":"data:image/png;base64,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","f_mu":"data:image/png;base64,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","f_ru":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAABECAYAAADzyHdMAAAHMUlEQVR4nM1aLXTjOBCe5AUozGYJDGxZjl1gYcpadoULF5YGFu6xW3YLu3BhYWCPXdkWBqbMZhbrvZnRSCNZTpy0zd681/pPlj7N/4wzKIriFX49DboejGazmb8wxvjzuq79tbUWiqLw5zK2dmN4GF/juPF4TGOapgIcLu/gUa+x3W7l9LUL5Gi5XNKETdPQBGWJE/B1WY7B2gaqiifW4/DaqgXlGR71s6qq/GJlWcJ2swVTGDoXuru76wQ5WC6XrwAWqkpNXlkopoXfuRAvijuvaIGiQCD8TICcn58j76Cqaje+8NzSG8O/6XRKz5BJDmRL3IO/v3wiHYyhnIgswPpf3JiFxeIiC3Iwn89f620Nk9kErK1Jl8IE1l2qe2DBgAHrtmQcR0oUp4jcojgN2Ma9MsZxrC44k20sTKZTmmFxVsDX7//AZDKB6+vrFsiBMcZbsdadYAwxVryrn+8iwpoMY521sFxekVHhPMvfJ3D/8Ewiv7iIOTmYFMWrXjQ3aRfZvgOz4A18/vwJ1utH0n0Bifdvbq5htWKQA/SDZKGk2n5pEuuhAOwRgJFj9F4DsLycwLf7p8gFDdl9kJ8I2Bw49nHyJzsPYjfKp+Wu991HWq/XpH/IoYf1C3y6mZOoxcKH+K8JrPP2oP2UPBCHTProdMkowPK631RPzv748YNAottaP9ZwdTHzgWHo+EaEuiB/fK3uKfQCDhzYaP0ILQPtQwgSfab4UzQgAtioKCCE53zN9+lPbSLwKqYuLMzl3UDx8WKxoOjF1zx+xNEDT9lMInG7u+DDGINniv2g2eF6+PY+A+Lwl25kiKDCvFq8jqvqWq0WRGtDIpBBdXCMktdkvhEzpIFyPKapPIcUx7wL8pHF7dnkfaYH29PtBI/RnmMoO5SpiFHolqwN4tYeyMeT/g59HzEwTljQkvkeH4fCEuEcHdhX+Am0XnIm0rGS5SwlXngPka6Iylh4eamjd8kPMkdIwB5EeLlDXOraunEp7l4cRuPyp8ZzUN4dIbD8RGrB3ADSP6tGH0fRHNZCXcczeRGHwbv1K0wYK/WxpN0KZ/Px/WE7a86HJsmCdZ1i32gk6TpYWkhE8Dpoepg8IpH4KkB7LA+99VedS8wSUQ+KwlC6JZxLi6F0kr75ok243Y7hnGhoFZMKU9c+oxDw2+EqL2oHdI9hGLdpn5qFfLzFAKTb2xX5YMxiMBd8eHhAoSPAwJlw1MoaA/NAd/KPqZU3ksuLQyM+u729he/f72EyCTW1kAPIOwsUro81BOu51G1MAg65JY0AJA3SWbGEF/rfEgOKp29eJxTGm+w1OmQBxy6Li/yXlxffHFCRBImdpLZSr4Omr+XmyW/UeQc83t19gacnrj/YIDbw9HQPn/84w5zKZ9Qj3AW3PMqQyWBdOw1titgK2z2W8XhMu/c1spuLuwclWaO0TmSczINjf/5kcPd//QnPTxuA8ZS6GwQQixZka9ih83XYjyn5WppCoiPaFZmMK5Gm0q6NXV1debCoctvNs98wbk7WGt1cnwNY7Kf0oeagmGuYv9lnz1vuYnRFLZ/yf/32GO1Wc6ZL71Ku2Z0pvVR/sZHN5/POjVEXzNXFVLi/xQCOJVQZrH0F+GazgcvfSvi52QIUZ6R2qAIjkfWpqa5rMhoMbwgEj7PFJcwWXMzrDtIvawEbYwgYdREagMpy3xGNRDio/ODpyVpLopVincRNheT4/8HBlJOpm0JDaQHs2/t7bzKZUIr3qLuV5n4hNJ0W4Gq1ovbHl9UVnJ2dxSl/nBq9b93bh3INeyQyEp3R5JLJU1HTNKxiceEe6x0raRxnTwHYmNh6PQdTEGmqlatRPoKsFQ4KYMXBsIs8105l2WP3IUlT1lFjtntqyzaOORJ6IyNJ2ZoW7zFXD0//+xCuhxHFJ/EiYikPc5QD0r9wP5zSVnSr9ZFyrau3/FHibqhZypacKZpSAO0iKgZnPsbNJAn4SHNDGkL7uwsfIWKjvi4kbkb35VLG6KaivvfeZK1tdRUIoP6AyCLNvdy+J1+SzDtilS/2mBMmsZj+73w556ztByQUaUQb6WbR7o8x7XBn9vReDgUmhT0AdxWQhmVZtFDvo9iI4F0sm5qX7occeq7hdis/fugfIdI4rb3AW3QSOWjdj0R84Z4TU667uquzah2wtyYVyMFiGktzKDooHEz70LkGZvrJyrgY3ZWW9eUqcnCz2UbmOtRt2jChbn209SvHbbvji2dfprKBJOlW1+eEdngL3X85CqV9nWNJ10OtUNdFgTNaD+NJTMb9HKOLuVdGXZMdywnbMdc+wPKVK6zrjKQrU+kC2KWLTHkRH+JfJaPGT7NRVZdOlJ7nDQkSavvHQ0gzRhw2uZnWlyXVkusKcZ1csd3vHUIyvXMzcV1s1I8ZwyKxbugNQIQ+bOIYalV1u/SOrpULySW0KTfxXD4hHAPU/+jFvfcfL2HBGn3aiTMAAAAASUVORK5CYII=","f_ls":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAACACAYAAAB5sSvuAAAD6ElEQVR4nO1bS44UMQx9jGrhknpRIw0S1+AwnIA9K67DBglxFI4BexbTi5HKi5JAduzE9QGJNc+oJ01XJXm2n5MoiV8tT8uvjx8+4tPnL3j/7i0+ff2G7z++YycTIPFVASwiwCTAhvbAyg3QTSGTtFJkfJ+A+4tiuYmX9ru3OVkd+Lsu1k7IbD9NMx4SwLKcXzrJJFhuizfa4arVsT/RkXfc2kqgVs9KVUBuqWqRrYJq5Qpg1TUAhgUS7JU4hK1ZIgHALKTqz9IIDax2a95f7vu23dLRppVuRfV2DJTJWvA4wHVdO7Bu7oOGguYu71zHB9KeHS2dYnS4q4Fsrm59jFdTWe/XwFubRRzgPM/FKn+woIFzLjY3VovAQB/AJc/MSkYLkUYNBxmfAXjQy+sFnztA58dL+8E1qCDL965EsaxLdJCNdokAsDbNiq1+UaCYcrZ+goPulbCoA7QGJIJkfUkm7MU7Mq5g8GanXNDAJJ95me8FRexfRncLsPZx3qV7k4MSAL3DsODj0yMurRRldYtE1FaXe3Bg8KkHQpKgDEe9bq8fChrQAPmQRN6NRRdDzcl9/q6OAIpGe8cX3OoBEQr458j5bCPEAd4zIhuUM5DUMqMsB2aEGGdu4TZ/r/C5tLFzvdcON1eQycNofYyD00UgZMVi1fpcMPhnpc8Mxa2dt6FUBdy47GOUP5uned+viAdOj+IkuFnzKCfQMVzcLbgk+OtWHu2kUulaD8SYReRC8XVbx/8D8JoDileMdq+iOAneORXFktPWtHdlRmy+7/VjPk/n7vh3nGmK69swc9cRxbdi6urWcN8g9+Cc5ID9L+Nn8qxGcSifg3UHaF8eX7fh5fnKguaenPCzw5xPVctiIBSId7oFVcciYzdCjFkjvTRjbi6W5uaO/fnnM4A3mIsF+5CRBHeO5QBcNdeYxoqlInB6sISS6e5Wf3hk1G3rAh+4sYahbSoKF1cNK5BG7KbnktPUNtaDCfxv60G5DW+kcsf1YAPG9aByPXgSrgcnrgfB9SAiHM4RwvUguB5EpQPXg0fhenDjelCdCtwfNOH+4MT9QXB/ULk/uHF/cC/cH9zCEtwfVO4PgvuDwvNi8LwYPC9Wnhdvh9UCz4tRlk48L5ZmCZ4Xm/C8WHheDJ4XI4OB9weV9wfB+4PK+4Pg/UHw/iB4fxC8PwjeH9x4f/AszCcR5pOA+SQwYT4JmE8ifWwU5pOA+SQuzCcB80mkcYH5JCbML55wKcwnmZhPAuaTIMLhHCHMJwHzSVDpwHySozCfZGM+iToVmE9iwnySifkkYD6JMp9kYz7JXphPsoUlmE+i/2E+yW+Nttse6TuuYgAAAABJRU5ErkJggg==","f_rs":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAACACAYAAAB5sSvuAAADIElEQVR4nO1ZS44TMRQsWkayJRYTiQtwEE7AeVjNmVizmw0H4AhskFhmg2RLWGL0bD/3c6edpAnLKmkm7fhXfr+2Km+e3j/9PfkTYopISBB4oD1hbee1nXICpJ0BuPZn+u04D3+57s5YWeP58zNevr3g08cP+PL1O378/IVFyOmACzLbhTopvw5283GVUD1MIarzr+AUKh/l4GKOg1XKCTeb2u90wwtizrTbYSst0zexdN9HODSPNBNg0QneefiJu3RwmSjW27NE3pA9irZmSja4hKC37E965nUTmWQIlXGzDRRqrd5eY/AqedOnuzh5CjIze6R0vhg4bKjJcdWtDYOFa6J0TxyAqwsHicbiPrGWuLqYWlyqcdk2Kq1b8ZRNPO30TWGTsz0v8i+K5XosmljbJIg51v6zRQn00WaT4BgQ/8Rh9FJP6ocMUgttNxB4/cocoqMfItW+XrrauBslRhDehqG9aODKgmHjIi2wQ5zpc2olx6Lz3RBSondkd4zNgu3wSwngFm9RPrXWCZIumi4zWslms/rmIDUxViuXuddIZiCEMGT+Ihlc3ibFvdXVhVQvK5XeYK17YhAmjm1puuZm8eQ7LXP108UyISI44NyK5PDmaO/TgdCeBd0kkW68PbZIv9V7zYI6WYj2wNaqvjldte4k4PMOOdt3gKRdY9GH6oaEk6SpCeotoX96kxyA72WiJYkkSHChXYuqm4tLteQIyXZrkcm2fMC6d8dq/VrWa+v1ujmGg7p4d8I9JfX/wzuPczwPluR90IsZeB/MvA9OwfugBe+D4H0QvA+u4H0QvA+O4H3QgvpgHuxBfbCD+qCC+mCmPjgF9UEL6oPJmoP6YAX1wUdAfRD8vdjx9+LDoD5oQX0Q1AdBfXAF9UFQHxxBfdCC+mAe7EF9sIP6oIL6YKY+OAX1QQvqg8mag/pgBfXBR0B9ENQHHfXBw6A+aEF9ENQHQX1wBfVBUB8cQX3QgvpgHuxBfbCD+qCC+mCmPjgF9UEL6oPJmoP6YAX1wUdAfRDUBx31wcOgPmhBfRDUB0F9cAX1QVAfxICJPvgKdjFbx2lo7k0AAAAASUVORK5CYII=","f_ld":"data:image/png;base64,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","f_md":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAAAwCAYAAADZ9HK+AAADsUlEQVR4nO1cQaobMQx9E6bgQBcT+Itsu2uv02t8eoTeoPfq7l+jiy5+F4EYGkiRLNmyJ/nQrKqO9CmTGfvJ5fGQZdkz0/F4vEJtBnCR33SdgXzJSHPiR/SbLCGVvqMFHt7423HHS0bOuYDUgQ4g9+xI/tiR9g08PPO3Y5UY9WS6ow5yn1Lie1aRUR31476Bh2f+pmVZrtRAHVQlGjo4XMwJ+xk4k3N1xKrioWqoCXxyyd+kOQCHEKsaO5/IQOwgpdZXBgg83PI3HZ+OHAH4H0lCgeRX5xR+RqA2f/AgRoGBh0v+SgTQTsZs9thURCPQs4xMTnReCTy88rfjBnViskieS1RhaqogHVgHDTy88lcEIE4krTCAXlG1X15nlYGHS/5W5YS6RiQV5RZiWFFWTWTjfeDhjb8WAcR03qiZpK4ZVUF2vrnxHwh8csVfXQZahxpK2pqxB1E7V5QwJBqBd8dfjQAlOSjwUjBsz1U9tpasTgLvmz/ZCxBlcIGgLBPYFGDXnKoum2UGHl7565NAs3tUNxdq6FAVNSfsyIagwMMbfztNEJJmi3beSK3GXAoIps+QYAQeLvmrm0EkCooU3UrSZJldDXnYcw483PJXBGCqQ0VBpVS4KjGOVYPqKPBwyp+UgiU8kHzugXXAi/aTpCPw8MxfWQUYhZQk4Q2wttVdpsB75o9PBN2qKGnW2M0zQzGhcxZ4l/ytSsFq9bSJXjtlDZsOgXfL3/3NILPMSKwYlCtvLLwxcODhib+yChiBt0KKOCwVpLbx2B05Djy88TellK63konO2a12tXvtgYcH/koOIMuCoigJERY8TjmjwgIPr/y1I2EaTrh0aED0204ab4WXwMMbf1OaZQoYHY4hQ8vJlzunTgPvkr9dFx/s2tGCxahyVPeda5/Ae+ZvLmVD2UIcokV1xp3bWyfWAg/X/JlCUB5eHOzVRAPZ0yVrC3xyyF/VgxwX6MuM5v2ydcloHD7wcMhfiwC2XDg6t6oRJa0s8PDI3wSgnQr+GzMbC4H3y9/jAgj7L+zubmDYNiwEsHELAWzcQgAbtxDAxi0EsHELAWzc5od6PlJ8CPw/yd/8/OW5PZRtwvo2qXxMyLaXDw/qS4jmHHrg4ZG/+eX7S/3QQP2y1AzsCfRuj/PvM/KpfF9uvwd+/PyFZVmaivSDA4GHR/6mb18/Ryl4wzZ9+vjhmk/A6+kVh/cHvpI6DsdD/fDgOZ+58+HpUA8c6mtprL/Awyt/0/JU3gsIwybtD2VlHuGFT6RIAAAAAElFTkSuQmCC","f_rd":"data:image/png;base64,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","ib_lu":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAYCAYAAAD6S912AAACXElEQVR4nJVVMY4bMQycGCq4gIs1cA/IPSP3+MsznM4prkhxwG5hwCwWSDBDUpKTKgKMXWml4XCGor+8fn39/fAHNA7g8nIBGuC7Y31Zse87rBnsbHB3bdv2Dct50fu6rtrL4YejmRmMAEdgFvDt4wZ84L9HY1RGNwIeEen64ypWZFoBYPmseUMQccDhIDEBiiHfDNg/ySzAFISgcO7qDJYGSKAEt3NRAyjCKWGx7640FSCjLbboG0H4I8hDmZCZR0ZtsOa3xgUKf/sZYBS5xuMIs7Z7HCRjCq8MMqiGUncw1xMzegLLVHhQTAiQh8tljdLT8z33NmpVGwqEI/QD7LC+TuAAnXRtw0xN98+9Twqk6zKP1LCzTRCjm2XeQVMmKZxaKYecOwsiWfeSSSDqCMvv1C/jDrxIQwX+j/AEKfbW63AEt4lhTzNqT25a6eZ6KkjKUKkGqD1dAJ47lXM6KOvHoefrGOBKs+qvjJQ8wTgKeyoFgkjoYpVPJZ11OEzzUeS5dupiT6MOhYPxLAPiqsZ6z+CoYNJwLD490+VKsW5Ilyhbls3aCrB8KnHnAOlkB1FZTcaUFFUNDdNNmQtbzgyxdWByWm2r9EW0r371qpTYnS/rJUpHmjy7PAvfO/g9NO3f2G22uvBtwdu3N2z3LYCpV6b4iA4Y7WyqiErTyn1OLwb8kj4b3r+/Y10N16mp9OhcY3P17I0ESpZinX101GHpMYFVm5/nC/VNqQWWDMusNt9mfSgHU5usOrj91QsnoH4B1LFLCxMG9ntuoODTgSrmcYOinNb+9xqF/wfe42YwhNh78gAAAABJRU5ErkJggg==","ib_mu":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAAAcCAYAAADRJblSAAADF0lEQVR4nOWYTW7jMAyFaUEDKEAXWmThI0wLDNDe/w6dq2RRoAbGQAZ8ImlaTVdDrkZtYseWPjkv/JOWt9e3+7ZvxK3hnWjb6dRaPc5xjz/v4/rmjny91UaRPErmL0R0p/+4FVb0UWutDeVEUd+Pz+0z93H3o3nZ/MoDYVbbMCu0XYCbA/OgveEebG8/XoBxn+2YLIpnXzqJv6zXdcQA8QkGWwf1H1XOTahHjHV9e+sUyZuP0fyFBQBo30ZQkSCjwaaRHFlZBJVxvn3INQCPMfZgYbxc/rJe+x3GJKaxsV141Z1/zWZnZtrErNAfhDAe+iTyF1iAYtVU2H9EyUdNTc5PoA/D4yJ59qWS+AWqSIC0SMnK82SzqtJ4IsDmaMugYF42vyrAoiU9KCJYvY9hiiK/mRx+CfFJ/SUied7nM/hFFUJ1xCopnJs+gK+m9FdwpjT7YCQvm18A4X9WyZWUGKjKVWdSzvyGz43oij+OtsG8bH7BzTZVSFpRtbMvQX1OJ1KIIPCQMy19mEBeNr/AlJz5WL6Fr8jAqQy1aOurNZE6mpfNLzh1fqFqDaXOacUirXu1J5nEUkwsL5u/9N7v5ltTGrHU4aorVdjysA9AZqKBvGT+sq6jELKmKUT9a4qwvvJiLW/iY4cfTrnpH3mnWj+BXy7tclop+c6HIUlAsvpb+zXqvZ8eLpqXza/rup4VdcqiTTlY711+EH3+IboQ0ed3/QJ42fz68uvlS+dj4fBJVC9H9HQbDtDcT6Qmq0vVIF42v77/fjcWkolWWxp1peRUX0RgmfbkkH6w3NQkHchL5i/PP5/vpuCUW3Vz0TYdJ2W/bdG8RH7x0iCaElF/6gbSygk5dn+QU/Wzb5G8ZH4xRWVfjU3ndrudzUpKzNMKjV+6GPEPG81L5hc919SBHVX1M5iQKinF4xSFUX+Lr7lyPYyXzS/qN7aj4pQbBYMrQqSMHPfE5OShEHQAj+Vl8+u4KGpi09DtwWt5CRWP9ZhFXzVJ8as5Iofwai6/cOf12r8WGCqM7Z7IZGPNOVRV0/MpKJqXzP8L+GIR9aQjezsAAAAASUVORK5CYII=","ib_ru":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAYCAYAAAD6S912AAACl0lEQVR4nJ1VsYrbQBAdmy1GoEKGK+wicAYX54NArkhjyJcH7jeuSRk4FQarMOwWAof3Zma1CqmiO2O0O/vmzZu3483xdHyoqGivMk2TaFIZnlTG35NkEZGSpes7ud2zaMKCiMwih/1BCv7uRVSVy/jeiMhD/uM5v5wrSCmFH0kiG1U1QGSfLRhMyuxrBf+lMmtBjqcj18jQYzf7/f7RJZE8C4PqZgBgfS6UAuuUBYD3iUnPpzPl4t44yRbnAiyeTjt+EAQw7I3TtACT1cD9j18fInOR6WqJyJAgYAktEIxDqGA2XcjcgSp7f4rr9/btjXtbBkTJ0KfXCgQt2fV+cPGWZKGl9kqwy48L95KhRDN0ZQNs4L3VlA1aNVDJ8DbdqC8ZtvohAOUHc7JwpvWZ1+VqjzMdv7dtlmhChlXwHpp551cOcKtpUxW6nAiCsjyzedACwk4stakiSrZGFRmGwc4M0DCMSUCzcDAhmPxldtbaNK8sPkXMtjWvcNEDwzahVQMcuu+gL5LPXuUMwNAiWh0JGhnWjVjezWql2my6F9OwHgp9mm5WbhEX++nfiRN0c1lM6NoclZJMo1XSJjmSqd+gPGfGJVoigFqdaGsDXYzuujY+VLccZiZu1Laq7drVYB8KtSleyWKXxQ1Dbx1A+enwfFjNuerLRj9OdJxIKuM4EsCGiHDNLoVVkS7fLyuLtBpxzjXl4Xn9+rquSEy/z+uNMen953tlMuD6RNfwPuBa+fCIQetq36CbV3X4cpDj89Gb4tl4ONi5Lz+vhddPizJpvmeR3uJh6uh0zpksc8myjdazIidHFrQKf/fMHqKye9otNkKi3hq024GrTfl6U6gHBqgPTTywQjUw/uI3pw6MRccOZ3uVP0Fqj0Adzr5HAAAAAElFTkSuQmCC","ib_ls":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAABACAYAAAAallfsAAACV0lEQVR4nO1XOW4jMRAsDxi0AAVUZv9g/f/HeJ/gYIFhMIA6GGAX1QdJyY42NQkJnOHRR1U3e/jy/uv978fvD9Ra8fb6hrmpKkTkYQwF0EMh1xg/fSyfN276MhGNm/R8Enp2bYACUqaxEyj3fCmcFCjUel/EHS7UFNA69lQwGSChUEWx3erQbtZQGLcV/sOCcMIEUNBpemIPwotwORdTkFlIa87wKP5yHZg6FC7I16n1rfncluBSUE5yMcfNFbqpaVUFQqG7r91986QApf1pg4TAq2P0zG7MJY81FaYRIiiYCOyMP79PBJirYU26LSLmUWsN21OU+aZDg6BgMAS4F4PlZJ+tHc2EbjBWI2yCOuuVQhP0EYtOVOCdMDHQOdcUpbsVC791na4dLpgmVrp3DJbVLHVPtoeNOZn4sM2ZwrAy60JYMF7rYHr7wmbmcEnsHjGs12qC9rbbs9TBOq3fOntTTOU7scnDwHASBnAzeC7l4ta21mPQMyWFT+S4q6O/hwXMBq7bj324I4xdQ9AEl34MpbAjF/LnmF2uI974frvewgg4rsyyUF7mXDZ2M94i4m0TBWMijPCEMm/OMue3PQYZmGnFnGqcHceXHyCdYVocFuW+chPgcxrwbrI2Uy3i9K53IySDX6jENnlmjThMdhMC5if/SVZYfREXZpZFVJB5DezLd6mXzUOFaAkQZyIfH2pKmU7sVVOwagpWTcGqKVg1BT+0pmxe88d3YP9UowIT7jW4f1FMdTm1y/QB+gMxLKsuY931Rlt3PV13PWvrrod118P/1JR/Y/YZdYKbZSwAAAAASUVORK5CYII=","ib_rs":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAABACAYAAAAallfsAAACqUlEQVR4nO1XsYrcMBB9WVzI4EKCC+yW+YPc/X+dJpBfSLlXHFjFgqYwJLynGdl3pEp71mLWlqyZN2/eaPCX5+/PfwDANgM2IE1ANUNOCbYBmLgK2MO0hinpnvNpSTAzXJ+ueHl+wa+fPzBxIqWExBf5M+jZuh1Y7Zt5yQEdJ1+Ev2uGta54rRUTX6yPqgUNeuY9N9Pssu/mRhl35HoGcLtmzGlGXjIunFB4Colhmu7pJEJWBLwyI3Ea5BDaszoF97c7LpwgZ3phc6NBg6OjEzl4dEpiEAjH7WvR/rIUTDLChdQ54mYaouFAwRHohY405u7YzLl15JdOdOeD4ci4wzBy6xkeKgjnpChnOW+toVnTHnEoQ8qyGwdQa+1GA2UkgnxtQNuaHJs7mqdZirgMOcSgcXcSFITTWJcBzFpvtSOTAyF0MY/hCPlyIP8X0oam9TnPmiZCzk8SprLbDXEyR/iuvch2PEeIv19XkFIqgCMvySvlQ9gWovW5EHAIXiAehuLoKGgViFmv1HrYQCxDlwcaopLao3P1LlGbx7N56YdUpKsDV/kpjyyOUB1VLwT0tcmwvq1KzCVKTUkYNbx7jnBDuGGEm/lD6o5LLsr8ZYRE4j/IR5qzHd0Il0iXuWd265VDYfOSbMLzEU3IJc5DjvJUut58TiWaEubi0lmIMMotThWdKL1OwyBD6k5Nx9QoUTe63lcZ470QHrkKGR0zeX+997UQvgUdphItt37a8BLCnPMuGxc178XLo4nsI1fhaGXZkdt1p2GSKEOsji56CjP3rqfwoJnK6CnlWsYpTiB7pXy+noKp9w8b/bj/D2TsKTxwhZBlegh32yn7dr19Wg7r2Zft7Mvp7MsaZ1/mOPtyOvtyPXuKnd967fzWw/mtt53feun/vvX+AoxewymeMkUNAAAAAElFTkSuQmCC","ib_ld":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAYCAYAAAD6S912AAACl0lEQVR4nF1Vy2rkMBDsMTr0gA8S7CEDe1hDLvmFwP7/TyzkuHsIWAeDGlYwofoh2XGYGdtSt6qqqzu37XV7fvz5oJwzlVyImfWDS0T0lzoRJf/gnq737DG1Vlos1BcSkXShelRNhmdNHsk02N912xsXYnhlSpQ8JYLXDFgWLEJCCBT9YA2HGGj82j5mJjnwUqiK0DJoyTeKp0uABkGeJGdWNJzYDsGhANaJlkvgWLQkllyGpggaKINyh1T2HtdyQQMKllk3mXZXDTOod6G97sTkB4Ce71lioyqGk3CyPytNoD3sHkBRSWy4p7slYYtHLP4G5cx5LujitEZzaWu1Q/djH6TYKx4ME8QNhIE29MIKKN1XS6wVFaGyFmMADQ+4w21EQovyU+RWflucydWLzmsUTA1lb1kRmo5Av+xeHRhTg1Q3t4RunAYOOUaFgdgRRYGWEqK6NcIh2inhSdcS71DdsEq4QfzQvJ6KEsKGtyO7Bp5sdee7aYk0UZA4QH14CjA6TgFahtFPKG3Nzey2wmCJZliiyko1hkGPNjOErbdpfC0WK70xJGTSSlLtAd/YjAY3u0R3CD1yma04WtTWJdrPLZWiSpFUafl8E58y9dMcENSbNNVSE63uV5cpjcZ3cUGl6jiyYCQbAxQz79QZemgVknQuyrdRNTwoZ+9ZYgwGhGF8GU26DGAwmvPQzWqIXHwg/oEAppef6HXTTnXWwUpmn060g1VH3uhf9tHENu/0mEPon/8r+PtJVLxnMUjU5MduWhKmTwwH5/54eVApRe/b/3axAk57OBLd71XY8jZ6OIDdtl/bE/Dff79PA7tl4rAYV4FmjrU25mJoeXt7fXvGBs48qjrb0XQD7X2AbjbCTiyauqTRF/QblaZaaQeLAAAAAElFTkSuQmCC","ib_md":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAAAMCAYAAADS87vJAAABvklEQVR4nM1WQWrDMBCcGBXW4IJzDPTQQC/Jqfn/oyKoQXsIpMxKa8kuveQkgWOPvJ5xVrMrHy5flycAKBQSBHgA+ijXwjuwOR4iQIwK4UVAHaHG+OiWL2zxQMB4EpJ4DShBuihUKa+IqibKaxMsIhoLnvJzXfPt8GBBTs6b5bzJHsgrm7NJlhWSyVdD0DvfHgcmDYE/nNGt7Wg1yeLrCzCmEV5jmdXJbdYx3w4P/rBlutSI1VAhWm3XkjKGq8Ls+YoIcI939M63x4fzx/lJYE1lN0hAMYqbnexhsdrJzvHAxpqM65jP7N/gwSZcyM41s5Zp67oladNspMTWePzwWBfomG+Pw7qlmJUEInMV9NJrXyCzVMKmDud5Rlxi/3wNDp5F7jUUsgCyMpNUWHLN5XrCmmH5swfnmN75fM5xmKcZ4zgipYTxfTTLjW8Zc3DOH+AqmN12HZYj/aTK0wOfOyJs+XzOcbhers1eWuvJO6nbyId313VlckTuyZqAMFZRTRiJX+XzFXzh/fBIYIqOcvyXDwAOt+/bU5eYbUP78GNqyjVi9Ky7gPyVpflPnT5PxVq5Lp1QY7RG1Dtfi38B9QuURhWwnEMAAAAASUVORK5CYII=","ib_rd":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAYCAYAAAD6S912AAACt0lEQVR4nF1VwWodMQycLD7I8ApeSOH10EOghybHQL+85JpLPyY5BNaQBfvwIGVG8j4nhs0DWxqNpJFyc//7/gMJ6HtHKQW1VpgZ+qXDAMAMlgy4dPQLdI8LHwD6WTLZP/55xNPfJyxy3t1IxgEuw1M57uve0XsHugPxfgRev6+6X08ZSUxMXNyBpE4elax0LgESYK03rGWVfevt+p4MCQHCvw7ijAyG2j2YMkjXNDOyl+i2wCrQWnNgAAvmOo1DUILxLgIO5m13RgSgTce1VFvdsCCcvhZ7HDZCYBEwW/bflOXXqjMbaS8EktPUlAM4WM3p8rRL0ye/NHy9FEthJ4ez5BEgB8WQz5QBWfJjijxMfbUMK4bU9+oAYkmG0fEBcHQQDhzN2/ZNneYpkQUblVTy6KIYxoPOnHoE2vYGwUz17pOdm4VApcPpsRTeO/PxRvGOpjQ06c12D8ZMF41TGDMVFnuc4y2Yz2cIOltGOXOimmoqM4Ksp/U6GeG8vW1XoNAeAcgsB1MwA02MT8cy6B/y+SIR6S3u15IVXHcpJsuAvK4+QZYp7M9bQ0w5rxRsvHHEVHwGILOpgaUUtHdnrhrKaloMY1nQcUzFy+vLVUJK0e351beKnCN9zbJRR87ARuRPG2dqBCeEszxqyiz4++4CZw8SLyrFLekEw2S+miJt1XaPhiQHlBpYEsafFotqSLD5G6nlMurlBZ8boimJOWbafNtqw3KM00g1qM+pqpbsJsEiXWqOoK03b1o0bFErGKXWY9VrPxZTygNke3VNism+ybnXaGTvB/N0vj1fdUdW5npcT+bNYuRvGefbIkGUS/HlS4n9XLWt+T6yTA/3D1ew6VeNidRZw+327POr/ydk83mRPP97lpxu7n7dfZAJtTZo+77wTlM+o+Oq5XiP+2HLmv44/8B/rie0Fv2Pw7wAAAAASUVORK5CYII=","tile_a":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAA3oElEQVR4nI2dy45cua5to4xsRAJu2MBpVON07v9/nN0wkNFIoC5EcU4OUkrjrA3vioxYD4mi+Jh8rH/+/fff/x7reHs8Hp+Px+vPKz4/3x6P1+f67vV4xQmPxzPOi/+P3+Pz5/p1ffeK8+N7HfH7+rDPWXd65vVxrGv59+V4f3t/fDw+9thee2xtLLpHjj+etr7Lzx7nY/yW5z+f+ZvGvZ7zOcbp+eDz5/lbjC9ptp4ZNIyxPh+v1+9Nn+fTz3x/vj8+Xh97XIvu6+z1e1JM4+RY1jM8Zhzx7DmuXMc1Fs17Xfv+9nh85HnfTOi4OBf/uRYriZG/72ElAUnMt1r8IpCuz0nlAnkiuIc/v9W/teg6Pj734sddkzhkxC8XRGPUb7qHCMPnf74WBb14MaPXK/4tYq1/7RlitHVOjn+NeM2v5qgNBDrFpnrtxf58PT7+/KqF0+j4DG3KV2doXrMX9oXndEZ9kXZk4Dz++fHjR0gAc1Xu6BiodkJb3H7oOu9OSQEu0Po7fi/itPvh83uQMvZ87abaE/tzPIf3A4FjJ2F8uQtJ0GMOb7h73lNE9m7Frvnrsei2GMMMkYuQG+D15/f+bd2XdMC947x11pCojVVS+sUwn7h+znF9fmLzkalCAuQftbNrkbyE+WEvbA2Kg/OEwHXmzrj/Js4Se+/f3zHx15Y+XHzvgpIwIsAiTDCnfp+TzfHtf11KhPQYjPzMBfbuTQnUCKbxXTaBJIXpGNfkvSQFNLb9wMeP5w8vrjcYpKuUrsa67uGdvO6tBVmfn32Ha9wxL0mDSaPc3Ov4JpHvCSWBLbo/yXr14H3zrU9EqHYfi/Z1rsTPs8R66sD1W+2s9X0yRywmnldPNxE2YcpGoai3RNBvGm/q4CDW09TDij4eH69fbYF9pGqKZ6Z6sATUk7ywp9Ssew0RbuqWLaMRbYbSnDFIqlGem2ognrVMCu14bUbQsNkA5hx/wSEkZ6Z+PHZe6sC1oNQ1bf8lR1Kn2wCKwb622F87cM7MkgA6Ng3KILZ2p4zXXAjpc87PzEb18cKzJLLX/WMudd0ar2jwnCoBIlgUIxNYKsUiy566qCbqd0ktMZ1F92mPaY5xzxelCTdmbVxPl9a+dqsJF5MpEVlSQfr+9fj4TAtzWZdhrUs8l+1f3sBF/1PPxu9QATXKpjI8zlj4XCCcW9Pbz11z/D/p8E8wkRiItpFFe9kfNrxeMC7hHW2G3Iv38/tPSz9eEwtmD6m8hFCdjQ4wQLlpP7UB3mueeSFVjK+HQfnPv//773+0MjUp6s/4LENDk8+F3oZNeQ8SM96F5EBOOon6/vzZGGIRKFwdEfKyQDykgtak/Tkejh1gAl5cu88+Hrq0VzdStMKtFsu9P5MJcwfL5eOGCO8qNhfcZtLswqA63zzBcSdNSatQqyldm/qaLvfb4/Hz+dxegAc6BlC+/iDo232h57We+HdY//nwGGx8ft+7Pn3++EyPIQd/xRisLrbx6HtZ533hrYBwL+wkEbysbxmFi6Bl00gN2LrP8+w5pATxM6GKbjQufu3ew+18rkub42CEol3eldiHrn+9ygaQuDoMl+DgXJC09GXtkrOff/E/164IG8EL/56c+p4icS2cduN7M8rkQ4uotIiBFuRkS7xegRxgDtM2eNBmWIsuK/piN4jQB4gkDAVMH4sf95IxDBuJor4Zs9y55zSC9kNqy+MQjcvoo5Gp+RZtNgNokXHSDTRofil0ye/l29ICJ3HX+UGAZd1r4dMQjB0sJghSFxBk4yk5nfdNwm2jMSyPbaSRMXIxOk6RHgAWpI6SOvv3ZC96MzogATeytsfbWI7Ak/GMuwvpzSIj188SgDbU1Fe4DBkRY431DDqk6oEX8c+P/9lAkA2gAesOdMCQ7maGFIcT1BiTDCKthY+J7sUW0FNuZDHCxgP2IRh42if0yeteBRvPMZRrCRX2RjUjDwD2h5j0kAT1PHs2eY9SAyJ20TTm9vxpN9O4AV1A/b0kyaIdvRr9Zk+lA0necE3tJAQ/1k7X7tPbYncQYl9GtwmT82Issf0IaPPUQYlWycB6pssY/v5H96/D+FvnpFpIZtkLsP8Oqz/PDzdSKGMM9L2MTOw6EXMCLk/uqvBi4IAmg+xzL+qEMHWOgW6dvYPFFG9lVG9meT5+v35/CWvHtTklq9kJCoGBpbbIrM02+CwGnFLVUHA7GCiBAdb0+lU05iJih4Z1jqCHd89CA2MiabwBF6AK8GTCECND1P21w72zgUq2exRcY0Kso+3w5ip9EaxK41Pnx2eIch+il43gYpIwjeau1jXYLM2Nk3ciSSabjLYNoOxphN4g8YMBtKu9O9JaPCBFWpQSV3k+j1hoEES7RuLagZ80BtfvGyH0nPd3cV5iBBR/dC0Pl27soDm2N38iktAZYdDFxDUSusc8xfX0BLYK/Hj8+v0bgIxAnjasxhTGG/6s6zatu5qmqim314Zo0stG4aDBPz++//iPxoM5kLsobYMZoAAotdE4GmcyyNIv1SIXmU8bYBP/I9UDrfr3x6+lXmhY4hn7cw6G7lj63RllbUEZSrD3BFEMQmlXz2cM1bI9hffD574xm9UBQ9X0di7BtK22sOtTmsydz51ettxgRm0SMvbn+vOCyr3+TKMj0cEh7p/fy898QXRvRA8LqMXHzjLRc1fbRaREwGczIJinTTrFqhdg+Pw9NMu5PXy/L6Ho8cwAr4A7mG62Rcpd1jgYdHok3YzaiRkPhi6m1aHAXY/uAaVMtfWOyChVt9VF3jeigZxgDJool/SX0b9Xj0EnhLlgzsMVQlx/u4EVM9CxASCpBljwQVxNngEijJM+b8PG12IUIR2xs5cj7OK5n02DzoyQJuGQAIo5iE3I1IH1f1/GZBG8HQkL+znU31rMEf3jjiWz2oX8kzGCAXyte3vtNkku2IGAICYUDKzYBlnjMg2ybhgGGhJIJrwrEe5zc/ltTAkEojoCXqCdu5Mp0pLNCa3wqoGXcK3WjtM85Pcn0MM1edv/aTs+Cb7GqAVitk2LXE71sBhqRA1jBIo+2iWsZ8eeNbMCg/HvcO04zjxfzylPYEufnciyg3M8X2smq2HjANAJ1hOPMQBw4rr5ryQ+Ex4WtuxdDwOnFvyMqTc9+3bCw3FNYgiRQaPgzvKnQ01cJMMBY49UsLQD3pd3Ah++DM+Z4YSFe7we70vamahbFaw5Nhw+xbQNRsLO3MkHrAx9DdXSRPfAAIK5fuwcA9FYdD08gDGvtyZeBv6szJTJtWvCO8pHAsWj04jbn1+6p3z1Ffs3IySjgDkkfmmTx3kxepwXOQTNnDzdPuP4ucgtGJNu5SfvmQvfglXF4JWk8WzuaNgv4c3omrpnpWh13N4eQ/NOtDOh10l3bf/DfklsJe2pRg8wIdeYwNI///7Pj/8KrYrhFWzK3TpTvDiZIWaY8bMTN17Nxw/3T3o9ibYXPhlIhM1JLWnz88dC0NKFZDIlU7eQzmZ75IIJ1K58ej7cNb7v+py++LTyGzwEOFjqQwwwYxIMDDXa0tpnMudAMb24+d+y0aYRudfS6N9YJ23ybRbJdYLvf0QIZfjJD3U4GKImCfMufY6dQ+aJ30OHFhNIIvj/35YO3oRcquXj90fFzKmyPGEkn2aOQuwwRRZHtFNJH484f42mQ7GgjufWwuDAPjYQ1NXcL+QmGi4fkUfTZ0T14vscl91WZh3HjXDv/MII4pASwcCEjyHd3xTnL5G0HlY+shZ4X9W5TcCP3R0ZhGuXptimi6eBTUPqyLVLkbfu+zM4fEHNH4/nq3Y3cf8mgSy9imjr5wUhi4A2Cl+FXh7JHxoHPAfTBCnWe8cXbLzO/Vj20PdMdTMUW4tuo/aywALW9lRel5QurbyAHkY408V8fO1B2LbJ87cbCN2j7JXTPcmEzozgVWh2D7KQQ3KggiVY/GUsEa3L37d4/2gYf+hb/ZZpToquCX3zk/xMWM0QeytJ5ElfWKrq8biMHyHi/K+sajGBDSrQQStDT8CGqRMxk3nSO6lA2YlxVGSwbAnTNxkmsunCDsm14b2gzpprCYZ6q8DDMDp4pDulY+28Ix08pcXc7VsdMGWrFuwD4rx0aFr2Yf3reSBILsayC46YP8c99SF0Ppno4dS1yr7xvXLxvJs/05VlhpTRwc48tAM6dVHEgk3Ro/aJX+hChZ1XwM1egDKK0ihOl/o6f3+H6GOomee04/Om+NuTXUmbC3Q4iFrWbHCaXKxmQC5Lvow7Zv+0xUM+4DTKdlbOllDLB7E7BbXT/PpYoNTTUBGT8R7WtSna/d1WhWtuS59f4V2AWkQdj9xDqAt7VVStn19EKofhF663o3lFe2cCxzrIRkk1ioTetmZJov2n/Xxl3sA3Td1I8RG4+sXKlmV9xOpzNwhq9e4DI9F3JuGYU7cTPiuNvDk+iAXIAH1/W/eE25X3WRi+metN3NJFf4xl6dhRaOKFY/iXqJ/GnPZFPJdA2mVn3nMBTxTSc0D6V0MAQ83Q0u9qpTGx6gJUENFSlazjCssubLry1qZOsvgTkqYgyQAx1u5f/2Ypk4spXi8DTbekjWCwLzwAi0HsRHsEDyaNjqPtyNqxjIqyZI3FLzNjiWK+jK7U9RMeZg4igB2PyfYJE034JAaHckxy5TE+ur07yXePMQpD6mEVZToSIZR8sP6rvPNhK+ydT667hIhz969/WxerLm8XWsSEHfLc91Q6U4mxNC6N8dfum+J3XSqrv3baaXA9GgAzmX2oFx3K9RcGIbrpO0RKLeYp1o32PQ6YXWlcOwjmu1xdVXsxN68lnl1gFpHI9fmb8ucsyr4/Hz++/6gJTJ9yiUWJIO1mQaDcsQrCyIJOD0I7OP5Wbh7FoBZhr3kljGohqS/bBJOB0qj6+JPGpIo7KAIpBj+rMMX3nFInCcqcfvvXRZ38/7p3Rez2eQbDkMv8fstWdtAod69GRqP5+8+0o2CEsxwMEiP+fc+SNM8pHxe7aIoWZbdKfGuRcprNAwidOgwaPd6VNaj+s73R4VQxkI0019ntey4/ftsQKJ+i/ZG2QUX91tMKetZCtOOtI2PlK5+h70ApWbfIdCyNM6VjU13YbZU0U/PVs007ueRr8Sm5HMiqCquGa4gVMT7ZPk6CHWV0a55vrqQZOnD9He5PGDMYvHLloGOW8dh0nqHZfX5V+oJYOFrgRdUtjEqDmFGTtxBEEp5RrrT6X6Pihv6/a+Qf55haYIYpYw3xBCL4+BrkoSozTZQ+FhOvBI+y/gV2Zd7PMIR7xV6tBRN4KTErKwiKxBsadQHK2z/ct4itExTqCZaH+HLotYwvw8i0ESTqpbsMrGzj0dcwfyB31y8Vb2q3IY2NamJj4Jg8Qq3bO3k0US2V1VPiV/nbHlfYI1x8GsEgfkhJZPTIvpnp7lKxvm/ubnliO5m27IOz+FYQ92tIl3L5nOhqo50ctDzd3DGsx49bfy5IU2gbdj0MmCOFOplou0BI1MwB/wzCo6tI07V7QBLZ5ninidWupOW9y7Ik6hXXgL5/vnrmb2TzJCL5XD7+flrsNsCyZvDIFtYWKdVFX17uqMYUsQvn66Vximv3whXTL+h4j0IYwQjEwftxhVKeXyqg0sx3R5JN/1+P3CyMA+D8LQHIKbdyIvvXpwsiLvQC+kEopEzosy3u2DkyOreLSGStMnAFc7oo0uOp0a9zVnaSK3sGhiH3lGN9JrBiz8OVSxoHIpfbCEqjNtWVfvIuHVnNCaSJ6Eqpl6FM6Hdn+WQCKBnSkPo2KFsSSIyzNoTdRzIQ4eW4bs92ZwWjzr0ydCogxIwY35VI2l7BXtunAxLgCI0KpTM8jPRwgDE72iZ0r0fAvDOaF3H+l8Yh4wUP6ldCvB5//d1y+OTXm8idqa5zhMFt7CAEU+VdUMruxBfB0K+ehHpzK0d0cNHuSJDBuNa138pYg6jKBWV1TKGFE4TBfw3lqnlDz9mv1GTpvZGGhpRx++J/UgcnAa0v4Wdv0GgEhjQul19te6AFRF4DwMmiFTEGmdKLO1OrYbwa6cz5CYDheFotYtKmDNjfhyUfm6m514P2gIo37lIAnVP8v0gLW6dGQkiJePn2VepsOIjGn9ww5OEVAFHpVHJOatIlVSzavQapo5UCTgmTeljFF07IsO2BUmszQSaTZA7hNNSMsL11w8r3hGSh5T8Xv5DHSmNbTDv7CvAZzWW+3RcGZtk6A2Oh7l8qg6nuIwnmSE7FOL7N3LdOpHJF7PYNpI/qw4vvh+BhmkC6YHuAS9cmjqCEShOgUDappULlKqO30LRyFVlrsEOu477KrX/b96juInVPekPNHZ2MBLEvZqZaa+Fp1/qntS9ghiif5oyCGndos6TLMDIYpOj9/ALdvB8FBYdIwoSA5DWkcGStkhAONaJLhwC9ZkfQt+ZA4/cdat4IWSZcwNVb35/Fmti1++7qM5bnVl+gYxGRAu7ahMDs8064RrkQ9ISqKwdS1FJd+aD4t4u3/pWx5/PMVJnsYiOweh61Ak8Y1a3WEc+2K87YwNEmzpMaXS2AoU9DbpaQs6tGS3ikTr5lBqeYbVnFsicGemUQRzEAGnsiIpM3wvL/ZZUh9aZk0XeN4cD5oftnTWIaYrc6QUcJtSi+3wn5tvQtA2g9KVfgV9+EI4JIY5eBHxq0LEPTswkEcZB5eVtUB3b0u/Vn+fMts8b3rOjfJuLuExA7LBahTq32cHVtwck1jlisLESRK7Z3cGUs4a4OI+8x9F9bg7qUNk66ULHKg27YyGPI75qh91yFMinqB2zuxlNT9cZc42rYJyNXMw/r/2acV2TVbjYlf6qHmej7z2oVO8uN2NKluU9MrkRrlH1uN/4slsWFQ2VEZi/LyekKqiYA5VOESls9YROfSCjJYkzu1pu7+D576oyEllYoOsrGmsuHXWWj49Z2FnTqi9MlBr0V0qc9b7ic3du6FJiOUrX1LySAIls6bO0Tz6Z0cD/bhCFRQq7+fQ6rEgAB6GER2txITaR2qcGaibtHlHDlCqJGPyVN6eTBICQ4k1E/B5EjjZ2Q9a1JxIhHaJDMF8x7uzSNSTZzTBLh8Rkbi7bSrf8gpE6zu4ZN0NLaYaTKho5UogMooBihWzH+u8VW9xJoA9jPbTqxo30GTFhEmsfW2/W0/XuVZm0PnB1GcLyqjmBLlZrnhyKZUgLqxWcilbi3jQCJUa5sOsuhv3viBoM0lToPdFIUDDd7u3MlNUbPgZCovWFk2UeIu/B8gEogiX8PFaA/pnVZlUHAAXLx3PbkgucfiY8Uj2AOR9OmLhzFH63BxBfh2qlmqsSszpGYlyH5688uONERDJSGmcvRRt6imQAqx6qldQqrSGLVPmKxtEDjkOHniibOj9cGIeQSjpx/tKez4deeUWphM0AGSlx46Tj0HW70Tej6xUARmhw9a3yMAo0bSLEJ3Vu/7QO7PEX+TCT9Sj8T4ia49biAMPfx8EiGTPumys8qF+LIWJ620wSv7KZBajBHwffRuShYGX2Ayih8doZAoyxtot0nUP6levTM0iQTc7heqhQ6YEp0vhr96emqeBeMRdA182iNpejm2ednSXnfvXTVKnT6PCVH3psSx7/TbbtIJqGSk6Hod/+tG8jEXA5D7/Lb3nAA4qyaBTbBKJxpYdEgomXDpFiPEwfgk8hgTXT/3abqc7dNoIE584VQ8hF+XqL5R8fj3T8gd5gKTO2idbG6jbBiAmXxePFn/6G3LxaeUgaMN/W7ilxUx7gZsdtRGxSrbmpbJE+QKLN5qcoUnSSBDTBVswzHU8qaSybsdO6QchnCUR7euBOZLiWdqySrmEEW/2kXHPEDnnsTuZ9nMklr+6qgQoo2qRdyc6vGIQOhEolqwQv+SemBFjZUK1Q1DDqp9+8Xu/pvEuF2TWOwvHZHCssjmynurQMaGNrdQpAn4O9xnvsDXAsfuFi3V8eMsmlz2s2f9Y5IuAvrerSTJeeO3jnVH2CdX/WBreFTnM9Cc0b0Rq+Ct65K6orqWdRsCM5lpJZFIOv1y80j3cZultppnhPt00GjGaHjcO/AELTXLN5vATgk7HATnU2ipH/VOMGDulfIcsFKC/V4d+38/Ws1NOqiSIWOvn42SaQLmdGur/IADrAmAamvoF4d1Y2sL4SbT9oWKDGsRhNxwCsodTKCNSzqQLextosHwx/HBRyiMcnuYfmjGbIx2s4HgPhNzjYhkH2i3+zmEJYZrqMnyQklSKI8gSpCSYEwjERDmu2+GST6akdRZys+L9XFXIfWmu6x6xSWqkAvopVWvg08iHh7RLtOT4yq62tR3o/W9hWwybQ0ADXV42AafpcQMb8eKkNBprinNmlEWfvi8z5vXVflAqwawGXEwY+0a7hRkmut2TZc2M+/RFfjfs02kveej9fvNdjfF2+iDhlRhQzCz55MMP13/B75d61p5cdRzZsZftuYTUjZQaS8lceRWTeqZN73zf5CadxOY7na2SJTKD2qryDftqNN99y0soX+rPHsEHPkJKS4/3XYHLV23xY37mIPIVfAsb342sVotpSD4/mzL08lcAJu1j+UakV8nnpqWsqaqozU3NWb4An/Ym4WuxeDU2XU+twO774t/eLIxe92RIdoe51EZjDRPZMHNcErQrysLfQ9AUdrwfOzM6BJm8ip1P1UDTTsjbjfThdb0dcWDZQN79g5RNFOqeqtz7UgheYhKwX31EMrIwjfoayJGDUrbJoKkhhuEGmabVGlVJjGkQbh3V1jeM/OxVvUqzS9StRVzXw7xEBSjY7+zbewmAYj/iARfnulG0PySVeneOGcvIGZSMzXXHbgAX1dl7BKff/xuTtwaaA9syd1C4JASgyRhHheQAYtctkDctm29a4JNWOuuRr7ww/bFeNVca25I9w0oGld761QcoE/H37PABgi9Dn+Vkl7NrYmoPVL/QIMXsEDyUUJ1gKz+Zm5YdrccTSYvOED5RfPNDjbAZGSBkbz83rHlPXckAAs1b5Cs+BSB3sYLcuF2os5xKqADuxHuVYNKBqcuX5ZIqqJRlncspzxUsUSy5XuxZRqv/QCTPIeqqOnwyuty9028lC+wQRYVHunea0Q985D3Dei9LDL2tzMXJiB+Em7N1WT57UeAqTbLQnUTNMDQjvZdJWGUWTndS0/oHX/rFpVEVvE3JM4hG6phvTnVeDhDNoGr+J9PK4FnPfqzSt3lJkEORnYCZ1JJB+fVAW1U29ZPy7sULBo/XOHrpXbkKnaHIdVFeorU5KyntIuIIz87sun4Y1NJznQeiQgAmm0UJnQSypkYS/jDd/kKhBc6PoVMeocWAvm5IDCLUKWClvFrM+72ZOObODgGyjXbqOPMTEadnnsFPGP1jSSHK7d4TTwEZSRrpYd8ZFl6uxQNotX24F5L0mRTiIkGiD1i68ev1iioVeSzhNDiO6jtwIN7wmzN8bGm0f75urnNCj4BjhIx+t1Zy2pgFAsjwEXi7DN9x5RPLuft508VIMyfVxgqWe53EyqzCM10lZ+d/30vOQsbqatUPJXaKCPaex9FWHEc1qcAe/58/XXXV0uOW0Hts+RGl90+vV7ZVwRRs+HYWzRIWT9HjlsXDzRCFCjwYs4L63/KVLJkX6tClwo2xxd9+5JirNHavOAh+WmySImvCxC2wWSavKLoIZh9egA1yaoGDQKwnXSEUuozGYUpCo5BIvZMqLz9bm7i0qK6NhIPRW+uY12wauFDzeP29Hx5dWUNpCSYcinNI5w8Hx9fEPZhp9/gBTgqFvpV9s1RsXqXhuhurxmhnp5EN2t59iNE0kllCLWo9iRBLCeMlrX/bKhhGFw5y2WS/jlvPz9/d1JR2HJzE9I3F8Lb/oPuhmUmy+jSOj5Vp5G5lMnkv33/j68AJVN5SVmhEOIQa/Xv24Ilg7tvXFvKmaLVuho+fzS0QJ15PIp9q8cfBiqHJe9gJy4LWfvkprbx/qfgjaPyzsLEgRrXkHqfy/6BHk0lmmHKNk0mKS8GUmR8vu7G21mcE0GCmPinGrAMVNXyu+vF267bH8xgGvt1OYNC+3wcLZgb+1kGk6ARQXRjYrhngJ+qvtIfo/gUTOgbHwmY8QrZOQqjU7a0+jL/2/1j/kUZu7yiExlZwszUviAOM7PYk6ggGaWOPdkCt1HzS/1vdFQIQB0/4gUMh6gdHSOjfaUF7pcYDXL0iZ5e67ARDZzdhhTWLXFWWLdSQw/bARl1vsDi9tLJDZdhIYTkSQqAwUIV0GvSsgciScGQ4oWcyEp6hVH0H0bGPOJ+bzQdFG71LgAYwV6MNBQ5PI5oByuXk8q7S1rNP5p8Ob8WFKneSvXcIylRTIRcdwSoN7WRsPx+XyPVog9rWmEPg1x8oGNy8ipYyJQB0a28LvOZ0uVPRmR7GJ3iPDJOFcrHu80nB0/6s0gFXq2Z/GcdQmdFozvN+zA2Tw78LJtkspTqF0/dmme604mUGuRpT2YwrtZa5HPXHWELYkVG430Mc4RxTWb1u2VMQx6KDTqhEICKfRPh6iqBeBEa3Je7AHpHgZk3vuI2muXRVFpTfxgFqgX6T6rowyUPNl+xtdVhlDQIIcVxiBfPyNGZceOVFHOfDKbcMH01pNcHLqi2CQMH0816eelbbWqqSt8LTXbm24Eo7DWMc77yFiA8uZjZ2yrvOfSITLF0C7fLJpcJ87dxEBWMY7W6wYLexzN/Ss9JhXFDOFWSRSf5dYWXtCs6xzjey56MUdWLCEBlokbu8du9v1Z5WksJWv6OLt5MZ+Ai0y3FjSipe6eyFlHUNXEZy7E0UqfnlSWx+leslN2LGA2ScBNN9iCnZQvKDInHxfVG4hlaQe+gJcaNOuVV9ra73c1Vt5OrqQHG2gCbbwA3Yg0toDFerKO3syBPj5WVQiFo8vIRhKT0LHZukdz3lsQMqQWqYbnkEa2YdIjua6YKpBaP+escJKdIrrAcI02cZ507jJV37KzZnCh9NLc0fjkV8nYHtg8aIh0FEp0EVcuV0O5pCLYbJkLzejdjL69rWfX4ltqyY58S1Rx7Y7VFs8/ZUIICGzpgghmNGcIAzPFOa4x2jfU25Zc1V7PC2OkUzROTc0aDS02FnmGnIU5ODV/nQ2DlXEWVAZdSsNaYENOVV8sL71fmPCXZgpgKJ/DoxmOZ1r2cTBRVRMEM32V1q3fn2JKqInnV+NKIrJgxQ2u1cSCz+WLMPFZ95v0baHxOd9L1Vbs6OcPS87DTRxSaLaYE5MUA4zJRtBqJGqaq2Dl9zQuxKp1DT2CuYheELycCgxgxEz3V6MkZAM3poHxSouY7g8zbF/AEwr7gOUsWBf39zONBeR/Z/MI0vNt2BkjnH54T5M+X7y+90jSRTVWdRHLiq9RYqDjW3/DBFAiIlljoh5Afr+J6kyBHNyAkCV+6GL6n7JrCaLoeXyBY75BZC1+61eUcQdm9jCrRwskJJB5J29dUmkXGsgZTZ6qhUyPVvrdxq1audOrWuBBEilCyQqsZDLlOyiTpzbUKUFLjYD+LQwOwC5zKdZm+rZdB4EzFx5xGnfdWGcxOaEsbXyGF+AsVfi8FcypRWjRtnxxdFULlxvZoGWnkhWeYXEM0IQtZVQfHwfbtmQDioaMXNSPqo3tEgZGoL6BKFvX0d6ITviaINlwl3WuPDF7KtUi3ru/dRtXIE7P6GOXNFm2z+4U6hMGyJA5e5JW8qenmLY4bR4CLHVdnC9P2Kh3+bvG5WXJg2l2kqdsDLhSragyASRNFlZeQ95GA8xnEo6AVhBxVtKwK1f41NtV3l4R4iBgMsc7CUKhCQXHpPlUHKTv8ALK4JDPt6Bx7Ux3SIH8mzbcXhJFltRUmIkE3mnVPrbpdN2o+b/d1SJDVVGI3kjSn6XP5XdrEXJco5FFg4SHbdLcPohwWtwvzpcLwtfH5EIoxTo8DMQWpAbX73qly16s4anIwucY8xU78Rtg3N1qVz7Vq+guSSlXT/MPyJkLW298aa+nGfUfe2rAsA2TWkd/gRFMQuLLpl+1D13h0+2Ds3x8u0ZHn1ymP9NQ0yiZOdsCQgNTnyrujd5AMoRPAWOJwCPc6zItBlPbke9GRNlZGYqZOEpJQTvr8/H4/bm7iGn2XVqDEa8HgmhxT7qnawybNvYCJh5fIeKyhIn8HeJfj0U6EsUas3yOhgoUyRZxA2mcoM2QBLpGBERcDXHBPvbHkFKtn07Ovwpi8u1hs1nlV93RtAOVjs16QS3yEWQanoLeV8R2L8PHt7WvTaJ8Aq2dcgkcDaSRqFgAs0nZi9ewJOBdBnUGlOtCBRkk5GgsGPXyPJe2hBkBBtCO698aT/TPug+lmAxOd+p6u3s3jO5tlxiFKE7u3Av0u70htP7rjuX2LDLG8sx3JSVqV8hjva28sne6/x8e09D9jY50L2NOTCTJhc+5640k+72Bqd8cQpRXMF8di4UmstcFIHrbUu8O4OjL7lY3vCCfz7qFbuwMMc7xZii0FonZzs9T0TGCSBtkZPRM97YVvc68f997L7IV2tsOUBVw9LFjDSsPE/bCZpgq/mj0hlf2uzXzgPGsgJPml78VgAoLfTNCGR3x7t0mnJEM6nQmLXTHoTcrwc2ZiZWjwndMrYk2J0m0xbpfZ8OWcYDWcKlsg9cAhZoLu/7LHbTOcXfPsgfKwsiRmEEXFr+/aynned5zVjYt2qzNlQWn9BCakSdPgbUPtn16VRBt0Z5qtsf+z7//8+9/8jvtR6JfXhF6GFhzFzS9C3a4va+OxhTu3Ra1SZh+EOXSeA/9nTvnx9yZA359jBcuzEaKPqY0vNCB83ebd9CP96QuZh5i2yRwP4/+AaBfs824YW3f9LVzzsHz2dPCZawE8dDM4fDzeYxkxYNwIOCJsY+CCQMd9Hcv9/0bJM3fadV7kXrw6ZXSrBH4hp1DijjRQt4BPQN2P8NurBLw4cZecwnLTZy/s+9Cl2rDq5HRJyQx1fZSEy7re0ACzIO742bxHoOttcOnjEIVe9auni4b+txty5mAVPnWLSqWYzjZbbiBFIvsOTT76zmFDQQEiBLHwDbsr7e8xO4ZrKP9TWnIzTPrJI91waKL4bTpCZB5c7z2gse4z8ypde7b6Q+nscFXrsrgoiuoBRqMIWDD1yk7xe/Y605z8+m/ErMSc068HCrkSuQ9slJnZbAxNeqh3RCI47lj5y7t0dFiCttEY8lc2CFmtNTQ5gBGcag7tOsDQ7j0yzDwcGEDPCoAa9Z72tiWCXPE5DXwvI6LfgM8BPackybndQNkNjdskiU4eorGuxXeCiHca4eMlIyF7uK39/c+wwjur2D13HAO07iP8eSCvo6iDM2hchSa3ApVu89j6LqVmVkNDlTDnkIZ4bM4ZLbSoW13CQdfQBYRUTc3zswFKreDuIFFoO83iG5K19szTPSbr55h6kNnXzqPKsAzdbz19wPPGc2uG7CUn9m/gOVYFT6GHfV2xv0jhSzuhW5kCdhM76ehqeiKZhrODWv6jAaRGu8XVdi9XfwQYRXBg9vzfwFiNIHDRYJ45gTiWjJd/j0xgZzASj/XeNvzgA3IU2hy5HOkTv0ZoEmeY1XCJpgDnq7ahByHXgABm2Uyqd6J2HohcJdrfMrd57UyYPnOnynJKKFFOw5h2lUbCeS7AEfjJ9W/G+EbDxwSYDYr0JFCeX/efxyilnpsh2pL9zsWnoc/gdMFNtHX3Tv6lBZ93M8xKTxvIIkOfQ+drMZXpt8sr8uYgd5fJAYs+mBn531FJhvDOI8pbs1QFNOvamyFDhnswrwVIv9GxK4vihZMkKVE8vNLYhkY0WcWRWqc2CHXw7uYEqlBTENaoOSbgI3udfFwuHteTsaoNjV6ofN+0glAzazmuK6Vv/edxy4lLqPXSYyI6usMSdMtbofOhTHo6zJsvpiNTDbrGCWF9juD5mvP4VI4OYHn5SD4ijKHbNtAIVGmLreIhRXv86rfjm2KoYPNSJJO6pMzRPYsDKH4iyPHtNyl9W8tVuxUHbcsXC+MkDjGPWQcJmPkPXQTo54GZeChSCU0Y5PeVq9rbNhG/D2adWjTKugk+iVzre/etkjSRDsM7IFigSTi9nc9UNEgS8HGt51On56Qrw2WHXUrGDmzjVM3bsgaOtiuZ8UTzBDSr5niTnfpSZ8c6dQ2dI+aQsz9MJZRRKNGkliszaeZa5l4PoNHe55DT+P7VmI+mZhiXqbwV3Ya6wWjWfScEPxl34jLn/l/O8LAipYhWm0wJlBC5mpQaLkwtbPWq1/Vx6YY0oYd/u6eRlr8MT4URIbroNcIl4R46V70mb0QPZVcR4xLM04Lfjd+lGWf/ftzvTw+SSoYem1B8/MM19Jwbcym33OsfK/Drc/TLg45pXBkBO1F7vF2cQmBoH1Fh0gtnlCz3mIKNJ6i+WQPE88gzLrSr2CL35ARozPG+/LEuD8ZqpVffLxscrimn2WAEmFru4uE/Bx9EWI/1FvJOpgFcT4MPH02QxLgas+fhp7o1t8PIPXwGrEcNusWrX4uJs77xGNUHOnCRkWrZJUnIehqNUTQS1c9gTmJk4n6f40kQhqUPbCZwFk/IsgI2crPXXpt77i+uOv4gc4hGfR+zACQxWOKcb8ddVj+Wx31hWGK2yzxCuZhsQ3xDhy96WTfWG0Hk3ked2ljVTg8hZCwca+P3R8gBjcGsm+APEGxgRGq4bb4IQAi5vsELj1+eYaVzdhBhUJWuzkRRlZ8WL3x319wcxCalUFkqSVgS8+7t8jx3NJ17b55GXLUy3sRc/Hz9Xhua+MSMxi40+gT7WBgbvU00VEYzLPjOOZxGrHKSno/U8I06RYFbJyHWx4IWpZHSQzfyrhwrxlXUGIq7YMIqwphA9ZNQ+nWFmZWNGm8R3/DzyGhyDCQet5ZzfjE27mRpRxj1rxGvuUMZpGRGchp8DslHnDCjszmb8PDEZP1NLbqF+DXxzfdMy13WN29DWlH4mauwC2iWKJ79sLZ429BlQmBwk0iXNsW9YsYwTRw037zQUjXjE+X6tHDyTfCrsPFr+N9hTr2m8571C6M2eV6jnA14/fVN2CoUx2y2RJ08hw8bs2zG7aBAzSjjZNmFE0PoesjEZXvFjzFe4/MtUGY8rN/3d71OjtgX6Y3axx+nyF2vJBLp7RpLiRSid+nJPUIkBgKzsaKBLqUS8e57kgiLXO9JXX/Xv0Eiwpqu0PfXR6IaLah+PIKyuu5WPreVBon6JK2h6OzmbCyzt84gCpu3vpOLKJXnrkXl+5h5J2ltS5Cw9jSM8oC742lKnqY9f/c5Re3sbl3ttypw0eE07YLRPZNRawDnkBrH4dd6QwdgD6nz41XysXNpBJlnW/GVgSS2AuziXuLueV9wwi1gddf6WOGFV020NIk7m6Jm5VBmqDeE2QRkkUJDc3zAa/gRsTh97OuTdxvI2fefzIa9T0CMFYDh42CuDvdIVrZGcB5EpShG0jR/5fjCrjEmNiWfuX6Zacj2zgMk0P3IyNL89p0pBfWXUbGEgrXED2KUTfjSm3+jqu+qUaOYVwtjERS+JafN6CnFk7ixnpUAR26fCp4FGhB8UeY19Y9Lflu0QtDVCDItX6Hh1I6tIWEYZy+ZKfkV7Nwxend+YzJGLQRtjuK3H8wwbXRlNVY3ktdz0zTnBPzC5zE8tuAEzOPWmq57TJI57xfZAQpXh47P7N2ut6vnVyhGcCxdN8iVr8iUSvunS1hWw++SnJouQC0lheocgWeegKGwKHd3gaG3QB2CmnEW9AuufWv1uuHjJLEjzdwFBHterHzhrEIuVq9Qyp7Ef+2Zd8bWX41Jj+zHTBa9Q1USaftxiGETygA5nyA+CLFg0uWZfRJJ8Ovf043Jg0Wi650fQig2BAZcYWwnFU82ZJAR+QMWISjYQn++Nf8nji7gaGxWx9vvfrGB3V6FoEWEANGUZRUhE53dbeBzQpidyXbPQgJBlVc5VLidVFJpU5L9bGDW89YEtX2QusVNnI5dXzbN9NLk8u/9M016Rn71qJCr0oUc9Luz0fsOgfsRXr9NpAjw8Wi06FWqKh9UbxraAE/618x5qgiykVk99Cmzp5YDBKeEnDo+KkGjlA0sRM1qkh8wLTNQFlV/qCZNaOzkymGF8VUNzNJnucmoDkPu8CIFH5z9gnfSo0JNdE4WqLJl47smh3msvsVxZCrjRti0Q0ZJO5Aa7wldWRoVlYxGEdAkw/4zF4ojvviwbzmK12ZAAIJ0P42HM2V6ePWom7/funp/b3DzADTSmpV5FQFNdzp9ZyzJ3PVQZSbtw43iCLTvD13rUSqr8ABjDXnAyTOaHA1pAzn2YVMkajJyhgSPh9uSHJrxe67UUKpEwT4/mO/3RsqaFvsZax614wYfjD09x+7BesoibYofYghaPB1w7LVGEj1NDe4FqFFO4UX+Hk9uqc4w+rzM43NaW9NgzXstjSAi6HKYLe0znE0gz2ZQF7UngbdhAmNAqAwhyl62OLQkyOFc6//7qbLcmHrWYlwGTOA35/vHo4Gjc1N67X76m9cLuX5Otl4P5EZBA0T3oYbCp0rCNr4giVe4gkDvJKCstF4Mx7l1TTKGi3x+Mv1A84w091aadlwhS/h4BZU8poLCuYk/gYJf36RnED4lTh0RtIUbfSLIpgB3DDZERBZ189O48P13ImYJTWiB1+cVy+Ruvn4c9wvzinyB8quYVRvFm20ELLTuUuauNnjyE1s9RDzGNB8rMsI9AgRZGJJSZB+X4a6JyS8LxGa9PaXOrRkrMZFmrTeFG44tmftuP9+3C/brwLEaITwIMfrVJsIwz+UpK9Dr2vtTCOwBSpIEuCJnZlzCHOm1fmPF0MCO/COvRSWrnvvYprug3tBZhBHY0B3Mrp4DQFNhHavC2woZGUxjnK4h+kGZkYQdIyx+YtfOrjdC5iZQ4YjASJ5MuGKoBFlTojwbSNG+vrN0DMzdALV+PLcNEi1e19/oIcbMV94Xhl7i6D7HUf5QosDfcvdj/rJW6q2K6s0R7uiZb90PEILnLkGaiSZJd4y8BpTKGpLJvMc94mBOSRvFMi1sdqdFAoC70XEIshIsnHWxalBIunVxBCOnvnphgUjyFBcWTw/ftpF64mQvRlVTwjtRpGILQzDHgHv03bvfm3LY/jfDCjtl0LlCy0GBO70sRy3vYmbRHcQ56xpPGBw0NTGI+MkplEx90r/jpQ0GMU2fJleJoIMr8Cvj596x2LNugNJnEOnNAQOE7fxIs51IyqAOG7OfCFI3vcgHsAQa2pAqbx/gScl9v1OhFfuNc5LotPxeZSV/QX/P9xl5Azw91a8Oe2Pca+W2EpDkPMiROy5j1axLoVHLeTnxbtlFmuJTD0Q7Uj3MJvla0s8k0kIpPjgIqoV2+e9d5Dbq+p1EZAMdEvt8Fis0vtII1Oon8bToNdXS7SQ6vJcmRiDudummDDsQVUsQurugqmTfW8Z0mOjcbanwb0kbr0FhWntzT5gXCC/2xLACyGHBJ0z8rfDiNBizHw1PgxcKyIukR/9c4mb4yUNUTyJYIobK2mH/y7VQIuWu40SrRVZwoNpsYh1TAkDH5uZTQybW0I8/pJdpHsfi3CO/7gPx8POLBcv4uiLPMPeRCpxVIMI6HMPmtg3IEWaiHOylAbzZQzMkHGhIsXWeANW9Qiu+7dMZHXgsmHVmVSivnXcmIz97H14m788chiP+PtQGz5QSDs9qlOadEhazDLtC9/vEnqfXsDxfkNKPLy9ZX0KHGB2rZg+IxfoqmNvHAsGaB2zzQTKk2NixdB13NnTtbv4tH2hsAOT0c7MoMe5MIORy6X6wta46eNJy1xgPoMY/S3F6yv0ctpmbT5zDOmxwL+qTykNtwQggQmQiPjjZtPYvUmBljeYg2qdvykJ6GbRoh/JkbUQjVQGQ5il9BWgxTq9x9DZLa1tGLSEeu3ekfgXYIkxeh/NqBvvMzxXyrQ/cion7TnmKY0uxr2k2D//73///Y8tTi2W/9ZkQDcW+dPQagDLpYX5ccw4+PAavFP83KGOeB3RxYn63XQy5vaAb9+e1CQh3d1zwacNVGpk/j3GgutoA9T3XWJcs5SGUSg7qucTnDkHyyt728kU3c+Oqq+ctCOCXywuW8LwYWWYjcXg5K+O80WUeuGaqdQJCAu3UAB6BLzX2ZWsH/WcFk5V2zsgkaYPxPxmFrazKdyD9Re0PQ6XdVQ/zdgDJcE0ZiP2QUknM5b3zY32dtyY/ixi1YVuDqMoCWEr9JNQxhmnbgYgCCEDrnx0LjzbssEK1s7S93DLAAW1yFr/f44N4NKEWFvQSNISKB3BpmSwfXQwpr1EE1K3q5NRCK8SREqtdNl7zcZGDis0DDVlRqnejVrb6hBCF0EVwx6w/NK+CHVtvtZVsXozFaZisV5982UkqhR8H5f3BXpxEQpW5TEbJ06GcGOqoRv1/Rt287MWb31Uarn0535Z9EYPcyRjjMAaEo9QGrfOL7QSOECDg3tjLM1nAkeazzUvYJzXaM/z8r717mAQu/n1jFO3TGAwzbSMc4gEXsjFzSMIECO/16UTmRyAy74f0szl/qH/nZ7b3FWNBSLwIfhYz5oNIlrjh4+jv3Gr5gWBpzH5nKid7g/dPXd6XzVKmAGbJ71tr8itRLxjl5ZJmta4HQ4+WokpKCQj7KbHR5dNWtM8Xw2VroYgCeLkEWIAEyYZFjQ9CHYfH+M8PuP3Z0Pzuvul+R1G8F8O0o7YAcfnyCo9BTPhGOeBzQBZFF1vhq6SVhl0G/NzWrjei3MWYGwB1na9RZAehu80aIiZqfMr/atXxqxzhAc29YMdvsfSoVyKzTZZLKqyfiQxnOr90H+1q3ulkkT/8RLsJKLo5ZRvE79eMrFHyVY7JWnj1y88Ed/rlrYH6cGwNTO1nD6Wz7MUROaTp+PXrfzJ+D45N7WYRY8OADjBj6NNXHONGtgz7qGJeizom4udxxy+r1zIedgToVnIt5y8TQ+h+vvHWOKe19rpJjXD8p4u2kUP73I0SZV8OfVtt+Pv1pNoQO8FelUD78lI21WfuRV7Pf8/6gKsU+olhqgAAAAASUVORK5CYII=","btn":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEwAAAAYCAYAAABQiBvKAAAGkElEQVR4nOVZLXMcRxBtpQJm2R6TYKBh/BMEY5awCAoa2jDQYQo0NBR0mMVy0GIRy0FBHdtjOyyp192vp2dvLadSqYpcGUu6vfnsft39und8IiJyejr+KU+0DSIy/4frc9vvDycnAOvixTN5+fJiZUoVkbK+uhSRivHPNaz/O/P+6XxvtR6tqnPfUyugq4LuoRSZ60HPq6qHncs1NldkPlTVdbvdya/bnXyNToD1w+Vb+X+0+mjX0agDd/nj8wZYjNUqf3y8ilW0ma8RqZP1VHdztdDiEAwMReo8eUB4pxpxUMuVspFaJ9/H+jCmNuZh+h3Wxz6pFd8zhHqkYS7OGzdSDyZPC4z5M5Fkwfzi4md59s1pBFMHGMB6e3Udy8NTA5XqYyWedFIpIchcq7u7g+3Ru7SiDXO3JjL2rRNAHZoajpHN5FbV5ND4yjIZFmVwwTMOtcmjYmfVsB/0EBFEIb5P0yzn59/Kdnsnoyoh8tXSKJh7c3sf+rVNqytpPRbqnFU7sDKfULjDgmPGgjEH2vsOMzjEbB+etgDLPky5Ng6w0hw4FnpoiXQwlqFbl+NsKDL7frXJtrt3zyYPuhw9YD722/ufQjjzBhuYa1USnGACO0fn2Jk2B2OTC5kxhUCYQq/RLeiFLtQ4FP3dIJQYenqwGwzz8ANd9NFhWslLBKCMDaROzQwkAPb9KOObV+fcqe235mFov1xdm0DwCoDk4NROotAlmCos6GO2nuENK1oswtvMykXqVBUbHYKH+SkATjFz+lOHc8/BPvDGUN9YwcWyf7qve3dQAL7DmnxWmnNA/C/BfH+z67yIOiqHhaWTR0RHUQ6P4K8p9jnHkrUJk7ljVNImX5iEOXQURMynBziAQvBSMmDo2ZFNSFpe1wH45G6ZVmqqgnS9y2TTScAGIM7G2KAWs0Xg1AAsa89DlI8SIKagBIF3pO0KB8X5eBB+1gCbbew5OCcSgQGoUhwlwZY5DMCSPLcPG3Ij5bBqS+RsLDLDO9XDDZhIyhvfD2ANrpPZq9u7LyswwWEzg/LUZJ3KTZvFA0wo6142Zv5LlsumGccxEgY9zLi4qEcwtCwLLtHvPa0B6CNVZDMWGUaRae900KeppgODgt4WezZ+BaABWK5u1QlMxiDyT7faVcoqBDbWrNgE0HIIvHSWUmLKpuE7MEYIb+PYb1WKVKrQSDiThirwJki0dwOPo0yhT4uKpkWLkIAslyc9h/lrgBJ8laG5R5MvrSvOZaG3B1eukzg9UjgBcSBz7aVCpqRilUOq4zLAvn4NxOZhnnAYwkHC/bwoYhGmAJ1hmeq/flXKkqiEa9RRzbu6HFA9AaQ65khQ/2slgH0DZ0SZcWyLNpYsvcw9TEyRDV0AFJRLL+BaHYNxc4qPcqSvpAkW2qaA8J0LF7uqhwWpa2haGdFZg8+l1XFrrbl2kQJipyXp5y4sxaAwQcIUPpcD4DpHSedFps68lHgyFcsaqqAI075RgDuFVfSNqg8hm9djc5VpobCF5MHeCRW8TwDSASd92LGzEbPVWY3HWmovtVX3EdYJwD70rZdzoxhNFtprCZDkmascPHkxHLRuezi08FgApZX2AI9EldvqOjCVFzXRusKVVuWefJ1hLaWNJUOKqVacen8nkCuErMWaKSKiaR+vKtzUv2MNHullMYfZ2jmK2V2naNHrmRpexj1ZgZNOotJnYkF1YOGo1JQr8gwYaxG7gRC53T24osmiKXsUj+8AK3sFlQrgPEEUe20yy9mm+f1Nw8PPUs/0veeUJSAPAAQQBIaHGmg9n9GoSugOIrM4AeabiZ1rr30Qb3t33wBZAtbysz1dX132jJ7XFftQb8EPSqnUmvd0ve0IpH4XOgrdRXgf3SbYi2eAnmyxFL+jiuRb7pkpyzLE48wWvhh78+q7XCb3HDYh6I3u9fPq3U1nJZJ2Td4UNxPqmXzmjUYj+qVgmBf10III6XDhpalf90+ZmetZUHIyvI/cqXTEqt03is9yXGtCTurx4eZOPdIq0wVg7Hv9+p2cnZ65Zos7tvx94Mtyf0dIyPvQd7JAqHAwXH2RPtLCDpfjTVfDBavUeGtpKcuZnv2OscmVdZMqt7e7Y8BIlrv7vf5+aW0kqf0bLSe+lTcdBezj7w9y8f3zLubaa1XOQKW7puK7Jy1Gq7Q1j90o92zDZ17pZI/yS4s+tfG6x+uvxX2iXUfHc16bi9EVz11pCFXcuqKdeMeT/W82eSLNs+jJX4At/Nr2Ra8kAAAAAElFTkSuQmCC","btn_f":"data:image/png;base64,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","btn_p":"data:image/png;base64,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","btn_d":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEwAAAAYCAYAAABQiBvKAAADr0lEQVR4nN1ZPdLiMAw131BABx0tx6Cl5Bq0HAOOQMkRuAItHXRQUlKSLul2RwyPeXlITmApdr43kyGxZVmS9WObTkopjUajP+mLqKoq9Xq9bF+O5h3+0fun8uXGFEXR6ZixptNpms/n90YDC4Bv7csZwpATCDQKVVx5vgMew+9lWWblsDaP/ng8pt1ul7r2YcZaLBZvC/UbES3ObDa7/94Nxthut+5gey9ldXIrr6FiUK8BP7T1+/17G3/fbrfn2HfnAMBHeTRFhbWbI43H4ydNV4212WxcRm3DomoZRmx8RVEUNeE/yTc6BovRBKYzOSaTSdrv92kwGNzbfrxBh8OhJmwU654XRsqpsCYYHh6vfD8tDJhD59d5Pd2s73K5uDx/PKXNyyCs9lWOUtqm4atC4x0PG4efCKokGwZ8MIcaCDJE3oZ2y+sezxcPs471et3aCIacV+kYbjMlvDwEnlgwL19GlS/nYZgP75Hs1m9h6KFmMBVMw6If5AHQWWJV188pZO1I7vawRz/2PY2LgrFtcqx6OMbnZON53CqZy1EGzwi8WpFRuV1p+J2FzOUxDTuWg8G8h8PhS3XWCs181OOfBvOMo4I3VZhScgMbNjI+FIgQGV8NyN4AA9qv8bd283zPmBw5PB94eJW65mG6L2JlWPhKqmGU4DVPmAJt8hCHJ+bVX+Vj9Ern7R29UNRxnny1pI/NIbtoLl8MH4pznvK2CTouMi4r4IWDekA0D/P3Cg7z0ohQY7GR3KQfnSOb3NgQrbonPAvcZiOpUK/V0PFoGW0qam5bUwtJVKWmI08beInU27watAAobeSdGj6qpEWORQNyHCKJc1UkG3Kv6ns3GJdvzyCeuyq038sJmodyIaP8ojwZ7c/YS4zX9XqtFQaPNxehaI/oHo2YkRfrpSibyxvc5wmc2xJAcfRrLoy2HTxGD+8oJN58MFDutPFiMBPkdDpl3b8vgnt96u4QXouEd1TRygbBoQTnMXwzDfPhUDQgRCNdjNbmtPO0F5K1syQYLZfLF8tq0u45yR90UelmAyuNVlwGK6ynCTWwgkNM59eFxq/14SypXtb1JsThm6GTVJmr4UgYCMALFHmqzu0tkI5XOfnoxWM53HT7gnY7S3o3NbUquVqt7H4/fYrqgyvtbyC3eE2IqjdfTTNqRyO7A4rugf5n9P7hsrHtfwE1g53P52R/hEQTRh5TyWrqUSK6usnh09tV72bhHZ5NNPC0zoP4q3+zpV+Kqqo6fwE+2gUDVvXHdwAAAABJRU5ErkJggg==","tab_on":"data:image/png;base64,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","tab_off":"data:image/png;base64,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","stab_on":"data:image/png;base64,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","stab_off":"data:image/png;base64,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","chk_on":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABrklEQVR4nIWSIXDiQBSGvzKIxSWOle9c4haJpA4cyMpKKnGHLO7qrq5I6q7yJDK4xCXuIoNLHOt6s8s0pb2j/DM7b3b+ff97+95/JSKvXEBd14Rh6OMbZqHiKdJ03WWz2ZDnuSeapiEIAnq9HlVVobX28RSmKhllW4bb7CjgklerFYfD4VIzLAfCyDZM0pIMReeUdFW/wuNAmAO/84KtBQUfBb4SuYuFKVCmO2Z70IEG9amDcyLLWPiuwBY7BnsYT6eo0NWHjgtS7IiU8i2dirgzCUPmjrANgxJCERaLRTvwrgXiMueXKAqrWNeWbWPR0scAP7yq5S4tqJRiZEy7Md8BwBzNOskwCn7qgDzqM1VvyVCkGesGBsZ4P8Rx/C5Q1zUiwr1VPCZZS7hpe1QlEzc0Efoi/8yr4xSdWXpas2jgJd2d0JbrYo+z0Xg8/u+GOqf2lCjiZg8vyVFklWQkFm5ub30R59DP6LbJ0kckxhjD7PmZP+mO+wYiY/wXHVy3ZwWMGbZVXPz28EAkwnK59PdzuAqC4HU4HFKW5QfCuv3izXYWRVEcBc49cEa5hL/uUZum7RnuPgAAAABJRU5ErkJggg==","chk_off":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAA6UlEQVR4nJVTMRKEIAyMDAV20B1lWjrbe4Z/8il+w9In2FpaQmd5N4mDw3Cg3s4ogtlNWEKDiB+4gfcejDE85pD0GscRlmXhhRACaK2hbVvYtg2stTzmmKYJ5nk+BIg8DAPs+35XDDiHoJSBdV15LtKflPWOjOig7/tzTeRBNZFIziFKwblIjUyQ0bgrkZzs3DEnnqQPcj0H4gtqiCd2biEUKrhCrIC34AvNQdlj2UopfmpJJHVYiYyIP8ElEZFWcEWmRCWv5BNyKlIV6Lo3933MQkaR26lhJbAAXYzY2/+i0VpXr/OT4/0CQTBSHoUffnsAAAAASUVORK5CYII=","scr_bar":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAT0lEQVR4nGNkYGD4v3dVD0NKUQsDsUCAh4OhpamEwTushIGJgUzAAaWZyDXgB6UGMAwuA35QagAHpQYwDD0D/gx0LPxAN4B08APujYGPBQDocw3/Ovl4qgAAAABJRU5ErkJggg==","scr_btn":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAArklEQVR4nL2TMQ7DIAxFf1AGjhBGRsaMXRmb63Ts2jHHKSNrj5AxY3MLVyYLIRQJUfUNtkCyv21MB4DQQM+GiLBtHsNgg495rwuUNsHH+KfD7eHQ7fGE+T5VKfvXAudXCD6kqtUtpJm/oaSEGXU5AWMvBjnsdA29xwg0ItikE65OoLT5TwUqIyTQSH9SkTJMO6fOmwrM5QRm1Ken2uG7YzDzmxZYsbSBJcJnaqngA2vkOCc5y4XSAAAAAElFTkSuQmCC","scr_btn_f":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAg0lEQVR4nGNkYGD4z0ABYAIR////x4OfI9EIfO9YMdgAFphJ94+XkGTz1CnbEC6gBLDgMhkbUJTkYPAKdsJvAAhk53gxYAOKliUM94/3oIgxMVAImCDUC0oNkKCXCyRwGUA+YMEWVaDQxgQSxBngFeyEEVX4AHW8ALIRXwrEBxgpzc4AR0lABVsQ+3gAAAAASUVORK5CYII=","close":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAA/UlEQVR4nJ1TLRuCMBC+8SwQoWlcJGo0GvEnGInapFkx2uRnEDXuLxCJRIxE2nwOPRyDPaBvud1t73sfHAwAQCml0Da1BBvKMu/5MpNwvDwYR/Ju7cOvEMKHhecqTlmDQMwmR/Ee0iRtz9z1tprqcpJcllXPd8y+D8kdovg0GesEwECRX9uBEQEtxb6VruwCcZR8Sn2LEJHidGcVCMNN+xiz4EO06GN8VgWITGZdFrTo2+CYCzJWtj6TgYDQyqHHRKZ29LgJbl4QgXrWRfQ5dALQy151G6kvzFhsIIDrSaAvYPrUrr697HYOVVEUo/1NIZMVMDzgX/WPwLNu2AtrH4cSO3iozAAAAABJRU5ErkJggg==","close_f":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAA5klEQVR4nGPg4OBg+E8UeI6Cnx8r/s/AwMDA8v379/85wUoMpAInIwkGAQGG/ywwAS8nQ6I1e2VPZVjXGgRmsyBLGBkpEtR87tx9FD4TugIJyx4wJiSG0wAGhhdgDNMAoSFiSEbiNiAn2ApuEEIzsjjMEhwG1JQEQRVLQBVKgPkgcaJcAAJT1t5DsuUFlI8dMKH6DdnP2LyD1QAJNCGEZoR3EOLogAVdAqYB5mdkQ1DDAW4AAxyAEgksRSInGGxiGAaAkicCwGIAnY/uXQYGlhfHe8AZA5a2SQWMIAKUq8jR/OEDAyMAYHuCrH1ZQH4AAAAASUVORK5CYII=","bar":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAPElEQVR4nO3QwQkAMAxCUVOykJD9V2vpBJ48xTeAwi8OL4wKgPXgOMe/HEhJJCWRlERSEklJtCBRc2g9eBySA1vt8mGhAAAAAElFTkSuQmCC","bar_l":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAYCAYAAADd5VyeAAAAKklEQVR4nGM0NDH8z4AEWEDE+TPn4QJMyLIgMCqACqgRHuBQNzQxhAsAAFOOBMkPiNk6AAAAAElFTkSuQmCC","bar_r":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAYCAYAAADd5VyeAAAAKUlEQVR4nGM0NDH8z4AEGBkYGOAChiaGDEwMaIBpVAAFUCM8WEAhjQwADjsD8cufiY8AAAAASUVORK5CYII=","bars":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAARklEQVR4nGM0NDH8z0BDwMjAwEBTC1j+bwpiGNI+YKKl4SAwagFBMBpEBMFoEBEEo0FEEIwG0cAHEcuQrzJZDE0MaWk+AwDWbAlhSoQhDgAAAABJRU5ErkJggg==","bars_l":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAYCAYAAADd5VyeAAAAPElEQVR4nGM0NDH8z4AEWEDE+TPnUQVA4P+mIDDNxIAEGP3WoQqAwKgAKkAJD3AwQkMdjsGBbGhiCFcFAEM8Dl716rRpAAAAAElFTkSuQmCC","bars_r":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAYCAYAAADd5VyeAAAAPElEQVR4nGM0NDH8z4AEGBkYGOAChiaGDEz/NwUxgDAMMDH6rUPWwcCEwmMYFWBADw/k4MMayCwgAhkAAMuMDIuVXyKyAAAAAElFTkSuQmCC","tw_normal":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAACLElEQVR4nI2SIXTaUBSGv1Q9XOKI48lXlzniiIxsp4IrUxTXuYEqU6Oup6pnaqA6ZNzAgWpRNG6Je3GJGs9lB7qxnTPY9rv7zv9/795zr8URPUReNdMFZQm2DXfzzDrkOzkWDjqXjMYzXBt8dcp1qKr/AjxEXpUagZCKj71z0tKQ5hpdbOi2Gn9ArEPU9cN1FU9ilOezSlPS5IlQOryerKyjHTxeNXf0b1/X1Woao5o+fjvCUwqpXpEbw/qqtfPcRi/ePeBTN6yWeht+rCb9N8iwjX9+wU1/wHw+4ywM0EIy1yXrD1HVdH9BrG04DMOXmQd9GkFAcNbhba9DpoZQJJzVFgSeZDSdcUrJRRSRL2NibX6McNrchbUBP4wY9Hpkqs9txwVH0v9cshEOw+shi0JgRI16dIktwOo2G5V0XfKiRJeAEHTaAb2xYFMajE4RLoSqINMlAqiLAl9K4lXOievUqJmSuisJPXubJ3nW3LfBbAqErDOK6jiiRsOxiTwXTI3ZKsWYDSeDOLEKBJPZAm0EgRQ8ZymLZ82Xvsti5JPrksJsuAwVy0wzTVIrLQzTJLP2e71qqepmnlj3F2ElRcF4ZcjLgoaUmE1JJ/AYL2fcxZnVatSreZZbRw/pXehV0hY86ZIk36BsB8eB9/FfDumnui1VSSGIojbDUFHbLskVjBfJ7ud/Au7miZUUJdPpGFyFsOEp1Ujb3rf9uw6OsFXkNSpdmH19KLx9/w42mQiDjCz/tgAAAABJRU5ErkJggg==","tw_champion":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABdUlEQVR4nHVTIVDDQBDc70QUlzhwjQwuRBUUyNZh6xgkEhR1LaqVDApwsVVQiYMqiIxMHXGJIy7Mfsjn8zQ7k8nf//3e3d69QAdeTv0yzjO53mQFVttU7PLrdRGMlzNMXBee7cDe63e5wdKNhT8olRFt0HV2E23FvwwW/qB03xO5ZmQTzISgz4XXkFm6U3JSpXwwOpZ2mFSExJFjy/8qaJNbusHIvPwarkEBKV6NryxvSNJKXEJQbQqmavaHWF5eIfIK3IZzuXU3mcKP+7h+vG9pw0CCtes1M21GniVzHMJDmE3xsUqRzjMMnT5MX6tObxfqy/lbk7LpK84H+6Xe5/ynkJFYgn3mqMssgZmZvqI29FIYRReRhOwORazP6lnotVJOEqU2BeNFfiTiHs/ZgbhpDhQBNzkkZJd1RpvWKMvIBTD6bGaDUHPwHG8FAldOWJxmGBuC1r1fB27laxIokj88Ac27MM52ZmCCQ/KQfMt191sEfgFIH8CZR4376wAAAABJRU5ErkJggg==","tw_giant":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAACFklEQVR4nIWTIVDbYBiGn3ITPy64xBGZudYFF3CZ61AdqkxRGaYCCqYKrnMdikOVqi2uraIoqOrVkaqlqq2iv/t2f7Md3NEen8h/l7zvc//3fl8KrKlGjJhzNoO5hssrCqt0G+vM5dCiFnfQgOvAWZQD3wWcRcgCcLyI/s0e2RgWWpFlUA7eQgqrqDKty/nJN7KJQmuNUjCZQbu3Wr+sqJrT5flaTAvDliXPzy2ZDkOJK0hUYfneaI4qLzfZMA/zoVgy5pZcnB4QFC3csMn+3j7fTxPCSgBzsF34c4fs7lgv7TRiZPrgiTHXI+ShZcl02pJKgEztJ2mqhjQjZPjLl7KPXNcReQrEgAxkY0lxO5wc77Nl2bg7txx8+sr55hD9CLtxwM9Ln3QEtZrPjyvA+oyzc7e0FqplJZNMY20pLKUYZxrbUTjtCkVVoqv7DBjg+AMeU9hUEB9v074d5xlMZhrPgzCw+OhZLLTGtTTFesKNbjMixQ0GuK5FyYWHfpVud4LJTGv4kOSjEWPUek7tUJEkmmw+plLfxHNHJN1tevdjGo2Agy9XpBMKCiS5fzXW8F+qpqVOEwmKyNmRLfU4D+/uGgn9XPNfu7aqZSVPHXtp9L18/mYPVmnfrLKhl0PFQh1ycW7jufA4gqRPwdzqXYDJpJ1o0sElVvE3aQaOrbC3kN7g7Sqv3W3ThjnTzPyP0Hsd2Kv6C+mZBw9YTJk+AAAAAElFTkSuQmCC","tw_party":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAACvUlEQVR4nJ2Sy2sTURSHvztJJo+ZpEkfSYxNbWsfKgqtKOILRURRRDe60KUIQkHEv0BB1y504VoXiqJgdSciggurtrqx2pettlWbtEmaV5tMkrmSETpr/cE993LgfJzfORe32y2B/zoutyJF/VGVksUKDBfhRBAG05Az4EAYhpMmpqowmjA53KYwmzYJ+BRuvF5g6PQ6LMC4IdkzcIumeCsOr87ir9+EYnEKvmYckTjplw/Roh1IaeAIRajNT2J8ekHu1T0UgB8rEO7ZRGpuHk9bLxsPHsMwJYWPr1B/T9HS0Y35cxxXeAPV0SFOH9qN8DfVS3HWQ6cOyYkx1ENnmX35AF9vH+mJUSJ9e5m+foY1Dd60ru87+3G29tiAL0um1b6mrGDuP0I+m6f4/CbTz0HRguANINwayBrC34zX64NSyQZE/ArzUzM0NHVRTM6TuzOA8Ojg1lAiHQinC+HREKoPPDot8VaqS3MWQKmH8SUTLRbHn5qyii3pIatIShO0EPLvvBGlPA16CEdz1AaoXoXC3Lc1q0JrhFoVWcxAPoU5PQKFDNJYxSwVKVcNhFBsC2EVGvYeZ+LaKSspi2kowqXHw5SNClJx0KhrZHI58uUKwuWiujBjA1IVqGUSax1cvP8Wv7eR12Nf+PrhPdHNWykX8mRmJolu287lrhjOcIdtYbUCrs37rMT5+0OMjE1w98lTzIpBe2c7y59HcApJbH2EYCRKUBXUckkbUC5DQ+Iz524PMvjwEYlvkwS6uvkx8o7+3j5Cuw4TiMVJ/1pgObHA4nIBWSraFtoD8P39G7ovXGHnyRayqRQ7tnQzGw7Q2hbkqK9KTzxMtr+LTt1Jk0cBr/534PWZBc9dRWaToPpwNEYQUqFW34A0kbkUIhhFlgrWVoTbh1zNI7Qg2We3EKpwSkNW7e/6D3KEdf4AbDUgueYVxywAAAAASUVORK5CYII=","tw_elite":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABqUlEQVR4nH2TLVDDUBCEvzCIgAJHUQQXHFQhqQUFLqBoXHGpAxySOiR1DI4qQLYKUFDFxDWuwRXVqXvMXfJCyAA3k8n72bvb7G0c8ogCDKXo3OKU9//eRwHGjPziqYILzPRV78dPFJg5WVxev9L1nnAmEWftmD/j40hxq+417gyCbcy8vQgnEfT6um019WUsTWkiZ0kSE056BS79BC2QpjGnnVAPn2O48HxaTWWiNCXZ83wauzGnfoar+UAMjtCQShIH+99skwQ67jT7/tmiFnnMGnPXy961JX4qveNjtjZzld0pQbRA/AjDlwcidw/Py5IH8c88qkU4nprg3ZiRGRmOjSEYG/bvf53OfPVAGAzIOq93POgf4i77UAPcKhrmyhur9s6Lo7SZpUXydnKuOlRZOOWDIFhja2OZJBnSPIGBf487G2py9yqbBCs3tMO64t+GeQExknhBQkZlp2HVLu/7DzI/tFCjXs8/IXeYOLEMFrXlsYWEhcXZhoUG4du3w6qjkrX4QnxgceJK1cCKJzNO899A3FidtWDE/+rAUpMCpPMvRbXAX/dfjNzc5H0xqDQAAAAASUVORK5CYII=","tw_unique":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABj0lEQVR4nKVTLXPCQBTcZCqQxYEjMjgkOIKLTB3gcCCpa/sPkIVfkOJAxnVQBEdkZHAgUQzuOvvK3Rwprjtzucu7fV97dw4eoB2Nled3UOSpsRXFAacsccpclx+/Gyk62eRJkMrMMZsA52Nxl4A+JkCR56h7TcQXpaLpp2Kml9cDpvsQfghwfT3lDvfIIZc+d4gvStDdKolcqflSFWeORxxTAbH+mCNIgep6jlorVM91D1m6kT2uabM5Gg6z2AKRGPbHyHeJ9E94XgN+O0SyXBie9nOp9mrWEIMulc5pFOCYVWRM1juxEeQwCYUlXB4VRYpWTbQ6XVFbMg+XQNw3pdLGSgiKSx8JgBuS98T0bDBcYoS9+dX75OpgLiOzhTwBruejCMbNLxQyAlSNDtwjh1zdwhM/vcFGzvmWSFEw6lwWsSgWzOKcsgS9wa9eBvqScKZIHPoO6H+bgzLi/1wkEsuXhP3yZNojT9aEzbHfjjwmnUUH3H6PVf8tliq4th3I1Y/pz/Mk2G/ZxvthCW3wA7aQMlDatplDAAAAAElFTkSuQmCC","ic_attack":"data:image/png;base64,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","ic_recovery":"data:image/png;base64,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","ic_sit":"data:image/png;base64,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","ic_autoget":"data:image/png;base64,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"};
-const LEAN_CSS = ":host{position:fixed;right:18px;top:90px;width:450px;z-index:2147483646;font:12px/1.3 Arial,Helvetica,sans-serif;color:#efdaa4;color-scheme:dark;text-shadow:1px 1px #000}\n*{box-sizing:border-box} [hidden]{display:none!important}\n.panel{position:relative;padding-bottom:19px;background:rgba(15,19,17,.96);box-shadow:0 8px 28px #000a}\n.panel:before{content:'';position:absolute;inset:36px 14px 16px;background-image:var(--s-tile_a);opacity:.55;pointer-events:none}\n.frame{position:absolute;pointer-events:none;background-repeat:no-repeat}\n.frame.lu{left:0;top:0;width:40px;height:68px;background-image:var(--s-f_lu)}\n.frame.mu{left:40px;right:40px;top:0;height:68px;background-image:var(--s-f_mu);background-repeat:repeat-x}\n.frame.ru{right:0;top:0;width:40px;height:68px;background-image:var(--s-f_ru)}\n.frame.ls{left:0;top:68px;bottom:48px;width:40px;background-image:var(--s-f_ls);background-repeat:repeat-y}\n.frame.rs{right:0;top:68px;bottom:48px;width:40px;background-image:var(--s-f_rs);background-repeat:repeat-y}\n.frame.ld{left:0;bottom:0;width:40px;height:48px;background-image:var(--s-f_ld)}\n.frame.md{left:40px;right:40px;bottom:0;height:48px;background-image:var(--s-f_md);background-repeat:repeat-x}\n.frame.rd{right:0;bottom:0;width:40px;height:48px;background-image:var(--s-f_rd)}\nheader{position:relative;z-index:1;height:34px;display:flex;align-items:center;justify-content:center;cursor:move;touch-action:none;padding:6px 32px 0;color:#fff}\nheader button.update,header button.discord{height:22px;min-width:0;margin-left:8px;font-size:11px}\nheader strong{font-weight:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\nheader button.version{display:inline;height:auto;min-width:0;padding:0;border:0;background:none;color:inherit;font:inherit;line-height:inherit;text-decoration:underline dotted;text-underline-offset:3px}header button.version:hover{color:#f0d98c}\nheader button.fold{position:absolute;right:10px;top:10px;width:16px;min-width:16px;height:16px;padding:0;border:0;background:var(--s-close);color:transparent;font-size:0}\nheader button.fold:hover{background-image:var(--s-close_f)}\n.body{position:relative;z-index:1;margin:0 15px}\nbutton,input,select{font:12px Arial,Helvetica,sans-serif;color:inherit;text-shadow:inherit;border-radius:0}\nbutton{display:inline-flex;align-items:center;justify-content:center;min-width:52px;height:24px;padding:0 6px;cursor:pointer;white-space:nowrap;background:transparent;color:#fefbd8;border-style:solid;border-width:5px;border-image-source:var(--s-btn);border-image-slice:6 fill;border-image-width:5px;border-image-repeat:stretch;line-height:14px}\nbutton:hover{border-image-source:var(--s-btn_f);color:#fff}button:active{border-image-source:var(--s-btn_p)}button:disabled{border-image-source:var(--s-btn_d);color:#7c786c;cursor:default}\nbutton:focus-visible,input:focus-visible,select:focus-visible{outline:1px solid #ffe08a;outline-offset:1px}\nnav,.row,.subtabs{display:flex;align-items:center;gap:5px;flex-wrap:wrap}\nnav{padding-top:4px;gap:2px}nav button{flex:1;padding:0 5px;font-size:11px}.subtabs{margin:0 0 8px;gap:2px}\nnav button,.subtabs button{height:24px;min-width:56px;padding:0 8px;color:#d8d4c4;border-width:0 6px;border-image-source:var(--s-tab_off);border-image-slice:0 8 fill;border-image-width:0 6px;line-height:23px}\nnav button[aria-selected=true],.subtabs button[aria-selected=true]{color:#fff;border-image-source:var(--s-tab_on)}\n.subtabs button{font-size:11px;min-width:48px;border-image-source:var(--s-stab_off)}\n.subtabs button[aria-selected=true]{border-image-source:var(--s-stab_on)}\n.class-tabs{display:flex;gap:3px;flex-wrap:wrap;margin-bottom:7px}.class-tabs button{font-size:11px;gap:4px;text-transform:capitalize;flex:1;min-width:80px}.class-tabs button[aria-selected=true]{color:#ffe08a}.class-tabs i{display:inline-block;width:16px;height:16px;flex:0 0 16px;background-size:16px 16px}\n.pane,.dialog-body{padding-top:9px;max-height:clamp(220px,calc(100vh - 300px),720px);overflow:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-color:#796a48 #171711}\n.pane::-webkit-scrollbar,.dialog-body::-webkit-scrollbar{width:16px}.pane::-webkit-scrollbar-track,.dialog-body::-webkit-scrollbar-track{background-image:var(--s-scr_bar)}.pane::-webkit-scrollbar-thumb,.dialog-body::-webkit-scrollbar-thumb{background:var(--s-scr_btn) center/16px 100% no-repeat;min-height:16px}.pane::-webkit-scrollbar-thumb:hover,.dialog-body::-webkit-scrollbar-thumb:hover{background-image:var(--s-scr_btn_f)}\nfieldset{position:relative;min-width:0;border:0;margin:0 0 9px;padding:25px 10px 9px;background-color:#282728;background-image:var(--s-ib_lu),var(--s-ib_ru),var(--s-ib_ld),var(--s-ib_rd),var(--s-ib_mu),var(--s-ib_md),var(--s-ib_ls),var(--s-ib_rs);background-position:left top,right top,left bottom,right bottom,left top,left bottom,left top,right top;background-repeat:no-repeat,no-repeat,no-repeat,no-repeat,repeat-x,repeat-x,repeat-y,repeat-y}\nlegend{position:absolute;left:9px;right:9px;top:3px;padding:0;height:13px;line-height:13px;color:#ffd65a;font-weight:bold}\n.field{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:6px 0;min-height:18px}.field>span{flex:1}\ninput:not([type=checkbox]),select{height:22px;background:#080907;border:1px solid #5d5034;padding:0 4px;outline:none;min-width:0;color:#efdaa4}\ninput:focus,select:focus{border-color:#c9a85c}.field input[type=number]{width:66px;text-align:right}.field input[type=text]{width:170px}.field select{max-width:220px;min-width:110px}\ninput[type=checkbox]{appearance:none;width:16px;height:16px;flex:0 0 16px;margin:0;border:0;background:var(--s-chk_off) center/16px 16px;cursor:pointer}input[type=checkbox]:checked{background-image:var(--s-chk_on)}\n.status{padding:6px 6px 8px;min-height:3lh;box-sizing:content-box;white-space:pre-line;color:#f4eedc;border-bottom:1px solid #5d503455}\n.controls{padding:6px 0;gap:3px}.controls button:first-child{flex:1}\n.feedback{padding:6px 4px 0;overflow-wrap:anywhere;font-size:11px;min-height:8px}\n.muted{color:#a09b8c;font-size:11px;margin:6px 0}\n.grid{display:flex;flex-wrap:wrap;gap:5px;align-content:flex-start;margin:8px 0}\nbutton.slot,.skill-icon{position:relative;display:inline-block;flex:0 0 34px;width:34px;min-width:34px;height:34px;border:1px solid #4e4532;border-image:none;background:#050505;box-shadow:inset 0 0 0 1px #17140e;padding:0;overflow:hidden;vertical-align:middle}\nbutton.slot:hover{border-image:none;border-color:#d9b765}.slot.on{border-color:#ffe08a;box-shadow:0 0 5px 1px #ffd678a6}\n.slot img,.skill-icon img{position:absolute;inset:0;width:32px;height:32px;image-rendering:auto}\n.fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;color:#b1a17b}.slot[data-icon-loaded=true]>.fallback,.skill-icon[data-icon-loaded=true]>.fallback{display:none}\n.slot .cd{position:absolute;inset:0;background:conic-gradient(#000b var(--p,0%),transparent 0);pointer-events:none}\n.slot .seconds{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;font-size:11px;pointer-events:none}\n.slot .order{position:absolute;left:1px;top:0;color:#ffd65a;font-size:10px;line-height:11px;pointer-events:none}\n.skill-row{display:flex;align-items:center;gap:7px;min-height:42px;padding:4px 5px;margin:3px 0;background-image:var(--s-bar_l),var(--s-bar_r),var(--s-bar);background-position:left,right,center;background-repeat:no-repeat,no-repeat,repeat-x;background-size:4px 100%,4px 100%,auto 100%}\n.skill-row:hover{background-image:var(--s-bars_l),var(--s-bars_r),var(--s-bars)}\n.skill-row .skill-info{flex:1;min-width:0}.skill-name{display:block;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.skill-detail{font-size:10px;color:#d6c794}.skill-row button.mini{min-width:22px;width:22px;padding:0;height:22px}\n.picker-title{display:flex;align-items:center;gap:6px;justify-content:space-between;margin-top:8px}.picker-title input{max-width:170px;width:50%;font-size:11px}\n.skill-tip{position:fixed;z-index:2147483647;max-width:270px;pointer-events:none;padding:9px;background:rgba(8,9,6,.97);border:1px solid #b79b5c;box-shadow:inset 0 0 0 2px #30291c,0 3px 10px #000;font-size:12px;color:#efdaa4;white-space:pre-line;text-shadow:1px 1px #000}\n.skill-tip strong{display:block;color:#fff;margin-bottom:5px}.empty{padding:10px 4px;color:#a09b8c;text-align:center}\npre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;max-height:130px;overflow:auto;overscroll-behavior:contain;margin:5px 0}\n.wardrobe-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-bottom:8px}\n.wardrobe-item{min-width:0;height:48px;padding:4px;justify-content:flex-start;gap:6px;text-align:left;font-size:10px;white-space:normal;line-height:12px}\n.wardrobe-item>.slot{flex:0 0 34px}.wardrobe-item>span:last-child{overflow:hidden;max-height:36px;overflow-wrap:anywhere}\n.wardrobe-item[aria-pressed=true]{color:#ffe08a;outline:1px solid #ffe08a;outline-offset:-2px}\n@media(max-width:500px){:host{right:4px;top:70px;width:calc(100vw - 8px)}.body{margin:0 13px}.pane{max-height:clamp(200px,calc(100vh - 280px),720px)}.field input[type=text]{width:150px}.skill-row{gap:4px}.controls{gap:2px}}\n\n.waiting{white-space:pre-line;color:#c8d9ae;margin:4px 0}:host(:not(.wide)) .waiting{min-height:2lh}\ntextarea{width:100%;color:inherit;background:#151916;font:11px monospace}\n\n.dialog{position:fixed;width:min(430px,calc(100vw - 8px));z-index:10}.dialog[hidden]{display:none}.dialog-body{max-height:min(70vh,640px);margin:0 15px}.report-preview .field{display:block}.report-preview .field>span{display:block;margin-bottom:4px}.report-image{display:block;width:100%;height:auto;margin:6px 0;border:1px solid #5d5034}\n.patch-notes .release{margin:2px 0 10px}.patch-notes .release>strong{display:block;color:#f0d98c;font-weight:normal;margin-bottom:4px}.patch-notes ul{margin:0;padding-left:18px}.patch-notes li{margin:3px 0;line-height:1.4}.patch-notes .row{margin-bottom:6px}\n.update-note{color:#f0d98c;font-size:11px;line-height:1.35;margin:2px 0 6px}.update-note[hidden]{display:none}\n:host(.min){width:auto!important}\n.orb{position:relative;display:block;width:40px;min-width:40px;height:40px;padding:2px;border:1px solid #c9a85c;background:#000;box-shadow:0 0 0 1px #000,0 3px 10px #000c;cursor:grab;touch-action:none}\n.orb:hover{border-color:#ffe08a;background:#000}.orb:active{cursor:grabbing}\n.orb img{position:absolute;inset:2px;width:34px;height:34px;pointer-events:none}\n.orb-mark{display:grid;place-items:center;width:100%;height:100%;color:#c9a85c;font-weight:bold}\n.orb-dot{position:absolute;right:-5px;bottom:-5px;width:12px;height:12px;border-radius:50%;border:2px solid #000;background:#d9583e;box-shadow:0 0 6px #d9583e}\n.orb[data-state=ok] .orb-dot{background:#7bd155;box-shadow:0 0 6px #7bd155;animation:orb-blink 1.6s infinite}\n.orb[data-state=busy] .orb-dot{background:#ffd65a;box-shadow:0 0 6px #ffd65a}\n@keyframes orb-blink{50%{opacity:.45}}\n.orb.alert{animation:orb-ring 1s infinite}@keyframes orb-ring{50%{box-shadow:0 0 0 1px #000,0 0 14px 4px #6fc1ff}}\n.orb-tip{position:absolute;right:48px;top:50%;transform:translateY(-50%);display:none;width:max-content;max-width:260px;padding:6px 9px;text-align:left;font-weight:normal;line-height:1.35;background:rgba(11,10,7,.96);border:1px solid #6b5a36;white-space:normal;cursor:default}\n.orb.left .orb-tip{right:auto;left:48px}\n.orb:hover .orb-tip,.orb.alert .orb-tip{display:grid}\n.orb-tip strong{color:#9fe27e}.orb[data-state=stop] .orb-tip strong{color:#f08c74}.orb[data-state=busy] .orb-tip strong{color:#ffd65a}.orb.alert .orb-tip strong{color:#6fc1ff}\n.orb-tip em{font-style:normal;color:#b9a878;font-size:10px;margin-top:2px}\n/* Wide window (opt-in, screens at least 900 px wide). The compact window is unchanged. */\n.wide-only,.classic-only,nav button>img,header button.layout{display:none}\n@media(min-width:900px){\nheader button.layout{display:inline-flex;height:22px;min-width:0;margin-left:8px;font-size:11px}\n:host(.wide){width:min(1000px,calc(100vw - 8px))}\n:host(.wide) .body{display:grid;grid-template-columns:104px minmax(0,1fr) 196px;grid-template-areas:\"note note note\" \"strip strip ctl\" \"nav wait side\" \"nav pane side\" \"nav fb side\" \"log log log\";column-gap:8px;align-items:start}\n:host(.wide) .wide-only{display:block}\n:host(.wide) .status{display:none}\n:host(.wide) .update-note{grid-area:note}\n:host(.wide) .strip{grid-area:strip;display:grid;grid-template-columns:150px minmax(0,1fr) 210px;gap:12px;align-items:center;margin:4px 0 8px;padding:9px 12px;background-color:#282728;background-image:var(--s-ib_lu),var(--s-ib_ru),var(--s-ib_ld),var(--s-ib_rd),var(--s-ib_mu),var(--s-ib_md),var(--s-ib_ls),var(--s-ib_rs);background-position:left top,right top,left bottom,right bottom,left top,left bottom,left top,right top;background-repeat:no-repeat,no-repeat,no-repeat,no-repeat,repeat-x,repeat-x,repeat-y,repeat-y}\n:host(.wide) .who strong{display:block;color:#fff;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}:host(.wide) .who .muted{display:block;margin:2px 0 0;text-transform:capitalize}\n:host(.wide) .bars{display:grid;gap:3px}:host(.wide) .gauge{display:grid;grid-template-columns:28px minmax(0,1fr) 96px;align-items:center;gap:6px}\n:host(.wide) .gauge label{color:#b9a878;font-size:10px;font-weight:bold}:host(.wide) .gauge span{text-align:right;font-size:11px;color:#fff;font-variant-numeric:tabular-nums}\n:host(.wide) .track{height:10px;background:#050505;border:1px solid #4e4532;padding:1px}:host(.wide) .track i{display:block;height:100%;width:0;transition:width .3s}\n:host(.wide) .gauge.hp i{background:linear-gradient(#ff7a6a,#b01e1a 55%,#6e0f0d)}:host(.wide) .gauge.mp i{background:linear-gradient(#7fb4ff,#2557b8 55%,#16337a)}:host(.wide) .gauge.xp i{background:linear-gradient(#ffe58a,#c99a1e 55%,#7a5a0a)}\n:host(.wide) .state{display:grid;grid-template-columns:10px minmax(0,1fr);column-gap:7px;align-items:center;padding:5px 9px;background:#0a0d0b;border:1px solid #7a3a2c}\n:host(.wide) .state strong{color:#f08c74;font-size:13px}:host(.wide) .state span{grid-column:2;color:#b9a878;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n:host(.wide) .state-dot{width:8px;height:8px;border-radius:50%;background:#d9583e;box-shadow:0 0 6px #d9583e}\n:host(.wide) .state[data-state=ok]{border-color:#4e6b3c}:host(.wide) .state[data-state=ok] strong{color:#9fe27e}:host(.wide) .state[data-state=ok] .state-dot{background:#7bd155;box-shadow:0 0 6px #7bd155;animation:orb-blink 1.6s infinite}\n:host(.wide) .state[data-state=busy]{border-color:#7a6a2c}:host(.wide) .state[data-state=busy] strong{color:#ffd65a}:host(.wide) .state[data-state=busy] .state-dot{background:#ffd65a;box-shadow:0 0 6px #ffd65a}\n:host(.wide) .controls{grid-area:ctl;display:grid;grid-template-columns:1fr 1fr;gap:3px;padding:4px 0 8px;align-self:center}:host(.wide) .controls button:first-child{grid-column:1/-1;height:28px;font-weight:bold;color:#fff}\n:host(.wide) .waiting{grid-area:wait}\n:host(.wide) nav{grid-area:nav;flex-direction:column;align-items:stretch;flex-wrap:nowrap;gap:3px;padding-top:0}\n:host(.wide) nav button{flex:none;flex-direction:column;gap:3px;height:58px;padding:0;font-size:11px;border:0;border-image:none;background:linear-gradient(#262420,#16150f);box-shadow:inset 0 0 0 1px #4a4130}\n:host(.wide) nav button:hover{color:#fff;box-shadow:inset 0 0 0 1px #8f7a45}\n:host(.wide) nav button[aria-selected=true]{color:#fff;background:linear-gradient(#2a5b74,#183447);box-shadow:inset 0 0 0 1px #5fb6d9,0 0 6px #2d7fa588}\n:host(.wide) nav button>img{display:block;width:28px;height:28px;border:1px solid #5d5034;background:#000}\n:host(.wide) .pane{grid-area:pane;padding-top:0;height:clamp(240px,calc(100vh - 470px),600px);max-height:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:8px;align-content:start;align-items:start}\n:host(.wide) .pane>:not(fieldset){grid-column:1/-1}\n/* A page with one long box (Loot) spreads its rows over both columns. */\n:host(.wide) .pane>fieldset:only-of-type{grid-column:1/-1;columns:2;column-gap:28px}:host(.wide) .pane>fieldset:only-of-type>*{break-inside:avoid}:host(.wide) .pane>fieldset:only-of-type>p.muted{column-span:all}\n:host(.wide) .feedback{grid-area:fb}\n:host(.wide) .side{grid-area:side}:host(.wide) .side fieldset{margin-bottom:8px}:host(.wide) .side button{width:100%;margin-top:6px}\n:host(.wide) .readout{display:flex;justify-content:space-between;gap:6px;margin:4px 0;font-size:11px}:host(.wide) .readout span{color:#b9a878}:host(.wide) .readout b{color:#fff;font-weight:normal;text-align:right;font-variant-numeric:tabular-nums}\n:host(.wide) .logbox{grid-area:log;margin-top:4px;padding:7px 12px 8px;background:#0b0a07cc;border:1px solid #4a4130}:host(.wide) .logbox>strong{color:#ffd65a}\n:host(.wide) .log{list-style:none;margin:4px 0 0;padding:0;height:78px;overflow:auto;overscroll-behavior:contain;font-size:11px;scrollbar-color:#796a48 #171711}\n:host(.wide) .log li{display:flex;gap:8px;padding:1px 0}:host(.wide) .log time{color:#7f7458;font-variant-numeric:tabular-nums;flex:none}:host(.wide) .log li.warn span,:host(.wide) .log li.error span{color:#ffc67a}\n}\n/* Map page */\n.map-stage{position:relative;border:1px solid #6b5a36;box-shadow:0 0 0 2px #0b0a07,0 0 0 3px #4a4130;margin:2px 0 6px}\n.map-stage canvas{display:block;width:100%;height:280px;cursor:crosshair;touch-action:none}\n.map-tools{position:absolute;right:5px;top:5px;display:flex;gap:2px}.map-tools button{min-width:24px;height:22px;padding:0 6px;font-size:12px}\n.map-coords{position:absolute;left:5px;bottom:4px;padding:1px 6px;background:#000a;font-size:11px;pointer-events:none}.map-coords:empty{display:none}\n.map-legend{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:11px}.map-legend i{display:inline-block;width:12px;height:12px;background:center/contain no-repeat}\n@media(min-width:900px){:host(.wide) .pane>.map-box{grid-column:1/-1}:host(.wide) .map-stage canvas{height:340px}}\n/* Town page: the trip as a row of item pictures */\n.trip-flow{list-style:none;display:flex;margin:4px 0 0;padding:0}.trip-flow li{flex:1;display:grid;justify-items:center;gap:2px;position:relative;text-align:center;min-width:0}\n.trip-flow li:not(:last-child):after{content:'';position:absolute;top:17px;left:calc(50% + 21px);right:calc(-50% + 21px);height:2px;background:linear-gradient(90deg,#c9a85c,#5d5034)}\n.trip-flow strong{color:#fff;font-size:11px;font-weight:normal}.trip-flow small{color:#a09b8c;font-size:10px}.trip-flow small.missing{color:#ffc67a}\nnav button{min-width:0;padding:0 3px}\n@media(min-width:900px){:host(.wide) .pane>fieldset:has(.trip-flow){grid-column:1/-1}}\n/* Party page */\n.members{display:grid;gap:3px}\n.member{display:grid;grid-template-columns:minmax(0,1fr) 110px auto;align-items:center;gap:8px;min-height:38px;padding:4px 6px;background-image:var(--s-bar_l),var(--s-bar_r),var(--s-bar);background-position:left,right,center;background-repeat:no-repeat,no-repeat,repeat-x;background-size:4px 100%,4px 100%,auto 100%}\n.member.dead{opacity:.6}.member-name strong{display:block;color:#fff;font-weight:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.member-name .muted{margin:0}\n.member-bars{display:grid;gap:3px}.pbar{height:5px;background:#050505;border:1px solid #3d3626}.pbar i{display:block;height:100%}.pbar.hp i{background:linear-gradient(#ff7a6a,#b01e1a)}.pbar.mp i{background:linear-gradient(#7fb4ff,#2557b8)}\n.member-buffs{display:flex;gap:2px}.member-buffs .skill-icon{width:22px;min-width:22px;height:22px;flex:0 0 22px}.member-buffs .skill-icon img{width:20px;height:20px}.member-buffs .skill-icon.off{filter:grayscale(1) brightness(.5)}\n@media(min-width:900px){:host(.wide) .pane>fieldset:has(.members){grid-column:1/-1}}\n/* Items page */\n.degrees{display:flex;flex-wrap:wrap;gap:4px 8px;margin:4px 0 8px}.degrees label{display:flex;align-items:center;gap:3px;font-size:11px;cursor:pointer}\n.bulk{gap:3px;margin:4px 0 6px}.bulk button{min-width:0;font-size:11px;padding:0 6px}.bulk button.armed{color:#ffc67a}\n.item-table{display:grid;border:1px solid #3d3626;max-height:none}\n.item-row{display:grid;grid-template-columns:26px minmax(0,1fr) 26px 34px repeat(5,30px);align-items:center;gap:2px;min-height:28px;padding:1px 3px;border-top:1px solid #2f2a1e}\n.item-row.head{min-height:20px;border-top:0;color:#b9a878;font-size:10px;text-align:center}.item-row.head span:nth-child(2){text-align:left}\n.item-row:not(.head):hover{background:#ffffff0a}.item-row.ruled{background:#2a2414}\n.item-row .skill-icon{width:24px;min-width:24px;height:24px;flex:0 0 24px}.item-row .skill-icon img{width:22px;height:22px}\n.item-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff}.item-name em{font-style:normal;color:#6fc1ff;margin-left:5px;font-size:10px}\n.item-row>span:nth-child(3){text-align:center;color:#d6c794}\n.item-row button.cell{min-width:0;width:100%;height:20px;padding:0;font-size:11px;border-width:3px}.item-row button.cell.on{color:#ffd65a}\n.pager{justify-content:space-between;margin-top:6px}\n.item-menu{position:fixed;z-index:30;display:grid;gap:2px;min-width:170px;padding:6px;background:rgba(11,10,7,.97);border:1px solid #6b5a36;box-shadow:0 4px 14px #000}\n.item-menu strong{color:#fff;font-weight:normal;margin:0 2px 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.item-menu button{justify-content:flex-start;height:22px}\n@media(min-width:900px){:host(.wide) .pane>fieldset:has(.item-table){grid-column:1/-1}:host(.wide) .item-row{grid-template-columns:26px minmax(0,1fr) 34px 44px repeat(5,48px)}}\n/* Ten pages: two rows of five tabs in the compact window. The wide window keeps its page list. */\nnav button{flex:1 0 calc(20% - 2px)}\nfieldset>input[type=search]{width:100%;margin:2px 0 6px}\n.sx-score{margin:0 0 6px;color:#fff;font-weight:bold}\n.sx-rows{display:block}.sx-row{display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid #3a321c}.sx-row:first-child{border-top:0}\n.sx-text{flex:1;min-width:0}.sx-text strong{display:block;color:#fff}.sx-text .muted{display:block;margin-top:1px}\n.sx-ico{--c:#8a8a8a;overflow:visible}.sx-ico:after{content:'';position:absolute;right:-4px;bottom:-4px;width:11px;height:11px;border-radius:50%;border:1px solid #000;background:var(--c)}\n.sx-ok .sx-ico{--c:#7fd08a}.sx-warn .sx-ico{--c:#f0b64a}.sx-bad .sx-ico{--c:#e8776a}\n.sx-row button{flex:0 0 auto;min-width:64px}\n\n/* Shared activity views own their scrolling inside Settings and the session window. */\n.activity-history{position:relative;height:220px;max-height:30vh;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;margin:6px 0;padding:6px;list-style:none;background:#171711;border:1px solid #5d5034;font-size:11px}\n.activity-history[hidden]{display:none}.activity-history li{display:flex;gap:7px;line-height:1.5}.activity-history time{flex:none;color:#b0a48b}.activity-history span{white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}.activity-history .warn{color:#ffc67a}.activity-history .error{color:#ff9999}.activity-history .cmd{color:#aba79c}\n.session-window .dialog-body{max-height:calc(100vh - 100px)}:host(.wide) .session-window .body{display:block}.session-window .field{margin:3px 0}.session-window .session-values{padding-bottom:6px}\n.activity-panel[hidden]{display:none}.activity-panel>.row{display:flex;flex-wrap:wrap;gap:4px}.activity-panel select{max-width:160px}.activity-panel input[type=search]{box-sizing:border-box;width:100%;margin:4px 0}.activity-panel .field{white-space:normal}.activity-export .dialog-body{display:block}.activity-export textarea{box-sizing:border-box;width:100%;font:11px monospace}:host(.wide) .activity-export .body{display:block}\n.activity-history,.activity-history *{user-select:text;-webkit-user-select:text}\n:host(.wide) .logbox .activity-history{height:78px;max-height:none;margin:4px 0 0;padding:0;background:none;border:0}\n.activity-history .activity-message{flex:1}.activity-history .activity-repeat{flex:0 0 auto;margin-left:auto;white-space:nowrap;color:#b9a878}\n:host(.wide) .pane>.pane-cols{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:8px;align-items:start}.pane-col{min-width:0}\n/* Classic window (opt-in, screens at least 900 px wide): SBot-style frame and tab order, black with lavender headings. */\n@media(min-width:900px){\n:host(.classic){--c-bg:#000;--c-line:#fff;--c-head:#b9b2ff;--c-text:#fff;--c-dim:#b8b8c0;--c-chip:#2f6cff;--c-field:#000;--c-bar:#fff;\n  width:840px;font:11px/1.25 Arial,Helvetica,sans-serif;color:var(--c-text);text-shadow:none}\n:host(.classic) .classic-only,:host(.classic) .wide-only{display:block}\n:host(.classic) .frame,:host(.classic) .panel:before,:host(.classic) .logbox,:host(.classic) .status,:host(.classic) .update-note:empty{display:none}\n:host(.classic) .panel{padding-bottom:0;background:var(--c-bg);border:1px solid #6d6d78;box-shadow:0 8px 28px #000a}\n:host(.classic) header{height:30px;padding:0 90px 0 8px;background:#fff;color:#000;justify-content:flex-start}\n:host(.classic) header strong{color:#000;font-weight:normal;font-size:12px}\n:host(.classic) header button{height:20px;min-width:0;color:#000;background:#f1f1f1;border:1px solid #9a9aa3;border-image:none;padding:0 7px;font-size:11px}\n:host(.classic) header button.version{background:none;border:0;padding:0;margin:0 0 0 4px;text-decoration:underline dotted}\n:host(.classic) header button.fold{background:none;border:0;width:16px;height:16px;top:7px;right:10px;color:#000;font-size:0;background-image:var(--s-close)}\n:host(.classic) .panel:not(.dialog)>.body{margin:0;padding:0 0 6px;display:grid;grid-template-columns:106px minmax(0,1fr) 140px;column-gap:6px;align-items:start;\n  grid-template-areas:\"menu menu menu\" \"note note note\" \"strip strip strip\" \"ctl ctl ctl\" \"nav wait side\" \"nav pane side\" \"nav fb side\"}\n:host(.classic) .menubar{grid-area:menu;display:flex;gap:2px;position:relative;padding:3px 6px;background:#fff;color:#000;margin-bottom:4px}\n:host(.classic) .menubar button.menu-title{height:20px;min-width:0;padding:0 8px;border:0;border-image:none;background:none;color:#000;font-size:12px}\n:host(.classic) .menubar button.menu-title:hover{background:#d9e8ff}\n:host(.classic) .menu{position:absolute;top:100%;z-index:5;display:flex;flex-direction:column;min-width:190px;background:#fff;border:1px solid #9a9aa3;box-shadow:2px 3px 8px #0008}\n:host(.classic) .menu button{justify-content:flex-start;height:24px;padding:0 12px;border:0;border-image:none;background:none;color:#000;font-size:12px}\n:host(.classic) .menu button:hover{background:#d9e8ff}\n:host(.classic) .update-note{grid-area:note;margin:0 8px 4px}\n:host(.classic) .strip{grid-area:strip;display:grid;grid-template-columns:150px minmax(0,1fr) 250px;gap:12px;align-items:center;margin:0 6px;padding:4px 0 6px;min-height:76px;background:none}\n:host(.classic) .who strong{display:block;color:var(--c-head);font-size:15px;font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n:host(.classic) .who .muted{display:block;margin:2px 0 0;color:var(--c-dim);text-transform:capitalize}\n:host(.classic) .bars{display:grid;gap:4px}\n:host(.classic) .gauge{display:grid;grid-template-columns:26px minmax(0,1fr);align-items:center;gap:6px;position:relative}\n:host(.classic) .gauge label{color:var(--c-text);font-size:11px}\n:host(.classic) .gauge .track{height:14px;padding:1px;background:#050505;border:1px solid #6d6d78}\n:host(.classic) .gauge .track i{display:block;height:100%;width:0;transition:width .3s}\n:host(.classic) .gauge.hp i{background:#8a1010}:host(.classic) .gauge.mp i{background:#1c2f9a}:host(.classic) .gauge.xp i{background:#157a1c}\n:host(.classic) .gauge span{position:absolute;left:32px;right:0;text-align:center;font-size:10px;line-height:14px;color:#fff;pointer-events:none}\n:host(.classic) .state{display:none}\n:host(.classic) .cstat{display:grid;gap:1px;font-size:11px}\n:host(.classic) .cstat div{display:grid;grid-template-columns:100px minmax(0,1fr)}\n:host(.classic) .cstat span{color:var(--c-head);font-weight:bold;text-align:right;padding-right:8px}\n:host(.classic) .cstat b{font-weight:normal;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n:host(.classic) .controls{grid-area:ctl;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:0 6px 8px}\n:host(.classic) .controls button{height:24px;min-width:0;font-weight:normal}\n:host(.classic) .controls button:first-child{grid-column:auto;height:24px;color:#fff}\n:host(.classic) .controls button:nth-child(4){display:none}\n:host(.classic) button{height:22px;min-width:0;padding:0 8px;color:#fff;background:#000;border:1px solid var(--c-line);border-image:none;font-size:11px}\n:host(.classic) button:hover{background:#17173a;border-image:none;color:#fff}\n:host(.classic) button:active{background:#262660;border-image:none}\n:host(.classic) button:disabled{color:#777;border-color:#555;background:#000;border-image:none}\n:host(.classic) nav{grid-area:nav;flex-direction:column;align-items:stretch;flex-wrap:nowrap;gap:2px;padding:0 0 0 6px}\n:host(.classic) nav button{flex:none;justify-content:flex-start;gap:6px;height:23px;padding:0 4px;border:0;background:none;color:#fff;font-size:12px;text-align:left}\n:host(.classic) nav button>img{display:block;width:16px;height:16px;border:0;background:none;flex:none}\n:host(.classic) nav button:hover{background:#17173a;box-shadow:none}\n:host(.classic) nav button[aria-selected=true]{background:var(--c-chip);color:#fff;box-shadow:none}\n:host(.classic) .waiting{grid-area:wait;min-height:2lh;margin:0 0 4px;color:var(--c-dim)}\n:host(.classic) .pane{grid-area:pane;display:block;height:min(470px,calc(100vh - 360px));min-height:240px;max-height:none;padding:6px 10px 6px 6px;background:#000;border:1px solid #2a2a33;\n  overflow-y:scroll;overflow-x:hidden;scrollbar-color:#6a6a78 #101014}\n:host(.classic) .pane::-webkit-scrollbar{width:14px}\n:host(.classic) .pane::-webkit-scrollbar-track{background:#101014;background-image:none}\n:host(.classic) .pane::-webkit-scrollbar-thumb{background:#c9c9d2;border:2px solid #101014;background-image:none}\n:host(.classic) fieldset{margin:0 0 16px;padding:0;border:0;background:none;box-shadow:none}\n:host(.classic) legend{position:static;display:block;width:60%;height:auto;margin:2px 0 8px;padding:0 0 3px;color:var(--c-head);font-size:16px;font-style:italic;font-weight:bold;line-height:1.2;border-bottom:1px solid #ddd}\n:host(.classic) .field{justify-content:flex-start;gap:8px;margin:5px 0;min-height:18px}\n:host(.classic) .field>span{flex:0 1 auto}\n:host(.classic) .field:has(input[type=checkbox]){flex-direction:row-reverse;justify-content:flex-end;gap:6px}\n:host(.classic) .field:has(input[type=checkbox])>span{flex:0 1 auto}\n:host(.classic) input:not([type=checkbox]),:host(.classic) select{height:20px;background:var(--c-field);border:1px solid var(--c-line);color:#fff;padding:0 4px}\n:host(.classic) input:focus,:host(.classic) select:focus{border-color:var(--c-head)}\n:host(.classic) input[type=checkbox]{appearance:auto;width:13px;height:13px;flex:0 0 13px;background:none;accent-color:#fff}\n:host(.classic) .muted{color:var(--c-dim);font-size:11px}\n:host(.classic) .row{gap:6px}\n:host(.classic) .subtabs button,:host(.classic) .class-tabs button{border-image:none;border:1px solid var(--c-line);background:#000;color:#fff}\n:host(.classic) .subtabs button[aria-selected=true],:host(.classic) .class-tabs button[aria-selected=true]{background:var(--c-chip)}\n:host(.classic) .feedback{grid-area:fb;padding:4px 2px 0;min-height:18px}\n:host(.classic) .side{grid-area:side;padding-right:6px;display:flex;flex-direction:column;gap:6px;align-self:stretch}\n:host(.classic) .side fieldset{margin:0}\n:host(.classic) .side legend{width:100%;font-size:11px;font-style:normal;margin:0 0 4px;padding-bottom:2px;border-bottom:1px solid #6d6d78}\n:host(.classic) .side button{width:100%;margin-top:0}\n:host(.classic) .side-actions{display:grid;gap:6px;margin-top:4px}\n:host(.classic) .readout{display:flex;justify-content:space-between;gap:6px;margin:1px 0;font-size:11px}\n:host(.classic) .readout span{color:var(--c-text)}\n:host(.classic) .readout b{color:#fff;font-weight:normal;text-align:right;font-variant-numeric:tabular-nums}\n:host(.classic) .dialog-body{margin:0 10px;padding:8px 0;max-height:calc(100vh - 100px)}\n:host(.classic) .dialog .field{justify-content:space-between}\n:host(.classic) .dialog .field:has(input[type=checkbox]){flex-direction:row-reverse;justify-content:flex-end}\n:host(.classic) .dialog textarea{background:#000;color:#fff;border:1px solid #fff}\n:host(.classic) .activity-history{background:#000;border:1px solid #6d6d78}\n:host(.classic) .item-row{grid-template-columns:26px minmax(0,1fr) 34px 44px repeat(5,44px)}\n}\n";
+const LEAN_CSS = ":host{position:fixed;right:18px;top:90px;width:450px;z-index:2147483646;font:12px/1.3 Arial,Helvetica,sans-serif;color:#efdaa4;color-scheme:dark;text-shadow:1px 1px #000}\n*{box-sizing:border-box} [hidden]{display:none!important}\n.panel{position:relative;padding-bottom:19px;background:rgba(15,19,17,.96);box-shadow:0 8px 28px #000a}\n.panel:before{content:'';position:absolute;inset:36px 14px 16px;background-image:var(--s-tile_a);opacity:.55;pointer-events:none}\n.frame{position:absolute;pointer-events:none;background-repeat:no-repeat}\n.frame.lu{left:0;top:0;width:40px;height:68px;background-image:var(--s-f_lu)}\n.frame.mu{left:40px;right:40px;top:0;height:68px;background-image:var(--s-f_mu);background-repeat:repeat-x}\n.frame.ru{right:0;top:0;width:40px;height:68px;background-image:var(--s-f_ru)}\n.frame.ls{left:0;top:68px;bottom:48px;width:40px;background-image:var(--s-f_ls);background-repeat:repeat-y}\n.frame.rs{right:0;top:68px;bottom:48px;width:40px;background-image:var(--s-f_rs);background-repeat:repeat-y}\n.frame.ld{left:0;bottom:0;width:40px;height:48px;background-image:var(--s-f_ld)}\n.frame.md{left:40px;right:40px;bottom:0;height:48px;background-image:var(--s-f_md);background-repeat:repeat-x}\n.frame.rd{right:0;bottom:0;width:40px;height:48px;background-image:var(--s-f_rd)}\nheader{position:relative;z-index:1;height:34px;display:flex;align-items:center;justify-content:center;cursor:move;touch-action:none;padding:6px 32px 0;color:#fff}\nheader button.update,header button.discord{height:22px;min-width:0;margin-left:8px;font-size:11px}\n.main-header{justify-content:flex-start;flex-wrap:wrap;height:auto;min-height:34px;padding-left:10px;padding-bottom:4px;row-gap:4px}\n.main-header strong{flex-shrink:0}\nheader button.render-toggle{flex-shrink:0;width:64px;min-width:64px;height:22px;margin-left:6px;font-size:11px;padding:0 4px}\nheader button.render-toggle[aria-pressed=true]{color:#ffc67a}\nheader strong{font-weight:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\nheader button.version{display:inline;height:auto;min-width:0;padding:0;border:0;background:none;color:inherit;font:inherit;line-height:inherit;text-decoration:underline dotted;text-underline-offset:3px}header button.version:hover{color:#f0d98c}\nheader button.fold{position:absolute;right:10px;top:10px;width:16px;min-width:16px;height:16px;padding:0;border:0;background:var(--s-close);color:transparent;font-size:0}\nheader button.fold:hover{background-image:var(--s-close_f)}\n.body{position:relative;z-index:1;margin:0 15px}\nbutton,input,select{font:12px Arial,Helvetica,sans-serif;color:inherit;text-shadow:inherit;border-radius:0}\nbutton{display:inline-flex;align-items:center;justify-content:center;min-width:52px;height:24px;padding:0 6px;cursor:pointer;white-space:nowrap;background:transparent;color:#fefbd8;border-style:solid;border-width:5px;border-image-source:var(--s-btn);border-image-slice:6 fill;border-image-width:5px;border-image-repeat:stretch;line-height:14px}\nbutton:hover{border-image-source:var(--s-btn_f);color:#fff}button:active{border-image-source:var(--s-btn_p)}button:disabled{border-image-source:var(--s-btn_d);color:#7c786c;cursor:default}\nbutton:focus-visible,input:focus-visible,select:focus-visible{outline:1px solid #ffe08a;outline-offset:1px}\nnav,.row,.subtabs{display:flex;align-items:center;gap:5px;flex-wrap:wrap}\nnav{padding-top:4px;gap:2px}nav button{flex:1;padding:0 5px;font-size:11px}.subtabs{margin:0 0 8px;gap:2px}\nnav button,.subtabs button{height:24px;min-width:56px;padding:0 8px;color:#d8d4c4;border-width:0 6px;border-image-source:var(--s-tab_off);border-image-slice:0 8 fill;border-image-width:0 6px;line-height:23px}\nnav button[aria-selected=true],.subtabs button[aria-selected=true]{color:#fff;border-image-source:var(--s-tab_on)}\n.subtabs button{font-size:11px;min-width:48px;border-image-source:var(--s-stab_off)}\n.subtabs button[aria-selected=true]{border-image-source:var(--s-stab_on)}\n.class-tabs{display:flex;gap:3px;flex-wrap:wrap;margin-bottom:7px}.class-tabs button{font-size:11px;gap:4px;text-transform:capitalize;flex:1;min-width:80px}.class-tabs button[aria-selected=true]{color:#ffe08a}.class-tabs i{display:inline-block;width:16px;height:16px;flex:0 0 16px;background-size:16px 16px}\n.pane,.dialog-body{padding-top:9px;max-height:clamp(220px,calc(100vh - 300px),720px);overflow:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-color:#796a48 #171711}\n.pane::-webkit-scrollbar,.dialog-body::-webkit-scrollbar{width:16px}.pane::-webkit-scrollbar-track,.dialog-body::-webkit-scrollbar-track{background-image:var(--s-scr_bar)}.pane::-webkit-scrollbar-thumb,.dialog-body::-webkit-scrollbar-thumb{background:var(--s-scr_btn) center/16px 100% no-repeat;min-height:16px}.pane::-webkit-scrollbar-thumb:hover,.dialog-body::-webkit-scrollbar-thumb:hover{background-image:var(--s-scr_btn_f)}\nfieldset{position:relative;min-width:0;border:0;margin:0 0 9px;padding:25px 10px 9px;background-color:#282728;background-image:var(--s-ib_lu),var(--s-ib_ru),var(--s-ib_ld),var(--s-ib_rd),var(--s-ib_mu),var(--s-ib_md),var(--s-ib_ls),var(--s-ib_rs);background-position:left top,right top,left bottom,right bottom,left top,left bottom,left top,right top;background-repeat:no-repeat,no-repeat,no-repeat,no-repeat,repeat-x,repeat-x,repeat-y,repeat-y}\nlegend{position:absolute;left:9px;right:9px;top:3px;padding:0;height:13px;line-height:13px;color:#ffd65a;font-weight:bold}\n.field{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:6px 0;min-height:18px}.field>span{flex:1}\ninput:not([type=checkbox]),select{height:22px;background:#080907;border:1px solid #5d5034;padding:0 4px;outline:none;min-width:0;color:#efdaa4}\ninput:focus,select:focus{border-color:#c9a85c}.field input[type=number]{width:66px;text-align:right}.field input[type=text]{width:170px}.field select{max-width:220px;min-width:110px}\ninput[type=checkbox]{appearance:none;width:16px;height:16px;flex:0 0 16px;margin:0;border:0;background:var(--s-chk_off) center/16px 16px;cursor:pointer}input[type=checkbox]:checked{background-image:var(--s-chk_on)}\n.status{padding:6px 6px 8px;min-height:3lh;box-sizing:content-box;white-space:pre-line;color:#f4eedc;border-bottom:1px solid #5d503455}\n.controls{padding:6px 0;gap:3px}.controls button:first-child{flex:1}\n.feedback{padding:6px 4px 0;overflow-wrap:anywhere;font-size:11px;min-height:8px}\n.muted{color:#a09b8c;font-size:11px;margin:6px 0}\n/* Pet status text changes length; keep a fixed three-line box so nothing below it moves. */\n.pet-note{height:4.2em;line-height:1.4;overflow-y:auto;overflow-wrap:anywhere}\n.grid{display:flex;flex-wrap:wrap;gap:5px;align-content:flex-start;margin:8px 0}\nbutton.slot,.skill-icon{position:relative;display:inline-block;flex:0 0 34px;width:34px;min-width:34px;height:34px;border:1px solid #4e4532;border-image:none;background:#050505;box-shadow:inset 0 0 0 1px #17140e;padding:0;overflow:hidden;vertical-align:middle}\nbutton.slot:hover{border-image:none;border-color:#d9b765}.slot.on{border-color:#ffe08a;box-shadow:0 0 5px 1px #ffd678a6}\n.slot img,.skill-icon img{position:absolute;inset:0;width:32px;height:32px;image-rendering:auto}\n.fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;color:#b1a17b}.slot[data-icon-loaded=true]>.fallback,.skill-icon[data-icon-loaded=true]>.fallback{display:none}\n.slot .cd{position:absolute;inset:0;background:conic-gradient(#000b var(--p,0%),transparent 0);pointer-events:none}\n.slot .seconds{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;font-size:11px;pointer-events:none}\n.slot .order{position:absolute;left:1px;top:0;color:#ffd65a;font-size:10px;line-height:11px;pointer-events:none}\n.skill-row{display:flex;align-items:center;gap:7px;min-height:42px;padding:4px 5px;margin:3px 0;background-image:var(--s-bar_l),var(--s-bar_r),var(--s-bar);background-position:left,right,center;background-repeat:no-repeat,no-repeat,repeat-x;background-size:4px 100%,4px 100%,auto 100%}\n.skill-row:hover{background-image:var(--s-bars_l),var(--s-bars_r),var(--s-bars)}\n.skill-row .skill-info{flex:1;min-width:0}.skill-name{display:block;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.skill-detail{font-size:10px;color:#d6c794}.skill-row button.mini{min-width:22px;width:22px;padding:0;height:22px}\n.picker-title{display:flex;align-items:center;gap:6px;justify-content:space-between;margin-top:8px}.picker-title input{max-width:170px;width:50%;font-size:11px}\n.skill-tip{position:fixed;z-index:2147483647;max-width:270px;pointer-events:none;padding:9px;background:rgba(8,9,6,.97);border:1px solid #b79b5c;box-shadow:inset 0 0 0 2px #30291c,0 3px 10px #000;font-size:12px;color:#efdaa4;white-space:pre-line;text-shadow:1px 1px #000}\n.skill-tip strong{display:block;color:#fff;margin-bottom:5px}.empty{padding:10px 4px;color:#a09b8c;text-align:center}\npre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;max-height:130px;overflow:auto;overscroll-behavior:contain;margin:5px 0}\n.wardrobe-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-bottom:8px}\n.wardrobe-item{min-width:0;height:48px;padding:4px;justify-content:flex-start;gap:6px;text-align:left;font-size:10px;white-space:normal;line-height:12px}\n.wardrobe-item>.slot{flex:0 0 34px}.wardrobe-item>span:last-child{overflow:hidden;max-height:36px;overflow-wrap:anywhere}\n.wardrobe-item[aria-pressed=true]{color:#ffe08a;outline:1px solid #ffe08a;outline-offset:-2px}\n@media(max-width:500px){:host{right:4px;top:70px;width:calc(100vw - 8px)}.body{margin:0 13px}.pane{max-height:clamp(200px,calc(100vh - 280px),720px)}.field input[type=text]{width:150px}.skill-row{gap:4px}.controls{gap:2px}}\n\n.waiting{white-space:pre-line;color:#c8d9ae;margin:4px 0;height:4lh;overflow-y:auto;overflow-wrap:anywhere;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#796a48 #171711}\ntextarea{width:100%;color:inherit;background:#151916;font:11px monospace}\n\n.dialog{position:fixed;width:min(430px,calc(100vw - 8px));z-index:10}.dialog[hidden]{display:none}.dialog-body{max-height:min(70vh,640px);margin:0 15px}.report-preview .field{display:block}.report-preview .field>span{display:block;margin-bottom:4px}.report-image{display:block;width:100%;height:auto;margin:6px 0;border:1px solid #5d5034}\n.patch-notes .release{margin:2px 0 10px}.patch-notes .release>strong{display:block;color:#f0d98c;font-weight:normal;margin-bottom:4px}.patch-notes ul{margin:0;padding-left:18px}.patch-notes li{margin:3px 0;line-height:1.4}.patch-notes .row{margin-bottom:6px}\n.update-note{color:#f0d98c;font-size:11px;line-height:1.35;margin:2px 0 6px}.update-note[hidden]{display:none}\n:host(.min){width:auto!important}\n.orb{position:relative;display:block;width:40px;min-width:40px;height:40px;padding:2px;border:1px solid #c9a85c;background:#000;box-shadow:0 0 0 1px #000,0 3px 10px #000c;cursor:grab;touch-action:none}\n.orb:hover{border-color:#ffe08a;background:#000}.orb:active{cursor:grabbing}\n.orb img{position:absolute;inset:2px;width:34px;height:34px;pointer-events:none}\n.orb-mark{display:grid;place-items:center;width:100%;height:100%;color:#c9a85c;font-weight:bold}\n.orb-dot{position:absolute;right:-5px;bottom:-5px;width:12px;height:12px;border-radius:50%;border:2px solid #000;background:#d9583e;box-shadow:0 0 6px #d9583e}\n.orb[data-state=ok] .orb-dot{background:#7bd155;box-shadow:0 0 6px #7bd155;animation:orb-blink 1.6s infinite}\n.orb[data-state=busy] .orb-dot{background:#ffd65a;box-shadow:0 0 6px #ffd65a}\n@keyframes orb-blink{50%{opacity:.45}}\n.orb.alert{animation:orb-ring 1s infinite}@keyframes orb-ring{50%{box-shadow:0 0 0 1px #000,0 0 14px 4px #6fc1ff}}\n.orb-tip{position:absolute;right:48px;top:50%;transform:translateY(-50%);display:none;width:max-content;max-width:260px;padding:6px 9px;text-align:left;font-weight:normal;line-height:1.35;background:rgba(11,10,7,.96);border:1px solid #6b5a36;white-space:normal;cursor:default}\n.orb.left .orb-tip{right:auto;left:48px}\n.orb:hover .orb-tip,.orb.alert .orb-tip{display:grid}\n.orb-tip strong{color:#9fe27e}.orb[data-state=stop] .orb-tip strong{color:#f08c74}.orb[data-state=busy] .orb-tip strong{color:#ffd65a}.orb.alert .orb-tip strong{color:#6fc1ff}\n.orb-tip em{font-style:normal;color:#b9a878;font-size:10px;margin-top:2px}\n/* Wide window (opt-in, screens at least 900 px wide). The compact window is unchanged. */\n.wide-only,.classic-only,nav button>img,header button.layout{display:none}\n@media(min-width:900px){\nheader button.layout{display:inline-flex;height:22px;min-width:0;margin-left:8px;font-size:11px}\n:host(.wide){width:min(1000px,calc(100vw - 8px))}\n:host(.wide) .body{display:grid;grid-template-columns:104px minmax(0,1fr) 196px;grid-template-areas:\"note note note\" \"strip strip ctl\" \"nav wait side\" \"nav pane side\" \"nav fb side\" \"log log log\";column-gap:8px;align-items:start}\n:host(.wide) .wide-only{display:block}\n:host(.wide) .status{display:none}\n:host(.wide) .update-note{grid-area:note}\n:host(.wide) .strip{grid-area:strip;display:grid;grid-template-columns:150px minmax(0,1fr) 210px;gap:12px;align-items:center;margin:4px 0 8px;padding:9px 12px;background-color:#282728;background-image:var(--s-ib_lu),var(--s-ib_ru),var(--s-ib_ld),var(--s-ib_rd),var(--s-ib_mu),var(--s-ib_md),var(--s-ib_ls),var(--s-ib_rs);background-position:left top,right top,left bottom,right bottom,left top,left bottom,left top,right top;background-repeat:no-repeat,no-repeat,no-repeat,no-repeat,repeat-x,repeat-x,repeat-y,repeat-y}\n:host(.wide) .who strong{display:block;color:#fff;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}:host(.wide) .who .muted{display:block;margin:2px 0 0;text-transform:capitalize}\n:host(.wide) .bars{display:grid;gap:3px}:host(.wide) .gauge{display:grid;grid-template-columns:28px minmax(0,1fr) 96px;align-items:center;gap:6px}\n:host(.wide) .gauge label{color:#b9a878;font-size:10px;font-weight:bold}:host(.wide) .gauge span{text-align:right;font-size:11px;color:#fff;font-variant-numeric:tabular-nums}\n:host(.wide) .track{height:10px;background:#050505;border:1px solid #4e4532;padding:1px}:host(.wide) .track i{display:block;height:100%;width:0;transition:width .3s}\n:host(.wide) .gauge.hp i{background:linear-gradient(#ff7a6a,#b01e1a 55%,#6e0f0d)}:host(.wide) .gauge.mp i{background:linear-gradient(#7fb4ff,#2557b8 55%,#16337a)}:host(.wide) .gauge.xp i{background:linear-gradient(#ffe58a,#c99a1e 55%,#7a5a0a)}\n:host(.wide) .state{display:grid;grid-template-columns:10px minmax(0,1fr);column-gap:7px;align-items:center;padding:5px 9px;background:#0a0d0b;border:1px solid #7a3a2c}\n:host(.wide) .state strong{color:#f08c74;font-size:13px}:host(.wide) .state span{grid-column:2;color:#b9a878;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n:host(.wide) .state-dot{width:8px;height:8px;border-radius:50%;background:#d9583e;box-shadow:0 0 6px #d9583e}\n:host(.wide) .state[data-state=ok]{border-color:#4e6b3c}:host(.wide) .state[data-state=ok] strong{color:#9fe27e}:host(.wide) .state[data-state=ok] .state-dot{background:#7bd155;box-shadow:0 0 6px #7bd155;animation:orb-blink 1.6s infinite}\n:host(.wide) .state[data-state=busy]{border-color:#7a6a2c}:host(.wide) .state[data-state=busy] strong{color:#ffd65a}:host(.wide) .state[data-state=busy] .state-dot{background:#ffd65a;box-shadow:0 0 6px #ffd65a}\n:host(.wide) .controls{grid-area:ctl;display:grid;grid-template-columns:1fr 1fr;gap:3px;padding:4px 0 8px;align-self:center}:host(.wide) .controls button:first-child{grid-column:1/-1;height:28px;font-weight:bold;color:#fff}\n:host(.wide) .waiting{grid-area:wait}\n:host(.wide) nav{grid-area:nav;flex-direction:column;align-items:stretch;flex-wrap:nowrap;gap:3px;padding-top:0}\n:host(.wide) nav button{flex:none;flex-direction:column;gap:3px;height:58px;padding:0;font-size:11px;border:0;border-image:none;background:linear-gradient(#262420,#16150f);box-shadow:inset 0 0 0 1px #4a4130}\n:host(.wide) nav button:hover{color:#fff;box-shadow:inset 0 0 0 1px #8f7a45}\n:host(.wide) nav button[aria-selected=true]{color:#fff;background:linear-gradient(#2a5b74,#183447);box-shadow:inset 0 0 0 1px #5fb6d9,0 0 6px #2d7fa588}\n:host(.wide) nav button>img{display:block;width:28px;height:28px;border:1px solid #5d5034;background:#000}\n:host(.wide) .pane{grid-area:pane;padding-top:0;height:clamp(240px,calc(100vh - 470px),600px);max-height:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:8px;align-content:start;align-items:start}\n:host(.wide) .pane>:not(fieldset){grid-column:1/-1}\n/* A page with one long box (Loot) spreads its rows over both columns. */\n:host(.wide) .pane>fieldset:only-of-type{grid-column:1/-1;columns:2;column-gap:28px}:host(.wide) .pane>fieldset:only-of-type>*{break-inside:avoid}:host(.wide) .pane>fieldset:only-of-type>p.muted{column-span:all}\n:host(.wide) .feedback{grid-area:fb}\n:host(.wide) .side{grid-area:side}:host(.wide) .side fieldset{margin-bottom:8px}:host(.wide) .side button{width:100%;margin-top:6px}\n:host(.wide) .readout{display:flex;justify-content:space-between;gap:6px;margin:4px 0;font-size:11px}:host(.wide) .readout span{color:#b9a878}:host(.wide) .readout b{color:#fff;font-weight:normal;text-align:right;font-variant-numeric:tabular-nums}\n:host(.wide) .logbox{grid-area:log;margin-top:4px;padding:7px 12px 8px;background:#0b0a07cc;border:1px solid #4a4130}:host(.wide) .logbox>strong{color:#ffd65a}\n:host(.wide) .log{list-style:none;margin:4px 0 0;padding:0;height:78px;overflow:auto;overscroll-behavior:contain;font-size:11px;scrollbar-color:#796a48 #171711}\n:host(.wide) .log li{display:flex;gap:8px;padding:1px 0}:host(.wide) .log time{color:#7f7458;font-variant-numeric:tabular-nums;flex:none}:host(.wide) .log li.warn span,:host(.wide) .log li.error span{color:#ffc67a}\n}\n/* Map page */\n.map-stage{position:relative;border:1px solid #6b5a36;box-shadow:0 0 0 2px #0b0a07,0 0 0 3px #4a4130;margin:2px 0 6px}\n.map-stage canvas{display:block;width:100%;height:280px;cursor:crosshair;touch-action:none}\n.map-tools{position:absolute;right:5px;top:5px;display:flex;gap:2px}.map-tools button{min-width:24px;height:22px;padding:0 6px;font-size:12px}\n.map-coords{position:absolute;left:5px;bottom:4px;padding:1px 6px;background:#000a;font-size:11px;pointer-events:none}.map-coords:empty{display:none}\n.map-legend{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:11px}.map-legend i{display:inline-block;width:12px;height:12px;background:center/contain no-repeat}\n.map-position{margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #655635}\n.map-spot-header{display:flex;align-items:center;justify-content:flex-start;gap:8px;margin-bottom:8px}\n.map-spot-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;align-items:center;gap:8px}\n.map-position .field{margin:0;min-width:0;gap:6px}.map-position .field>span{flex:0 0 auto}\n.map-position .field input{box-sizing:border-box;width:100%;min-width:0;flex:1}\n.map-position>p.muted{margin:5px 0 10px;font-size:11px}\n.map-current-position{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:5px}\n.map-current-position input{font-variant-numeric:tabular-nums}\n:host(.classic) .map-position .field{margin:0}\n@media(max-width:380px){.map-current-position{grid-template-columns:minmax(0,1fr) auto}.map-current-position>.field{grid-column:1/-1}.map-spot-header{flex-wrap:wrap}}\n@media(min-width:900px){:host(.wide) .pane>.map-box{grid-column:1/-1}:host(.wide) .map-stage canvas{height:340px}}\n/* Town page: the trip as a row of item pictures */\n.trip-flow{list-style:none;display:flex;margin:4px 0 0;padding:0}.trip-flow li{flex:1;display:grid;justify-items:center;gap:2px;position:relative;text-align:center;min-width:0}\n.trip-flow li:not(:last-child):after{content:'';position:absolute;top:17px;left:calc(50% + 21px);right:calc(-50% + 21px);height:2px;background:linear-gradient(90deg,#c9a85c,#5d5034)}\n.trip-flow strong{color:#fff;font-size:11px;font-weight:normal}.trip-flow small{color:#a09b8c;font-size:10px}.trip-flow small.missing{color:#ffc67a}\nnav button{min-width:0;padding:0 3px}\n@media(min-width:900px){:host(.wide) .pane>fieldset:has(.trip-flow){grid-column:1/-1}}\n/* Party page */\n.members{display:grid;gap:3px}\n.member{display:grid;grid-template-columns:minmax(0,1fr) 110px auto;align-items:center;gap:8px;min-height:38px;padding:4px 6px;background-image:var(--s-bar_l),var(--s-bar_r),var(--s-bar);background-position:left,right,center;background-repeat:no-repeat,no-repeat,repeat-x;background-size:4px 100%,4px 100%,auto 100%}\n.member.dead{opacity:.6}.member-name strong{display:block;color:#fff;font-weight:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.member-name .muted{margin:0}\n.member-bars{display:grid;gap:3px}.pbar{height:5px;background:#050505;border:1px solid #3d3626}.pbar i{display:block;height:100%}.pbar.hp i{background:linear-gradient(#ff7a6a,#b01e1a)}.pbar.mp i{background:linear-gradient(#7fb4ff,#2557b8)}\n.member-buffs{display:flex;gap:2px}.member-buffs .skill-icon{width:22px;min-width:22px;height:22px;flex:0 0 22px}.member-buffs .skill-icon img{width:20px;height:20px}.member-buffs .skill-icon.off{filter:grayscale(1) brightness(.5)}\n@media(min-width:900px){:host(.wide) .pane>fieldset:has(.members){grid-column:1/-1}}\n/* Items page */\n.degrees{display:flex;flex-wrap:wrap;gap:4px 8px;margin:4px 0 8px}.degrees label{display:flex;align-items:center;gap:3px;font-size:11px;cursor:pointer}\n.bulk{gap:3px;margin:4px 0 6px}.bulk button{min-width:0;font-size:11px;padding:0 6px}.bulk button.armed{color:#ffc67a}\n.item-table{display:grid;border:1px solid #3d3626;max-height:none}\n.item-row{display:grid;grid-template-columns:26px minmax(0,1fr) 26px 34px repeat(5,30px);align-items:center;gap:2px;min-height:28px;padding:1px 3px;border-top:1px solid #2f2a1e}\n.item-row.head{min-height:20px;border-top:0;color:#b9a878;font-size:10px;text-align:center}.item-row.head span:nth-child(2){text-align:left}\n.item-row:not(.head):hover{background:#ffffff0a}.item-row.ruled{background:#2a2414}\n.item-row .skill-icon{width:24px;min-width:24px;height:24px;flex:0 0 24px}.item-row .skill-icon img{width:22px;height:22px}\n.item-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff}.item-name em{font-style:normal;color:#6fc1ff;margin-left:5px;font-size:10px}\n.item-row>span:nth-child(3){text-align:center;color:#d6c794}\n.item-row button.cell{min-width:0;width:100%;height:20px;padding:0;font-size:11px;border-width:3px}.item-row button.cell.on{color:#ffd65a}\n.pager{justify-content:space-between;margin-top:6px}\n.item-menu{position:fixed;z-index:30;display:grid;gap:2px;min-width:170px;padding:6px;background:rgba(11,10,7,.97);border:1px solid #6b5a36;box-shadow:0 4px 14px #000}\n.item-menu strong{color:#fff;font-weight:normal;margin:0 2px 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.item-menu button{justify-content:flex-start;height:22px}\n@media(min-width:900px){:host(.wide) .pane>fieldset:has(.item-table){grid-column:1/-1}:host(.wide) .item-row{grid-template-columns:26px minmax(0,1fr) 34px 44px repeat(5,48px)}}\n/* Ten pages: two rows of five tabs in the compact window. The wide window keeps its page list. */\nnav button{flex:1 0 calc(20% - 2px)}\nfieldset>input[type=search]{width:100%;margin:2px 0 6px}\n.sx-score{margin:0 0 6px;color:#fff;font-weight:bold}\n.sx-rows{display:block}.sx-row{display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid #3a321c}.sx-row:first-child{border-top:0}\n.sx-text{flex:1;min-width:0}.sx-text strong{display:block;color:#fff}.sx-text .muted{display:block;margin-top:1px}\n.sx-ico{--c:#8a8a8a;overflow:visible}.sx-ico:after{content:'';position:absolute;right:-4px;bottom:-4px;width:11px;height:11px;border-radius:50%;border:1px solid #000;background:var(--c)}\n.sx-ok .sx-ico{--c:#7fd08a}.sx-warn .sx-ico{--c:#f0b64a}.sx-bad .sx-ico{--c:#e8776a}\n.sx-row button{flex:0 0 auto;min-width:64px}\n\n/* Shared activity views own their scrolling inside Settings and the session window. */\n.activity-history{position:relative;height:220px;max-height:30vh;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;margin:6px 0;padding:6px;list-style:none;background:#171711;border:1px solid #5d5034;font-size:11px}\n.activity-history[hidden]{display:none}.activity-history li{display:flex;gap:7px;line-height:1.5}.activity-history time{flex:none;color:#b0a48b}.activity-history span{white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}.activity-history .warn{color:#ffc67a}.activity-history .error{color:#ff9999}.activity-history .cmd{color:#aba79c}\n.session-window .dialog-body{max-height:calc(100vh - 100px)}:host(.wide) .session-window .body{display:block}.session-window .field{margin:3px 0}.session-window .session-values{padding-bottom:6px}\n.activity-panel[hidden]{display:none}.activity-panel>.row{display:flex;flex-wrap:wrap;gap:4px}.activity-panel select{max-width:160px}.activity-panel input[type=search]{box-sizing:border-box;width:100%;margin:4px 0}.activity-panel .field{white-space:normal}.activity-export .dialog-body{display:block}.activity-export textarea{box-sizing:border-box;width:100%;font:11px monospace}:host(.wide) .activity-export .body{display:block}\n.activity-history,.activity-history *{user-select:text;-webkit-user-select:text}\n:host(.wide) .logbox .activity-history{height:78px;max-height:none;margin:4px 0 0;padding:0;background:none;border:0}\n.activity-history .activity-message{flex:1}.activity-history .activity-repeat{flex:0 0 auto;margin-left:auto;white-space:nowrap;color:#b9a878}\n:host(.wide) .pane>.pane-cols{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:8px;align-items:start}.pane-col{min-width:0}\n/* Classic window (opt-in, screens at least 900 px wide): SBot-style frame and tab order, black with lavender headings. */\n@media(min-width:900px){\n:host(.classic){--c-bg:#000;--c-line:#fff;--c-head:#b9b2ff;--c-text:#fff;--c-dim:#b8b8c0;--c-chip:#2f6cff;--c-field:#000;--c-bar:#fff;\n  width:840px;font:11px/1.25 Arial,Helvetica,sans-serif;color:var(--c-text);text-shadow:none}\n:host(.classic) .classic-only,:host(.classic) .wide-only{display:block}\n:host(.classic) .frame,:host(.classic) .panel:before,:host(.classic) .logbox,:host(.classic) .status,:host(.classic) .update-note:empty{display:none}\n:host(.classic) .panel{padding-bottom:0;background:var(--c-bg);border:1px solid #6d6d78;box-shadow:0 8px 28px #000a}\n:host(.classic) header{height:30px;padding:0 90px 0 8px;background:#fff;color:#000;justify-content:flex-start}\n:host(.classic) .main-header{height:auto;min-height:30px;padding-top:4px;padding-bottom:4px}\n:host(.classic) header strong{color:#000;font-weight:normal;font-size:12px}\n:host(.classic) header button{height:20px;min-width:0;color:#000;background:#f1f1f1;border:1px solid #9a9aa3;border-image:none;padding:0 7px;font-size:11px}\n:host(.classic) header button.version{background:none;border:0;padding:0;margin:0 0 0 4px;text-decoration:underline dotted}\n:host(.classic) header button.fold{background:none;border:0;width:16px;height:16px;top:7px;right:10px;color:#000;font-size:0;background-image:var(--s-close)}\n:host(.classic) .panel:not(.dialog)>.body{margin:0;padding:0 0 6px;display:grid;grid-template-columns:106px minmax(0,1fr) 140px;column-gap:6px;align-items:start;\n  grid-template-areas:\"menu menu menu\" \"note note note\" \"strip strip strip\" \"ctl ctl ctl\" \"nav wait side\" \"nav pane side\" \"nav fb side\"}\n:host(.classic) .menubar{grid-area:menu;display:flex;gap:2px;position:relative;padding:3px 6px;background:#fff;color:#000;margin-bottom:4px}\n:host(.classic) .menubar button.menu-title{height:20px;min-width:0;padding:0 8px;border:0;border-image:none;background:none;color:#000;font-size:12px}\n:host(.classic) .menubar button.menu-title:hover{background:#d9e8ff}\n:host(.classic) .menu{position:absolute;top:100%;z-index:5;display:flex;flex-direction:column;min-width:190px;background:#fff;border:1px solid #9a9aa3;box-shadow:2px 3px 8px #0008}\n:host(.classic) .menu button{justify-content:flex-start;height:24px;padding:0 12px;border:0;border-image:none;background:none;color:#000;font-size:12px}\n:host(.classic) .menu button:hover{background:#d9e8ff}\n:host(.classic) .update-note{grid-area:note;margin:0 8px 4px}\n:host(.classic) .strip{grid-area:strip;display:grid;grid-template-columns:150px minmax(0,1fr) 250px;gap:12px;align-items:center;margin:0 6px;padding:4px 0 6px;min-height:76px;background:none}\n:host(.classic) .who strong{display:block;color:var(--c-head);font-size:15px;font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n:host(.classic) .who .muted{display:block;margin:2px 0 0;color:var(--c-dim);text-transform:capitalize}\n:host(.classic) .bars{display:grid;gap:4px}\n:host(.classic) .gauge{display:grid;grid-template-columns:26px minmax(0,1fr);align-items:center;gap:6px;position:relative}\n:host(.classic) .gauge label{color:var(--c-text);font-size:11px}\n:host(.classic) .gauge .track{height:14px;padding:1px;background:#050505;border:1px solid #6d6d78}\n:host(.classic) .gauge .track i{display:block;height:100%;width:0;transition:width .3s}\n:host(.classic) .gauge.hp i{background:#8a1010}:host(.classic) .gauge.mp i{background:#1c2f9a}:host(.classic) .gauge.xp i{background:#157a1c}\n:host(.classic) .gauge span{position:absolute;left:32px;right:0;text-align:center;font-size:10px;line-height:14px;color:#fff;pointer-events:none}\n:host(.classic) .state{display:none}\n:host(.classic) .cstat{display:grid;gap:1px;font-size:11px}\n:host(.classic) .cstat div{display:grid;grid-template-columns:100px minmax(0,1fr)}\n:host(.classic) .cstat span{color:var(--c-head);font-weight:bold;text-align:right;padding-right:8px}\n:host(.classic) .cstat b{font-weight:normal;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n:host(.classic) .controls{grid-area:ctl;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:0 6px 8px}\n:host(.classic) .controls button{height:24px;min-width:0;font-weight:normal}\n:host(.classic) .controls button:first-child{grid-column:auto;height:24px;color:#fff}\n:host(.classic) .controls button:nth-child(4){display:none}\n:host(.classic) button{height:22px;min-width:0;padding:0 8px;color:#fff;background:#000;border:1px solid var(--c-line);border-image:none;font-size:11px}\n:host(.classic) button:hover{background:#17173a;border-image:none;color:#fff}\n:host(.classic) button:active{background:#262660;border-image:none}\n:host(.classic) button.slot{width:34px;min-width:34px;height:34px;padding:0;border:1px solid #4e4532;background:#050505}\n:host(.classic) button.slot:hover{background:#050505;border-color:#d9b765}\n:host(.classic) button.slot.on{border-color:#ffe08a;box-shadow:0 0 5px 1px #ffd678a6}\n:host(.classic) button:disabled{color:#777;border-color:#555;background:#000;border-image:none}\n:host(.classic) nav{grid-area:nav;flex-direction:column;align-items:stretch;flex-wrap:nowrap;gap:2px;padding:0 0 0 6px}\n:host(.classic) nav button{flex:none;justify-content:flex-start;gap:6px;height:23px;padding:0 4px;border:0;background:none;color:#fff;font-size:12px;text-align:left}\n:host(.classic) nav button>img{display:block;width:16px;height:16px;border:0;background:none;flex:none}\n:host(.classic) nav button:hover{background:#17173a;box-shadow:none}\n:host(.classic) nav button[aria-selected=true]{background:var(--c-chip);color:#fff;box-shadow:none}\n:host(.classic) .waiting{grid-area:wait;margin:0 0 4px;color:var(--c-dim)}\n:host(.classic) .pane{grid-area:pane;display:block;height:min(470px,calc(100vh - 360px));min-height:240px;max-height:none;padding:6px 10px 6px 6px;background:#000;border:1px solid #2a2a33;\n  overflow-y:scroll;overflow-x:hidden;scrollbar-color:#6a6a78 #101014}\n:host(.classic) .pane::-webkit-scrollbar{width:14px}\n:host(.classic) .pane::-webkit-scrollbar-track{background:#101014;background-image:none}\n:host(.classic) .pane::-webkit-scrollbar-thumb{background:#c9c9d2;border:2px solid #101014;background-image:none}\n:host(.classic) fieldset{margin:0 0 16px;padding:0;border:0;background:none;box-shadow:none}\n:host(.classic) legend{position:static;display:block;width:60%;height:auto;margin:2px 0 8px;padding:0 0 3px;color:var(--c-head);font-size:16px;font-style:italic;font-weight:bold;line-height:1.2;border-bottom:1px solid #ddd}\n:host(.classic) .field{justify-content:flex-start;gap:8px;margin:5px 0;min-height:18px}\n:host(.classic) .field>span{flex:0 1 auto}\n:host(.classic) .field:has(input[type=checkbox]){flex-direction:row-reverse;justify-content:flex-end;gap:6px}\n:host(.classic) .field:has(input[type=checkbox])>span{flex:0 1 auto}\n:host(.classic) input:not([type=checkbox]),:host(.classic) select{height:20px;background:var(--c-field);border:1px solid var(--c-line);color:#fff;padding:0 4px}\n:host(.classic) input:focus,:host(.classic) select:focus{border-color:var(--c-head)}\n:host(.classic) input[type=checkbox]{appearance:auto;width:13px;height:13px;flex:0 0 13px;background:none;accent-color:#fff}\n:host(.classic) .muted{color:var(--c-dim);font-size:11px}\n:host(.classic) .row{gap:6px}\n:host(.classic) .subtabs button,:host(.classic) .class-tabs button{border-image:none;border:1px solid var(--c-line);background:#000;color:#fff}\n:host(.classic) .subtabs button[aria-selected=true],:host(.classic) .class-tabs button[aria-selected=true]{background:var(--c-chip)}\n:host(.classic) .feedback{grid-area:fb;padding:4px 2px 0;min-height:18px}\n:host(.classic) .side{grid-area:side;padding-right:6px;display:flex;flex-direction:column;gap:6px;align-self:stretch}\n:host(.classic) .side fieldset{margin:0}\n:host(.classic) .side legend{width:100%;font-size:11px;font-style:normal;margin:0 0 4px;padding-bottom:2px;border-bottom:1px solid #6d6d78}\n:host(.classic) .side button{width:100%;margin-top:0}\n:host(.classic) .side-actions{display:grid;gap:6px;margin-top:4px}\n:host(.classic) .readout{display:flex;justify-content:space-between;gap:6px;margin:1px 0;font-size:11px}\n:host(.classic) .readout span{color:var(--c-text)}\n:host(.classic) .readout b{color:#fff;font-weight:normal;text-align:right;font-variant-numeric:tabular-nums}\n:host(.classic) .dialog-body{margin:0 10px;padding:8px 0;max-height:calc(100vh - 100px)}\n:host(.classic) .dialog .field{justify-content:space-between}\n:host(.classic) .dialog .field:has(input[type=checkbox]){flex-direction:row-reverse;justify-content:flex-end}\n:host(.classic) .dialog textarea{background:#000;color:#fff;border:1px solid #fff}\n:host(.classic) .activity-history{background:#000;border:1px solid #6d6d78}\n:host(.classic) .item-row{grid-template-columns:26px minmax(0,1fr) 34px 44px repeat(5,44px)}\n}\n";
 
 function assetLoaderMain(self) {
   'use strict';
@@ -8091,18 +12404,23 @@ const Icons = {
 
 // Repair missing learned metadata lazily; never add an unlearned skill to the character.
 const Learned = {
-  pending: null, retryAt: 0,
+  pending: null, retryAt: 0, english: new Map(), loaded: false,
+  // Official English names (textdataname) replace whatever code or name the catalog carries.
+  localize() {
+    for (const [id, name] of this.english) { const s = World.catalog.get(id); if (s && s.name !== name) s.name = name; }
+  },
   rows() {
     return (World.gp?.skills || []).map(id => World.skill(id) || { id, group: id, name: 'Skill #' + id, missing: true });
   },
   async repair() {
-    if (this.pending || now() < this.retryAt || !this.rows().some(s => s.missing)) return;
+    if (this.pending || now() < this.retryAt || (this.loaded && !this.rows().some(s => s.missing))) return;
     this.retryAt = now() + 30000;
     this.pending = (async () => {
       const [data, names] = await Promise.all([Icons.request('/assets/data/skillData.json', 'json'), Icons.request('/assets/text/textdataname.en.json', 'json')]);
       const learned = new Set(World.gp?.skills || []), additions = [];
       for (const row of data.rows || []) {
-        const m = row.split('\t'), id = Number(m[0]);
+        const m = row.split('\t'), id = Number(m[0]), en = names.entries?.[m[19]];
+        if (en) this.english.set(id, en);
         if (!learned.has(id) || World.skill(id)) continue;
         // These are the projected columns published by buildSkillDataAsset.mjs.
         const group = Number(m[1]), sibling = World.groups.get(group)?.[0];
@@ -8111,11 +12429,17 @@ const Learned = {
           targetRequired: m[78] === undefined ? !!sibling?.targetRequired : Number(m[78]) !== 0,
           cooldownMs: sibling?.cooldownMs || 0 });
       }
+      this.loaded = true;
       if (additions.length) World.rebuildCatalog([...World.catalog.values(), ...additions]);
+      else { this.localize(); bus.emit('catalog'); }
     })().catch(e => Log.warn('Learned skill metadata: ' + e.message)).finally(() => { this.pending = null; });
     return this.pending;
   },
 };
+{
+  const rebuild = World.rebuildCatalog;
+  World.rebuildCatalog = function (list) { rebuild.call(this, list); Learned.localize(); };
+}
 
 
 const WD_MEDIA = '/assets/images/Media_extracted/';
@@ -9701,7 +14025,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.4.3", "title": "Relay hosting: the administrator's choice; auto stall", "items": ["The relay can now run in three places with the same protocol: Cloudflare Workers (new edition under relay/cloudflare: Durable Objects, WebSocket hibernation, storage that survives restarts, zero administration), fly.io (the Node relay as-is with a Dockerfile), or your own VPS (systemd unit included).", "The bot now sends the room key in the WebSocket URL (?key=…) for hosts that route by it; the Node relay ignores it, so all three hosts work with one address format.", "relay/smoke-test.cjs can verify a live deployment: WS_URL=wss://your-relay/ws node smoke-test.cjs.", "Auto stall: price items on a new page, stand in town, and the character opens its own street stall, offers them, and runs it; a sale is confirmed by the offer disappearing and gold rising, never by a dispatch. Hunting refuses to start while a stall session runs."], "note": "Both parts are tested in simulation (464 tests). The Workers edition follows the documented Durable Objects patterns but has only been syntax-checked and reviewed, not deployed — run its smoke test after wrangler deploy. Neither has run with real characters."}, {"version": "1.4.2", "title": "Coherence fixes for the team layer", "items": ["A unique's death reported by a teammate is recorded quietly; it used to be re-announced, which echoed between clients forever.", "A teammate's store write no longer cancels the sync this client still owes the room (a pending local sighting could be lost until the next change).", "Moving the hunting spot from the tracker cancels any automatic unique converge, so its later restore cannot overwrite the manual spot.", "Shared live intel is cleared when the character changes; the \"Hunt here\" button still works the same."], "note": "Found by re-reading the code with two clients in mind; tested in simulation, not yet with real characters."}, {"version": "1.4.1", "title": "Team edition rounded out", "items": ["Optional unique converge: when a unique appears and its position is known, a hunting character moves its hunting spot there (toasts say so); the saved spot comes back when the unique dies or after 20 minutes. Off by default.", "The public pool grows a memory: with public sharing on, the unique tracker also reads and writes the relay's public store, so every room keeps the spawn history.", "Bug reports now include a team summary line (shared entities, combat edges, tracked uniques, known players).", "The repository README describes this fork's team edition."], "note": "Still simulation-tested only; no live run with real characters yet."}, {"version": "1.4.0", "title": "Team edition complete (phases 2-6)", "items": ["Live shared world: each character publishes the interesting monsters it sees (champion and up, party mobs, uniques with an HP estimate), the other players in view, and who attacks what (observed from every cast around); the map draws it all as a dimmed team layer, own view always winning.", "Unique tracker: the game's own server-wide announcements plus shared sightings build a history per unique with respawn windows (the timer restarts at death; 3-6 h per unique), toasts, a sound, map pins, and a Hunt here button that moves your hunting spot to the last known position.", "Player knowledge: every player the team sees is remembered with position and level; a player attacking a teammate outside a party is marked hostile (red on the map, flagged in the panel).", "Team drops: the room shares pickup counters.", "Team decisions: assist (fight what a teammate or party member fights), spot claims (a warning when two characters start hunting on top of each other), synchronized town trips (optional; a teammate's town trip starts yours), and resurrection claims (the dead member waits up to 60 s for the peer walking over instead of reviving itself).", "The room key holders always see everything; an optional public pool (per-relay, per-category checkboxes) shares monsters, players and unique events with every room on your relay — never your own position or inventory.", "The reference relay grows a room key-value store (the team's shared memory, persisted across restarts) and a console page (/?key=room key) showing the fleet with Stop everyone and Town trip buttons."], "note": "All of it is tested in simulation and against a local relay only; a live check with real characters is still to do."}, {"version": "1.3.0", "title": "Team relay (phase 1: presence)", "items": ["New Team page: connect several characters through your own WebSocket relay; while it runs, each character sees the others' presence (name, hunting, alive, level) in the panel.", "A reference relay server (rooms by room key, presence forwarding, no game logic) is included under relay/ in the repository.", "Presence is private to one room key; nothing is shared beyond it. The bot never depends on the relay: off or unreachable, everything else works exactly as before.", "Update checks now come from this fork's repository (duan78/opensro-bot-lean) instead of the original."], "note": "Presence, heartbeats and reconnection are tested in simulation only; a live relay check is still to do."}, {"version": "1.2.128", "title": "Town trips no longer stop on an item the merchant won't buy", "items": ["A town trip could stop at the weapon merchant with \"Inventory rejected: 2\". The bot had tried to sell an item the game does not allow merchants to buy (quest and event items, for example), and one refusal ended the whole trip.", "Items the game marks unsellable are now never offered, even with a Sell rule. They stay in the pet or bag.", "If the merchant still refuses an item, the bot keeps it, logs a warning and sells the rest, then carries on with the trip.", "Written from the code and simulated game state; not yet seen on a live server."]}, {"version": "1.2.127", "title": "Bag selling no longer stops on a full bag", "items": ["With **Sell items from the character bag too** on, a town trip with a completely full bag stopped before it ever reached the merchant that sells: at arrival (\"free a character bag slot\"), or at the potion merchant (no room for potions).", "Now, with that switch on, the trip goes to the repair merchant first (sell, ammunition, repair), then the potion merchant, then the world statue. A full bag is emptied before potions are bought. With the switch off, the order is unchanged.", "Written from the code and simulated game state; not yet seen on a live server."]}, {"version": "1.2.126", "title": "Sell from the character bag on town trips", "items": ["New switch in Scroll town cycle: **Sell items from the character bag too**. When on, the town trip sells unprotected items from your own bag at the repair merchant, after the pet loot, by the same rules as pet loot. Off by default.", "Never sold from the bag: potions, scrolls, supplies, Keep names, buff-set gear, the alchemy weapon, and anything with a Store, Keep or Drop rule. A Sell rule always sells.", "Tested in simulation only; not yet confirmed on the live server."]}];
+const RELEASE_NOTES = [{"version": "1.5.0", "title": "Upstream sync: travel, trade, lure, auto-start, and the released auto stall", "items": ["This fork merges upstream 1.2.128 → 1.2.169: teleport and ferry travel, the auto trade routes, the lure areas, auto-start, item balance, repair hammer, walk-back over teleports, and many fixes.", "The auto stall is now the upstream released version (1.2.169), which keeps this fork's original flow plus the maintainer's review fixes: a sale counts even when its gold arrives a tick later, potion and inventory refusals no longer close the stall, and a refused offer skips just that item.", "The team edition is unchanged and re-verified on the new base (545 tests): presence, live shared intel with the map layer, the unique tracker and shared knowledge, assist, town sync, resurrection claims, unique converge, the public pool, the relay console, and the three hosting options (Node, Cloudflare Workers, fly.io/VPS).", "Diagnostics now use the name-free team status line, matching the upstream review's finding."], "note": "Everything is re-verified in simulation on the merged base; nothing has run with real characters yet."}, {"version": "1.4.3", "title": "Relay hosting: the administrator's choice; auto stall", "items": ["The relay can now run in three places with the same protocol: Cloudflare Workers (new edition under relay/cloudflare: Durable Objects, WebSocket hibernation, storage that survives restarts, zero administration), fly.io (the Node relay as-is with a Dockerfile), or your own VPS (systemd unit included).", "The bot now sends the room key in the WebSocket URL (?key=…) for hosts that route by it; the Node relay ignores it, so all three hosts work with one address format.", "relay/smoke-test.cjs can verify a live deployment: WS_URL=wss://your-relay/ws node smoke-test.cjs.", "Auto stall: price items on a new page, stand in town, and the character opens its own street stall, offers them, and runs it; a sale is confirmed by the offer disappearing and gold rising, never by a dispatch. Hunting refuses to start while a stall session runs."], "note": "Both parts are tested in simulation (464 tests). The Workers edition follows the documented Durable Objects patterns but has only been syntax-checked and reviewed, not deployed — run its smoke test after wrangler deploy. Neither has run with real characters."}, {"version": "1.4.2", "title": "Coherence fixes for the team layer", "items": ["A unique's death reported by a teammate is recorded quietly; it used to be re-announced, which echoed between clients forever.", "A teammate's store write no longer cancels the sync this client still owes the room (a pending local sighting could be lost until the next change).", "Moving the hunting spot from the tracker cancels any automatic unique converge, so its later restore cannot overwrite the manual spot.", "Shared live intel is cleared when the character changes; the \"Hunt here\" button still works the same."], "note": "Found by re-reading the code with two clients in mind; tested in simulation, not yet with real characters."}, {"version": "1.4.1", "title": "Team edition rounded out", "items": ["Optional unique converge: when a unique appears and its position is known, a hunting character moves its hunting spot there (toasts say so); the saved spot comes back when the unique dies or after 20 minutes. Off by default.", "The public pool grows a memory: with public sharing on, the unique tracker also reads and writes the relay's public store, so every room keeps the spawn history.", "Bug reports now include a team summary line (shared entities, combat edges, tracked uniques, known players).", "The repository README describes this fork's team edition."], "note": "Still simulation-tested only; no live run with real characters yet."}, {"version": "1.4.0", "title": "Team edition complete (phases 2-6)", "items": ["Live shared world: each character publishes the interesting monsters it sees (champion and up, party mobs, uniques with an HP estimate), the other players in view, and who attacks what (observed from every cast around); the map draws it all as a dimmed team layer, own view always winning.", "Unique tracker: the game's own server-wide announcements plus shared sightings build a history per unique with respawn windows (the timer restarts at death; 3-6 h per unique), toasts, a sound, map pins, and a Hunt here button that moves your hunting spot to the last known position.", "Player knowledge: every player the team sees is remembered with position and level; a player attacking a teammate outside a party is marked hostile (red on the map, flagged in the panel).", "Team drops: the room shares pickup counters.", "Team decisions: assist (fight what a teammate or party member fights), spot claims (a warning when two characters start hunting on top of each other), synchronized town trips (optional; a teammate's town trip starts yours), and resurrection claims (the dead member waits up to 60 s for the peer walking over instead of reviving itself).", "The room key holders always see everything; an optional public pool (per-relay, per-category checkboxes) shares monsters, players and unique events with every room on your relay — never your own position or inventory.", "The reference relay grows a room key-value store (the team's shared memory, persisted across restarts) and a console page (/?key=room key) showing the fleet with Stop everyone and Town trip buttons."], "note": "All of it is tested in simulation and against a local relay only; a live check with real characters is still to do."}, {"version": "1.3.0", "title": "Team relay (phase 1: presence)", "items": ["New Team page: connect several characters through your own WebSocket relay; while it runs, each character sees the others' presence (name, hunting, alive, level) in the panel.", "A reference relay server (rooms by room key, presence forwarding, no game logic) is included under relay/ in the repository.", "Presence is private to one room key; nothing is shared beyond it. The bot never depends on the relay: off or unreachable, everything else works exactly as before.", "Update checks now come from this fork's repository (duan78/opensro-bot-lean) instead of the original."], "note": "Presence, heartbeats and reconnection are tested in simulation only; a live relay check is still to do."}, {"version": "1.2.169", "title": "Run your own street stall to sell bag items", "items": ["A new **Stall** page sells your bag items from your own street stall: give items a price, stand in town with hunting, travel and alchemy stopped, and press **Open stall**.", "Prices are per exact item, saved with your character, and a new entry starts at 100 gold; each offer sells the whole stack.", "Set a **Stall name** (defaults to your character name), a **Greeting**, whether to **List the stall on the stall network** (on by default) and whether to **Close when everything is sold** (on by default).", "The status line shows offers left, visitors and gold earned; a sale counts only when the offer disappears and the gold arrives, and a step the game does not confirm is skipped rather than sent again.", "**Stop stall**, **Stop all** or **F8** closes a stall the bot opened, and hunting cannot start while any stall is open."], "note": "Contributed by duan78 (#49). Tested in simulation only, not in a live game."}, {"version": "1.2.168", "title": "Sell bag items from your own street stall", "items": ["A new **Stall** page lets you sell bag items from your own street stall: give items a price, stand in town with hunting, travel and alchemy stopped, and press **Open stall**.", "Set a **Stall name** (defaults to your character name), a **Greeting**, whether to **List the stall on the stall network** (on by default) and whether to **Close when everything is sold** (on by default).", "Prices are per exact item and saved with your character, so the same drop sells at the same price next time. A new price starts at 100 gold, and each offer sells the whole stack.", "The status line shows offers left, visitors and gold earned. A sale counts only when the offer disappears and the gold arrives, and a step the game does not confirm is skipped rather than sent again.", "**Stop stall**, **Stop all** or **F8** closes a stall the bot opened, and hunting cannot start while any stall is open."], "note": "Tested in simulation only, not in a live game."}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -9887,9 +14211,8 @@ const Diagnostics = {
     const blocked = Town.blocked();
     if (blocked) return 'Town return blocked: ' + blocked + '.';
     const c = Town.cfg();
-    if (['arrival', 'vendor', 'smith', 'gate', ...(c.petFull ? ['storage'] : [])].some(role => !c[role])) return 'Town return blocked: save missing service points in Supplies.';
+    if (['arrival', 'vendor', 'smith', ...(Town.walks() ? [] : ['gate']), ...(c.petFull ? ['storage'] : [])].some(role => !c[role])) return 'Town return blocked: save missing service points in Supplies.';
     if (!Town.scroll(0x09ec)) return 'Town return blocked: return scroll missing.';
-    if (!Town.scroll(0x19ec)) return 'Town return blocked: reverse scroll missing.';
     if (Town.validate()) return 'Town return blocked: check refill targets, low-stock thresholds and gold.';
     return Town.reason() ? 'Town return: preparing departure.' : '';
   },
@@ -9934,7 +14257,7 @@ const Diagnostics = {
     if (Trap.run) return Trap.message;
     if (Chase.owns()) return Chase.message || 'Checking obstacle approach.';
     if (BuffGear.run) return BuffGear.run.restoring ? 'Buff gear: restoring combat equipment.' : 'Buff gear: swapping or casting.';
-    if (BuffGear.recovery) return 'Buff gear: manual equipment review needed.';
+    if (BuffGear.recovery) return 'Buff gear: manual equipment review needed. ' + String(BuffGear.message).slice(0, 160);
     if (Alchemy.pending) return Alchemy.run ? 'Alchemy: waiting for the server result.' : 'Alchemy stopped; outstanding result unconfirmed.';
     if (Alchemy.run) return 'Alchemy: preparing the next attempt.';
     if (Reconnect.active() && Reconnect.message && !World.inWorld()) return Reconnect.message;
@@ -9943,13 +14266,14 @@ const Diagnostics = {
     if (Town.trip) {
       if (Town.trip.phase === 'buy') return Town.trip.supplies.map(s => `Refilling ${s.kind === 'hp' ? 'HP' : s.kind === 'mp' ? 'MP' : 'abnormal pills'}: ${Restock.count(s.refObjId)} / ${s.target}`).join(' · ');
       if (World.gp?.inventoryPending) return 'Town services: waiting for inventory transaction.';
-      const phases = { recall: 'stopping combat for recall', 'recall-wait': 'waiting for recall arrival', 'reverse-wait': 'waiting for reverse arrival', 'revive-arrival': 'waiting for town revival', store: 'depositing loot', sell: 'selling pet loot', ammo: 'buying ammunition', repair: 'repairing equipment', reverse: 'opening reverse return' };
+      const phases = { recall: 'stopping combat for recall', 'recall-wait': 'waiting for recall arrival', 'reverse-wait': 'waiting for reverse arrival', 'revive-arrival': 'waiting for town revival', store: 'depositing loot', sell: 'selling pet loot', ammo: 'buying ammunition', repair: 'repairing equipment', reverse: 'opening reverse return', leave: 'starting the walk back' };
       if (/^(walk|open)-/.test(Town.trip.phase) && Town.message) return Town.message;
       return 'Town services: ' + (phases[Town.trip.phase] || 'travelling between or opening services') + '.';
     }
+    if (Travel.active && !WalkBack.active) return Travel.status();
     if (WalkBack.active) return WalkBack.status();
     if (Restock.trip || Resurrect.trip) return 'Travelling; waiting to reach the destination.';
-    if (!Hunt.running) return 'Bot stopped.';
+    if (!Hunt.running) return AutoStart.pending() ? AutoStart.message || 'Auto-start: waiting.' : 'Bot stopped.';
     if (now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000) return 'Hunting paused after manual control.';
     if (Restock.activeShop() || World.gp?.storage) return 'Hunting paused: close shop or storage.';
     if (Hunt.state === 'resting' || Hunt.state === 'standing') return 'Recovering HP / MP.';
@@ -9964,7 +14288,7 @@ const Diagnostics = {
   snapshot() {
     const gp = World.gp, c = Settings.profile, pet = Loot.pet(), social = gp?.social, matching = gp?.partyMatching;
     return {
-      action: this.main(), partyStatus: this.party(), teamStatus: Settings.profile.team?.enabled ? Team.status() : '',
+      action: this.main(), partyStatus: this.party(), teamStatus: Team.diag(),
       teamDetail: Settings.profile.team?.enabled ? TeamIntel.rows().length + ' shared entities, ' + TeamIntel.edges.size + ' combat edges, ' + TeamKnowledge.uniques.size + ' tracked uniques, ' + TeamKnowledge.players.size + ' known players' : '', petStatus: this.pet(), townStatus: this.town(), townDetail: this.townDetail(), townReason: this.townReason(),
       navigationReady: !!Navigation.scene, navigationError: String(Navigation.error || '').slice(0, 80),
       buffGearStatus: BuffGear.cfg().buffSwap ? String(BuffGear.status()).slice(0, 600) : '', buffGearActive: !!BuffGear.run, buffGearRestoring: !!BuffGear.run?.restoring, buffGearMovePending: !!BuffGear.run?.pending, buffGearRecovery: !!BuffGear.recovery,
@@ -9991,7 +14315,7 @@ const Diagnostics = {
       joinRequest: !!matching?.request, acceptanceSent: !!matching?.request && Party.answered === `${matching.request.a}:${matching.request.b}:${matching.request.expires}`,
       requestRemainingMs: Number.isFinite(World.simNow()) && Number.isFinite(matching?.request?.expires) ? Math.max(0, matching.request.expires - World.simNow()) : null,
       townActive: !!Town.trip,
-      townPhase: ['recall', 'recall-wait', 'revive-arrival', 'walk-storage', 'open-storage', 'store', 'close-storage', 'walk-vendor', 'open-vendor', 'buy', 'close-vendor', 'walk-smith', 'open-smith', 'sell', 'repair', 'close-smith', 'walk-gate', 'open-gate', 'reverse', 'reverse-wait'].includes(Town.trip?.phase) ? Town.trip.phase : null,
+      townPhase: ['recall', 'recall-wait', 'revive-arrival', 'walk-arrival', 'walk-storage', 'open-storage', 'store', 'close-storage', 'walk-vendor', 'open-vendor', 'buy', 'close-vendor', 'walk-smith', 'open-smith', 'sell', 'repair', 'close-smith', 'walk-gate', 'open-gate', 'reverse', 'reverse-wait', 'leave'].includes(Town.trip?.phase) ? Town.trip.phase : null,
       scrollAttempts: this.number(Town.trip?.scrollAttempts), scrollAccepted: !!Town.trip?.scrollRequest?.accepted,
       returnScroll: !!Town.scroll(0x09ec), reverseScroll: !!Town.scroll(0x19ec),
       settings: { autoRecruit: !!c.party.autoRecruit, autoAccept: !!c.party.autoAcceptMatching,
@@ -10001,7 +14325,7 @@ const Diagnostics = {
         buyCure: !!Restock.cfg().cure.on, cureTarget: this.number(Restock.cfg().cure.target), cureLow: this.number(Restock.cfg().cure.low),
         hpLow: this.number(Restock.cfg().hp.low), mpLow: this.number(Restock.cfg().mp.low),
         collectDrops: !!c.hunt.pickup.enabled, petCollector: Loot.petMode(), follow: Settings.profile.trace.enabled ? Trace.code : '', autoStatPoints: Settings.profile.statPoints.enabled ? String(StatPoints.status()).slice(0, 200) : '', autoMastery: AutoMastery.active() ? String(AutoMastery.message).slice(0, 600) : '', trapStage: Trap.stage, trapTile: Trap.stage ? Trap.tile : '', characterCollects: Loot.categories.some(k => c.hunt.pickup[k] && Loot.collectorFor(k) === 'character'), pickupRadius: this.number(c.hunt.pickup.radius / 10),
-        finishFight: !!c.hunt.pickup.afterKillOnly, speedScroll: !!c.potion.speedScroll }
+        finishFight: !!c.hunt.pickup.afterKillOnly, speedScroll: !!c.potion.speedScroll, autoStart: !!c.hunt.autoStart }
     };
   },
   sample() {
@@ -10182,8 +14506,10 @@ const ITEM_WEAPON = { CH: { BLADE: 'Blade', SWORD: 'Sword', TBLADE: 'Glaive', SP
   EU: { SWORD: '1HSword', TSWORD: '2HSword', AXE: 'Axe', CROSSBOW: 'X-Bow', DAGGER: 'Dagger', TSTAFF: 'Staff', DARKSTAFF: 'W-Rod', STAFF: 'C-Rod', HARP: 'Harp' } };
 const ITEM_ACCESSORY = { NECKLACE: 'Necklace', EARRING: 'Earring', RING: 'Ring' };
 const ITEM_DROP_CONFIRM_MS = 5000;
+const ITEM_BALANCE_CONFIRM_MS = 5000;
+const ITEM_GEAR_SLOTS = ['primaryWeapon', 'primaryShield', 'secondaryWeapon', 'secondaryShield'];
 const ItemRules = {
-  infos: new Map(), dropping: null, dropBan: new Map(), message: '',
+  infos: new Map(), dropping: null, dropBan: new Map(), message: '', balancing: null, balanceBan: new Map(),
   cfg() { return Settings.profile.items; },
   get(id) { return this.cfg().rules[id] || null; },
   // change: { pick: 'yes' | 'no' | null, act: 'store' | 'sell' | 'keep' | 'drop' | null }; null clears that part.
@@ -10198,6 +14524,20 @@ const ItemRules = {
     Settings.saveProfile();
   },
   count() { return Object.keys(this.cfg().rules).length; },
+  // The primary and secondary weapon / shield picked on the Items page, as BuffGear item keys. Identical copies share a key,
+  // so every copy is protected. Protected gear is never sold, stored, dropped or moved to the pet.
+  gearKeys() { const g = this.cfg().gear || {}; return ITEM_GEAR_SLOTS.map(k => g[k]).filter(Boolean); },
+  guarded(item) { const keys = this.gearKeys(); return !!item && keys.length > 0 && keys.includes(BuffGear.key(item)); },
+  // Weapons and shields the character can choose from: worn first, then the bag.
+  gearChoices(shield) {
+    return World.items().filter(i => shield ? BuffGear.shield(i) : BuffGear.weapon(i))
+      .sort((a, b) => (a.slot > 7) - (b.slot > 7) || a.slot - b.slot);
+  },
+  setGear(slot, key) {
+    if (!ITEM_GEAR_SLOTS.includes(slot)) return;
+    (this.cfg().gear ||= {})[slot] = key || null;
+    Settings.saveProfile();
+  },
   // What the codename says about an item, for the filters and the table. Cached per item.
   info(id) {
     if (this.infos.has(id)) return this.infos.get(id);
@@ -10222,7 +14562,7 @@ const ItemRules = {
     this.infos.set(id, info);
     return info;
   },
-  // Every catalogue item that passes the filters, in id order. f: { query, group, race, gender, degrees: Set, kind, custom, nearby }.
+  // Every catalogue item that passes the filters, in id order. f: { query, group, race, gender, degrees: Set, kind, sox ('any', '1', '2', '3'), custom, nearby }.
   list(f) {
     const query = (f.query || '').toLowerCase().trim(), rules = this.cfg().rules, out = [];
     // Item numbers of the drops in view: the exact items to give a rule, whatever the item is called in the catalogue.
@@ -10235,11 +14575,40 @@ const ItemRules = {
       if (f.race && i.race !== f.race) continue;
       if (f.gender && i.gender && i.gender !== f.gender) continue;
       if (f.degrees?.size && !f.degrees.has(i.degree)) continue;
+      if (f.sox && (f.sox === 'any' ? !i.sox : String(i.sox) !== f.sox)) continue;
       if (f.kind && i.kind !== f.kind && i.material !== f.kind) continue;
       if (query && !i.name.toLowerCase().includes(query) && !i.code.toLowerCase().includes(query) && String(id) !== query) continue;
       out.push(i);
     }
     return out.sort((a, b) => a.id - b.id);
+  },
+  // Keep free slots even between the bag and the pickup pet by moving items that have a Sell or Store rule to the side with
+  // more room, one at a time, while hunting and outside town service and open windows. Needs two free slots on the side
+  // that receives, so loot keeps flowing. Protected gear, supplies the trip needs and worn gear never move.
+  balanceTick() {
+    const gp = World.gp, pet = Loot.pet();
+    if (!this.cfg().balance || !pet || !Hunt.running || Town.trip || !World.inWorld() || World.isDead() || !gp || gp.inventoryPending || gp.storage || gp.exchange?.open || Restock.activeShop()) return false;
+    const t = now(), b = this.balancing, equipped = gp.equipmentSlotCount || 13;
+    if (b) {
+      const moved = (b.toPet ? Loot.items(pet) : World.items()).some(i => i.slot === b.destination && i.refObjId === b.ref);
+      if (moved) { this.balancing = null; Log.info('Moved ' + Items.name(b.ref) + (b.toPet ? ' to the pet' : ' to the bag') + ' (balance).'); }
+      else if (t - b.at < ITEM_BALANCE_CONFIRM_MS) return false;
+      else { this.balancing = null; this.balanceBan.set(b.key, t + 30000); this.message = Items.name(b.ref) + ' was not moved; trying again in 30 s.'; Log.warn(this.message); }
+    }
+    const petInv = pet.rec.inventory || [], petFree = pet.rec.status - petInv.length, bagFree = World.freeBagSlots();
+    const toPet = bagFree - petFree <= -2 && petFree >= 2, toBag = petFree - bagFree <= -2 && bagFree >= 2;
+    if (!toPet && !toBag) return false;
+    const key = i => (toPet ? 0 : pet.rec.gid) + ':' + i.slot + ':' + i.refObjId;
+    const movable = i => ['store', 'sell'].includes(this.get(i.refObjId)?.act) && !this.guarded(i) && !(toPet && (Town.needed(i) || Alchemy.selected && Alchemy.selected.slot === i.slot)) &&
+      (this.balanceBan.get(key(i)) || 0) <= t;
+    const item = (toPet ? World.items().filter(i => i.slot >= equipped) : petInv).find(movable);
+    if (!item) return false;
+    const destination = toPet ? Town.free(petInv, 0, pet.rec.status) : Town.free(gp.inventory, equipped, gp.inventorySlotCount);
+    if (destination === null) return false;
+    const command = { kind: 'cos-transfer', gid: pet.rec.gid, toCos: toPet, source: item.slot, destination };
+    if (!Cmd.spaced(command.kind) || !Cmd.raw(command, 'Balance: move ' + Items.name(item.refObjId))) return false;
+    this.balancing = { key: key(item), toPet, ref: item.refObjId, destination, at: t };
+    return true;
   },
   // Drop items with a Drop rule from the character bag (never worn gear) or the pickup pet, one at a time, while
   // hunting and outside town service and open windows. A drop counts once the item has left that slot.
@@ -10257,7 +14626,7 @@ const ItemRules = {
     const equipped = gp.equipmentSlotCount || 13, pet = Loot.pet();
     const sources = [[0, World.items().filter(i => i.slot >= equipped)], ...(pet ? [[pet.rec.gid, pet.rec.inventory || []]] : [])];
     for (const [petGid, items] of sources) for (const item of items) {
-      if (this.get(item.refObjId)?.act !== 'drop') continue;
+      if (this.get(item.refObjId)?.act !== 'drop' || this.guarded(item)) continue;
       const key = petGid + ':' + item.slot + ':' + item.refObjId;
       if ((this.dropBan.get(key) || 0) > t) continue;
       const command = petGid ? { kind: 'cos-drop', gid: petGid, slot: item.slot } : { kind: 'item-drop', slot: item.slot };
@@ -10380,8 +14749,25 @@ const LeanMap = {
     this.pickRow = UI.row(UI.button('Make this the hunting spot', () => this.setCentre()), UI.button('Clear mark', () => { this.picked = null; this.dirty = true; this.render(); }));
     box.append(stage, this.info, this.pickRow);
     const H = () => Settings.profile.hunt;
+    const saved = H().center && this.space(H().center) ? displayCoords(H().center) : null;
+    this.spotX = el('input'); this.spotY = el('input');
+    for (const [input, key] of [[this.spotX, 'x'], [this.spotY, 'y']]) {
+      input.type = 'number'; input.step = '1'; input.value = saved ? saved[key] : '';
+    }
+    this.coordinateText = el('input'); this.coordinateText.type = 'text'; this.coordinateText.readOnly = true;
+    this.coordinateText.placeholder = 'Get position';
+    const spotHeader = el('div', null, 'map-spot-header');
+    spotHeader.append(UI.button('Set actual position', () => {
+      if (World.inWorld() && Hunt.setCenter()) { UI.toast('Hunting spot saved.'); this.dirty = true; }
+    }));
+    const spotFields = el('div', null, 'map-spot-fields');
+    spotFields.append(UI.field('X', this.spotX), UI.field('Y', this.spotY), UI.button('Set spot', () => this.setCoordinates()));
+    const current = el('div', null, 'map-current-position');
+    current.append(UI.field('Current', this.coordinateText), UI.button('Get position', () => this.getCoordinates()), UI.button('Copy', () => { void this.copyCoordinates(); }));
+    const coordinates = el('div', null, 'map-position');
+    coordinates.append(spotHeader, spotFields, el('p', 'Outdoor X / Y coordinates in metres.', 'muted'), current);
     const area = UI.group('Hunting area',
-      UI.button('Set hunting spot here', () => { if (World.inWorld() && Hunt.setCenter()) { UI.toast('Hunting spot saved.'); this.dirty = true; } }),
+      coordinates,
       UI.number('Hunt radius (m)', () => H().radius / 10, v => { H().radius = v * 10; this.dirty = true; }, 5, 200),
       UI.number('Chase distance (m)', () => H().chase / 10, v => { H().chase = v * 10; this.dirty = true; }, 10, 300));
     const legend = UI.group('Legend');
@@ -10430,6 +14816,37 @@ const LeanMap = {
     return { X: this.view.X + (e.clientX - r.left - r.width / 2) * this.upp, Z: this.view.Z - (e.clientY - r.top - r.height / 2) * this.upp };
   },
   zoom(f) { this.upp = clamp(this.upp * f, 1.5, 30); this.dirty = true; },
+  getCoordinates() {
+    const pose = World.inWorld() ? World.pose() : null;
+    if (!this.space(pose)) { UI.toast('Current outdoor coordinates unavailable.', 'warn'); return null; }
+    const coords = displayCoords(pose);
+    this.spotX.value = coords.x; this.spotY.value = coords.y;
+    const text = `X ${coords.x}, Y ${coords.y}`;
+    this.coordinateText.value = text;
+    return text;
+  },
+  async copyCoordinates() {
+    const text = this.getCoordinates();
+    if (!text) return;
+    const input = this.coordinateText;
+    try {
+      await W.navigator.clipboard.writeText(text);
+      UI.toast('Current coordinates copied.');
+    } catch (_) {
+      input.focus(); input.select();
+      UI.toast('Clipboard unavailable. Copy the selected coordinates.', 'warn');
+    }
+  },
+  setCoordinates() {
+    const x = this.spotX.value.trim(), y = this.spotY.value.trim();
+    const X = Number(x), Y = Number(y);
+    const point = x && y && Number.isInteger(X) && Number.isInteger(Y) && this.local((X + 135 * 192) * 10, (Y + 92 * 192) * 10);
+    if (!point) { UI.toast('Enter valid outdoor X / Y coordinates (whole metres).', 'warn'); return false; }
+    if (!World.inWorld() || !this.space(World.pose())) { UI.toast('Enter the outdoor world to set a hunting spot.', 'warn'); return false; }
+    this.picked = point;
+    this.setCentre();
+    return true;
+  },
   setCentre() {
     const pt = this.picked, pose = World.pose();
     if (!pt || !World.inWorld()) return;
@@ -10582,6 +14999,61 @@ const LeanMap = {
   },
   note(ctx, w, h, text) {
     ctx.font = '12px Arial'; ctx.textAlign = 'center'; ctx.fillStyle = '#a09b8c'; ctx.fillText(text, w / 2, h / 2); ctx.textAlign = 'start';
+  },
+};
+
+
+// Reuse the client's hidden-tab render path: world publications and their ACKs
+// keep flowing at its background cadence. Loading may still draw until ready.
+// Keep the GPU device alive so rendering can resume without reloading the game.
+const RenderControl = {
+  suspended: false, previous: null, getter: null, mask: null,
+  set(enabled) {
+    const suspend = !enabled;
+    if (suspend === this.suspended) return true;
+    let mask = null;
+    try {
+      if (suspend) {
+        const previous = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+        const getter = () => 'hidden';
+        // Cover the retained frame without touching the game's canvas or GPU.
+        // Outside the panel so minimising/hiding NIX keeps the game black.
+        mask = el('div');
+        mask.setAttribute('aria-hidden', 'true');
+        mask.style.cssText = 'position:fixed!important;inset:0!important;background:#000!important;z-index:2147483645!important;pointer-events:auto!important;';
+        document.documentElement.append(mask);
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: getter });
+        this.previous = previous; this.getter = getter; this.mask = mask;
+      } else {
+        // Do not overwrite a later hook installed by another script.
+        if (Object.getOwnPropertyDescriptor(document, 'visibilityState')?.get === this.getter) {
+          if (this.previous) Object.defineProperty(document, 'visibilityState', this.previous);
+          else delete document.visibilityState;
+        }
+        this.mask?.remove(); this.mask = null;
+        this.previous = null; this.getter = null;
+      }
+      this.suspended = suspend;
+      this.refresh();
+      return true;
+    } catch {
+      mask?.remove();
+      UI.toast('Render toggle unavailable in this browser.', 'warn');
+      return false;
+    }
+  },
+  button() {
+    this.control = UI.button('No Render', () => this.set(this.suspended));
+    this.control.className = 'render-toggle';
+    this.refresh();
+    return this.control;
+  },
+  refresh() {
+    if (!this.control) return;
+    this.control.textContent = this.suspended ? 'Render' : 'No Render';
+    this.control.setAttribute('aria-label', this.suspended ? 'Resume game rendering' : 'Suspend game rendering');
+    this.control.setAttribute('aria-pressed', String(this.suspended));
+    this.control.title = this.suspended ? 'Resume game rendering' : 'Suspend game rendering (the bot keeps running)';
   },
 };
 
@@ -10753,6 +15225,12 @@ const UI = {
     const host = this.root?.host;
     if (host) host.hidden = !host.hidden;
   },
+  toggleMinimised() {
+    const host = this.root?.host;
+    if (!host) return;
+    if (host.hidden) { host.hidden = false; this.minimise(false); return; }
+    this.minimise(!this.minimised);
+  },
   mount() {
     const host = el('div'); host.id = 'sro-bot-lean';
     document.documentElement.append(host);
@@ -10761,8 +15239,8 @@ const UI = {
     style.textContent = ':host{' + Object.entries(LEAN_SKIN).map(([key, data]) => `--s-${key}:url("${data}");`).join('') + '}\n' + LEAN_CSS + '\n:host([hidden]){display:none!important}';
     const panel = el('section', null, 'panel'), header = el('header');
     const fold = this.button('×', () => this.minimise(true));
-    fold.className = 'fold'; fold.setAttribute('aria-label', 'Minimise bot window'); fold.title = 'Minimise (the bot keeps running)';
-    header.title = 'The × minimises the window to a small icon; F7 folds it; Shift+F7 hides or shows everything.';
+    fold.className = 'fold'; fold.setAttribute('aria-label', 'Minimise bot window'); fold.title = 'Minimise · F6 (the bot keeps running)';
+    header.title = 'The × or F6 minimises the window to a small icon; F7 folds it; Shift+F7 hides or shows everything.';
     this.updateButton = this.button('Update', () => Updates.open());
     this.updateButton.className = 'update'; this.updateButton.hidden = true;
     // Updates are announced on Discord, so the invite sits next to the version.
@@ -10777,7 +15255,8 @@ const UI = {
     this.layoutButton.className = 'layout'; this.layoutButton.title = 'Switch between the wide and the compact window';
     this.classicButton = this.button('Classic', () => this.setClassic(true));
     this.classicButton.className = 'layout'; this.classicButton.title = 'Switch to the classic window: tabs and layout after SBot';
-    header.append(name, this.layoutButton, this.classicButton, discord, this.updateButton, fold);
+    header.classList.add('main-header');
+    header.append(name, RenderControl.button(), this.layoutButton, this.classicButton, discord, this.updateButton, fold);
     this.body = el('div', null, 'body'); this.status = el('div', 'Waiting for game…', 'status'); this.status.setAttribute('role', 'status');
     this.updateNote = el('div', '', 'update-note'); this.updateNote.hidden = true;
     Updates.render();
@@ -10823,10 +15302,10 @@ const UI = {
     // Busy comes from the live trips, not from Controller.mode: that label lags a tick behind (it still says
     // "returning" for up to 100 ms after Stop all ended a walk-back).
     const busy = Town.trip ? 'Town trip' : WalkBack.active ? 'Returning' : Reconnect.active() ? 'Reconnecting' : Restock.trip ? 'Shopping'
-      : Resurrect.trip ? 'Resurrecting' : BuffGear.run ? 'Buff gear' : Alchemy.run || Alchemy.pending ? 'Alchemy' : Stall.run ? 'Stall' : '';
+      : Resurrect.trip ? 'Resurrecting' : BuffGear.run ? 'Buff gear' : Trade.run ? 'Trading' : Alchemy.run || Alchemy.pending ? 'Alchemy' : Stall.run ? 'Stall' : '';
     const label = dead ? 'Dead' : error ? 'Error' : busy || (Hunt.running ? 'Hunting' : 'Stopped');
     // `note` is what only the state can say; the icon falls back to the first wait reason, which the wide window shows below the strip.
-    const note = Town.trip ? Town.status() : WalkBack.active ? WalkBack.status() : Reconnect.active() && Reconnect.message ? Reconnect.message
+    const note = Town.trip ? Town.status() : Travel.active ? Travel.status() : WalkBack.active ? WalkBack.status() : Reconnect.active() && Reconnect.message ? Reconnect.message
       : Restock.recording ? 'Recording route: ' + Restock.draft.route.length + ' points' : '';
     const reason = note || (this.waitNote?.textContent || '').split('\n')[0];
     return { key: dead || error ? 'stop' : busy ? 'busy' : Hunt.running ? 'ok' : 'stop', label, dead, note, reason };
@@ -10931,7 +15410,7 @@ const UI = {
     const orb = this.orb = el('button', null, 'orb'); orb.type = 'button'; orb.hidden = true;
     orb.setAttribute('aria-label', 'Show bot window');
     this.orbState = el('strong'); this.orbDetail = el('span'); this.orbVitals = el('span', '', 'muted');
-    const tip = el('div', null, 'orb-tip'); tip.append(this.orbState, this.orbDetail, this.orbVitals, el('em', 'Click to open · drag to move'));
+    const tip = el('div', null, 'orb-tip'); tip.append(this.orbState, this.orbDetail, this.orbVitals, el('em', 'Click or F6 to open · drag to move'));
     orb.append(el('span', 'nb', 'orb-mark'), el('i', null, 'orb-dot'), tip);
     Icons.paint(orb, 'action\\icon_cha_auto_attack.ddj');
     let drag = null;
@@ -11039,7 +15518,7 @@ const UI = {
   learnedSkills(buff) {
     const best = new Map();
     for (const s of Learned.rows()) {
-      if (s.missing || s.active === false || s.groundTarget || (buff ? s.targetRequired : !s.targetRequired || (s.targets !== undefined && !(s.targets & 4)))) continue;
+      if (s.missing || s.active === false || s.groundTarget || (buff ? s.targetRequired && !(s.targets & 1) : !s.targetRequired || (s.targets !== undefined && !(s.targets & 4)))) continue;
       const group = s.group ?? s.id, previous = best.get(group);
       if (!previous || (s.level ?? 0) > (previous.level ?? 0)) best.set(group, s);
     }
@@ -11064,7 +15543,7 @@ const UI = {
       up.setAttribute('aria-label', 'Move up ' + World.skillName(id)); down.setAttribute('aria-label', 'Move down ' + World.skillName(id)); remove.setAttribute('aria-label', 'Delete ' + World.skillName(id));
       row.append(this.skillSlot(id, () => {}, World.skillName(id)), info, up, down, remove); parent.append(row);
       if (buff) parent.append(this.select('Gear for ' + World.skillName(id),
-        () => [[0, 'Current combat gear'], ...Settings.profile.macro.buffSets.map(s => [s.id, s.name])],
+        () => [[0, BuffGear.auto() ? 'Automatic: the weapon the skill needs' : 'Current combat gear'], ...Settings.profile.macro.buffSets.map(s => [s.id, s.name])],
         () => entry.gearSet || 0, value => entry.gearSet = Number(value)));
     });
     const search = el('input'); search.type = 'search'; search.placeholder = 'Find a skill…'; search.setAttribute('aria-label', buff ? 'Search buff skills' : 'Search attack skills');
@@ -11090,7 +15569,11 @@ const UI = {
     const selected = current && (World.bestOfGroup(current.group, current.id) || current.id);
     parent.append(el('p', selected ? 'Selected: ' + World.skillName(selected) + ' · ' + this.skillDetails(selected) : 'No weapon imbue selected.', 'muted'));
     parent.append(this.button('No imbue', () => { Settings.profile.macro.imbue = null; Settings.saveProfile(); this.draw(); }));
-    for (const s of this.learnedSkills(true)) grid.append(this.skillSlot(s.id, () => {
+    // Only weapon imbues and poison coatings, unless the character has none of those (or all skills are asked for).
+    const all = this.learnedSkills(true), imbues = all.filter(s => /GIGONGTA|POISON\w*_BLADE|MALL_PET_SKILL/.test(s.nameSymbol || ''));
+    const list = imbues.length && !this.allImbues ? imbues : all;
+    if (imbues.length) parent.append(this.button(this.allImbues ? 'Show imbues only' : 'Show all self skills', () => { this.allImbues = !this.allImbues; this.draw(); }));
+    for (const s of list) grid.append(this.skillSlot(s.id, () => {
       Settings.profile.macro.imbue = { id: s.id, group: s.group ?? s.id };
       Settings.saveProfile(); this.draw();
     }, 'Use imbue ' + World.skillName(s.id), current?.group === (s.group ?? s.id)));
@@ -11114,7 +15597,7 @@ const UI = {
         tab.setAttribute('aria-selected', String(name === this.combatTab)); subtabs.append(tab);
       }
       this.pane.append(subtabs);
-      if (this.combatTab === 'Hunt area') this.sections('combatHuntArea', 'combatMonsters');
+      if (this.combatTab === 'Hunt area') this.sections('combatHuntArea', 'combatMonsters', 'combatLure');
       if (this.combatTab === 'Skills') this.sections('combatRotation', 'combatOptions', 'combatBerserk');
       if (this.combatTab === 'Buffs & imbue') this.sections('combatBuffs', 'combatImbue');
     } else if (this.current === 'Loot') {
@@ -11126,18 +15609,20 @@ const UI = {
       this.sections('townTrip', 'townWhen', 'townCycle', 'townAmmo');
     } else if (this.current === 'Party') {
       this.sections('partyMembers', 'partyHeal', 'partyBuffs', 'partyParty', 'partyTrace');
-    } else if (this.current === 'Team') {
-      this.sections('teamRelay', 'teamWorld');
     } else if (this.current === 'Items') {
       this.drawItems();
-    } else if (this.current === 'Stall') {
-      Stall.draw();
     } else if (this.current === 'Setup') {
       Setup.draw(this.pane);
     } else if (this.current === 'Map') {
       LeanMap.draw(this.pane);
     } else if (this.current === 'Alchemy') {
       Alchemy.draw();
+    } else if (this.current === 'Trade') {
+      Trade.draw();
+    } else if (this.current === 'Stall') {
+      Stall.draw();
+    } else if (this.current === 'Team') {
+      this.sections('teamRelay', 'teamWorld');
     } else if (this.current === 'Wardrobe') {
       LeanWardrobe.draw(this.pane);
     } else {
@@ -11160,16 +15645,17 @@ const UI = {
         ['combatRotation'], ['combatOptions'], ['combatBuffs'], ['combatImbue']] },
       { name: 'Items/Storage', icon: 'action\\cos_cmd_inventory', pages: ['Items', 'Town'], draw() {
         this.drawItems(); this.sections('townTrip', 'townCycle', 'townAmmo'); } },
-      { name: 'Stall', pages: ['Stall'], draw() { Stall.draw(); } },
-      { name: 'Training place', icon: 'action\\icon_cha_camp', pages: ['Combat', 'Party'], sections: [['combatHuntArea', 'Training place'], ['partyTrace']] },
+      { name: 'Training place', icon: 'action\\icon_cha_camp', pages: ['Combat', 'Party'], sections: [['combatHuntArea', 'Training place'], ['partyTrace'], ['combatLure']] },
       { name: 'Party/Autores', icon: 'action\\icon_cha_party', pages: ['Party'], sections: [
         ['partyMembers', 'Current party'], ['partyParty', 'Party settings'], ['partyHeal']] },
       { name: 'Player buffing', icon: 'action\\icon_cha_party', pages: ['Party'], sections: [['partyBuffs', 'Player buffing']] },
       { name: 'Team', icon: 'action\\icon_cha_party', pages: ['Team'], sections: [['teamRelay', 'Team relay']] },
       { name: 'Auto alchemy', icon: 'action\\icon_cha_alchemy', pages: ['Alchemy'], draw() { Alchemy.draw(); } },
+      { name: 'Stall', icon: 'action\\icon_cha_shop', pages: ['Stall'], draw() { Stall.draw(); } },
       { name: 'Extra', icon: 'action\\icon_cha_helper', pages: ['Settings'], sections: [
         ['settingsStats'], ['settingsMastery'], ['settingsStatPoints'], ['settingsProfiles'], ['settingsShare'], ['settingsReports'], ['settingsActivity']] },
       { name: 'Map', pages: ['Map'], draw() { LeanMap.draw(this.pane); } },
+      { name: 'Auto trade', icon: 'action\\icon_cha_shop', pages: ['Trade'], draw() { Trade.draw(); } },
       { name: 'Wardrobe', icon: 'action\\icon_cha_shop', pages: ['Wardrobe'], draw() { LeanWardrobe.draw(this.pane); } },
       { name: 'Setup', icon: 'action\\icon_cha_camp', pages: ['Setup'], draw() { Setup.draw(this.pane); } },
     ];
@@ -11177,7 +15663,7 @@ const UI = {
   // The classic tab that holds a compact page (so Setup and the checklist can open the right place).
   tabFor(page, combatTab) {
     if (page === 'Combat') return combatTab === 'Hunt area' ? 'Training place' : 'Skills';
-    return { Loot: 'Settings', Supplies: 'Settings', Town: 'Items/Storage', Party: 'Party/Autores', Items: 'Items/Storage', Alchemy: 'Auto alchemy', Settings: 'Extra' }[page] || page;
+    return { Loot: 'Settings', Supplies: 'Settings', Town: 'Items/Storage', Party: 'Party/Autores', Items: 'Items/Storage', Alchemy: 'Auto alchemy', Trade: 'Auto trade', Settings: 'Extra' }[page] || page;
   },
   // Is this compact page (and optional Combat sub-tab) what the window shows right now, in either layout?
   is(page, tab) {
@@ -11210,9 +15696,9 @@ const UI = {
   buildNav() {
     this.nav.replaceChildren();
     const icons = { Items: 'action\\cos_cmd_inventory', Party: 'action\\icon_cha_party', Combat: 'action\\icon_cha_auto_attack', Loot: 'action\\icon_cha_autoget', Supplies: 'action\\icon_cha_recovery', Town: 'item\\etc\\mall_return_scroll',
-      Alchemy: 'action\\icon_cha_alchemy', Wardrobe: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper', Setup: 'action\\icon_cha_camp' };
+      Alchemy: 'action\\icon_cha_alchemy', Trade: 'action\\icon_cha_shop', Wardrobe: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper', Setup: 'action\\icon_cha_camp' };
     const entries = this.classic ? this.classicTabs().map(t => ({ name: t.name, icon: t.icon, open: () => { this.ctab = t.name; this.draw(); } }))
-      : ['Setup', 'Map', 'Combat', 'Party', 'Team', 'Loot', 'Items', 'Supplies', 'Town', 'Stall', 'Alchemy', 'Wardrobe', 'Settings'].map(name => ({ name, icon: icons[name], open: () => { this.current = name; this.draw(); } }));
+      : ['Setup', 'Map', 'Combat', 'Party', 'Team', 'Loot', 'Items', 'Supplies', 'Town', 'Stall', 'Alchemy', 'Trade', 'Wardrobe', 'Settings'].map(name => ({ name, icon: icons[name], open: () => { this.current = name; this.draw(); } }));
     // Page icons are the game's own action-bar icons; they show only in the wide and classic windows' page lists.
     for (const entry of entries) {
       const tab = this.button(entry.name, entry.open);
@@ -11285,6 +15771,8 @@ const UI = {
         this.number('Hunt radius (m)', () => H().radius / 10, v => H().radius = v * 10, 5, 200),
         this.number('Chase distance (m)', () => H().chase / 10, v => H().chase = v * 10, 10, 300),
         this.check('Return when idle', () => H().returnToCenter, v => H().returnToCenter = v),
+        this.check('Walking back may use teleports and ferries (beta; pays their fee)', () => H().travel !== false, v => H().travel = v),
+        el('p', 'Beta: a long walk back is first checked against the game map, and teleports and ferries are used where walking cannot get there. If a route looks wrong, send the log.', 'muted'),
         this.check('Avoid other players’ targets', () => H().avoidKs, v => H().avoidKs = v),
         this.number('Minimum mob level (0 = any)', () => H().levelMin, v => H().levelMin = v, 0, 140),
         this.number('Maximum mob level (0 = any)', () => H().levelMax, v => H().levelMax = v, 0, 140),
@@ -11321,7 +15809,7 @@ const UI = {
   section_combatBerserk(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       host.append(this.group('Berserk when the gauge is full, on',
-        ...[['giant', 'Giants'], ['titan', 'Titans'], ['unique', 'Uniques'], ['elite', 'Elites'], ['party', 'Party monsters'], ['champion', 'Champions'], ['normal', 'Normal monsters']]
+        ...[['giant', 'Giants'], ['giantParty', 'Giant party'], ['titan', 'Titans'], ['unique', 'Uniques'], ['elite', 'Elites'], ['party', 'Party monsters'], ['champion', 'Champions'], ['normal', 'Normal monsters']]
           .map(([key, label]) => this.check(label, () => M().berserkClasses[key], v => M().berserkClasses[key] = v))));
   },
   section_combatBuffs(host) {
@@ -11341,7 +15829,7 @@ const UI = {
       options.append(this.select('Default collector', [['character', 'Character'], ['pet', 'Pickup pet']], () => L().collector, v => { L().collector = v; Loot.reset(); }));
       options.append(this.check('Chime when pet bag is full', () => L().petFullSound, v => { L().petFullSound = v; Loot.fullAlert = null; }), this.button('Test pet chime', () => Sound.test()),
         this.check('Chime and notice when a SoX item is picked up', () => L().soxSound, v => L().soxSound = v), this.button('Test SoX chime', () => Sound.test('sox')));
-      this.petNote = el('p', '', 'muted'); options.append(this.petNote);
+      this.petNote = el('p', '', 'muted pet-note'); options.append(this.petNote);
       options.append(this.row(...[['Elixirs only','elixirs'],['Elixirs + gold','elixirs-gold'],['All items','all']].map(([label,mode]) => this.button(label, () => { Loot.preset(mode); this.draw(); }))));
       for (const [key, label] of [['enabled', 'Collect drops'], ['soxOnly', 'Equipment: only SoX (Star / Moon / Sun)'], ['afterKillOnly', 'Character: finish the current fight before picking up']]) options.append(this.check(label, () => L()[key], v => L()[key] = v));
       options.append(this.number('Pickup radius (m)', () => L().radius / 10, v => L().radius = v * 10, 3, 100),
@@ -11369,6 +15857,11 @@ const UI = {
       this.speedNote = el('p', '', 'muted');
       pots.append(this.check('Use beginner +100% speed scroll automatically', () => P().speedScroll, v => { P().speedScroll = v; SpeedScroll.reset(); }),
         el('p', 'Uses only the beginner scroll during hunting or travel when no movement-speed buff is active. Works during combat casts; potions have priority. Waits for buff confirmation and stops retrying after three unconfirmed attempts.', 'muted'), this.speedNote);
+      const R = () => P().repairHammer;
+      this.hammerNote = el('p', '', 'muted');
+      pots.append(this.check('Use a repair hammer when gear is worn', () => R().on, v => { R().on = v; RepairHammer.reset(); }),
+        this.number('Gear durability below (%)', () => R().pct, v => R().pct = v, 1, 99),
+        el('p', 'While hunting, when the most worn repairable item you are wearing drops below this share of its maximum durability, uses a repair hammer from the bag; one hammer repairs everything you wear. Waits for the repair to show and stops retrying after three unconfirmed attempts. Keep it above the Town page worn-gear level so the hammer comes first.', 'muted'), this.hammerNote);
       for (const kind of ['hp', 'mp']) pots.append(this.check('Use ' + kind.toUpperCase(), () => P()[kind].on, v => P()[kind].on = v), this.number(kind.toUpperCase() + ' below (%)', () => P()[kind].pct, v => P()[kind].pct = v, 5, 95));
       pots.append(this.check('Use vigor potions', () => P().vigor.on, v => P().vigor.on = v),
         this.number('Vigor when HP below (%)', () => P().vigor.hpPct, v => P().vigor.hpPct = v, 0, 95),
@@ -11377,7 +15870,7 @@ const UI = {
         this.check('Use recovery kits on my pets', () => P().petHp.on, v => { P().petHp.on = v; PetPotion.reset(); }),
         this.number('Pet HP below (%)', () => P().petHp.pct, v => P().petHp.pct = v, 5, 95),
         el('p', 'Pets: when an attack or pickup pet drops below this HP, one recovery kit (the smallest that covers the missing HP) is used on it. Your own potions always go first; each kit must be seen consumed before the next. Vigor potions need no setting beyond the two thresholds above; they are used only when the HP and MP potions are not enough.', 'muted'));
-      this.petPotionNote = el('p', PetPotion.message, 'muted'); pots.append(this.petPotionNote);
+      this.petPotionNote = el('p', PetPotion.message, 'muted pet-note'); this.petPotionNote.title = PetPotion.message; pots.append(this.petPotionNote);
       host.append(pots);
   },
   section_suppliesRestock(host) {
@@ -11415,7 +15908,7 @@ const UI = {
         ['mall_warehouse_ticket', 'Warehouse', () => town().storage ? 'saved' : 'not saved'],
         ['all_potion_03', 'Potions', () => town().vendor ? 'saved' : 'not saved'],
         ['mall_repair_hammer', 'Repair', () => town().smith ? 'saved' : 'not saved'],
-        ['mall_reverse_return_scroll', 'Reverse', () => count(0x19ec) + ' in bag']]) {
+        ['mall_reverse_return_scroll', 'Way back', () => Town.walks() ? 'walks back' : count(0x19ec) ? count(0x19ec) + ' reverse in bag' : 'no reverse: walks back']]) {
         const step = el('li'), slot = el('span', null, 'skill-icon'), note = el('small', detail());
         slot.append(el('span', label[0], 'fallback')); Icons.paint(slot, `item\\etc\\${icon}.ddj`);
         step.append(slot, el('strong', label), note); flow.append(step);
@@ -11437,18 +15930,20 @@ const UI = {
         this.number('No XP for (minutes)', () => town().noXp.minutes, v => town().noXp.minutes = v, 1, 120),
         this.check('On a timer', () => town().every.on, v => town().every.on = v),
         this.number('Every (minutes)', () => town().every.minutes, v => town().every.minutes = v, 5, 600),
-        this.check('Revive in town and use reverse return', () => town().revive, v => town().revive = v),
+        this.check('Revive in town and go back to the hunting spot', () => town().revive, v => town().revive = v),
         this.select('After death, reverse to', [['recall', 'Last return-scroll location (hunting area)'], ['death', 'Death location']], () => town().deathReturn, v => { town().deathReturn = v; Activity.emit({category:'settings',code:'reverse-choice-changed',text:'Revival reverse destination changed to ' + v + '.',details:{choice:v === 'death' ? 3 : 2}}); }),
-        el('p', 'Service trips reverse to their departure point. After death, use the selected destination. A missing game destination stops the trip; it never substitutes another point.', 'muted'),
+        el('p', 'Service trips reverse to their departure point. After death, use the selected destination. A missing game destination stops the trip; it never substitutes another point. Without a reverse scroll, or with Back to the hunting spot set to Walk, the trip walks back to the saved hunting spot instead.', 'muted'),
         el('p', 'Worn gear means the most worn repairable item you are wearing, measured against its own maximum durability; the trip repairs it. A broken weapon (0 durability) has its own switch, on by default. The XP and timer clocks run only while hunting and restart with every trip.', 'muted')));
   },
   section_townCycle(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
     const town = () => Town.cfg();
       const services = this.group('Scroll town cycle',
-        this.check('Use return scroll → town services → reverse return', () => town().enabled, v => { town().enabled = v; this.draw(); }),
+        this.check('Use return scroll → town services → back to the hunting spot', () => town().enabled, v => { town().enabled = v; this.draw(); }),
+        this.select('Back to the hunting spot', [['reverse', 'Reverse return scroll (walks when none is carried)'], ['walk', 'Walk']], () => town().returnBy, v => { town().returnBy = v; this.draw(); }),
         this.check('Deposit SoX gear in the warehouse (character and pet bags)', () => town().storeSox, v => town().storeSox = v),
-        this.check('Sell items from the character bag too (same rules as pet loot)', () => town().sellBag, v => town().sellBag = v),
+        this.check('Sell Star gear too (instead of depositing it)', () => town().sellStar, v => town().sellStar = v),
+        this.check('Sell ordinary gear from the character bag too', () => town().sellBag, v => town().sellBag = v),
         this.text('Also deposit gear requiring level', () => town().storeLevels, v => town().storeLevels = v, 'e.g. 85 or 80-90, 100'),
         this.number('Town arrival tolerance (m)', () => town().arrivalRadius / 10, v => town().arrivalRadius = v * 10, 10, 150),
         el('p', 'Bind your recall to Hotan, Jangan, Donwhang, Constantinople or Samarkand in the game. Quickest: pick your town and press Set up this town; the arrival point is where its return scroll always lands, so you do not have to be in town. It fills the arrival point and the four services. To do it by hand instead, save the arrival point where a return scroll places you, then stand near, select and save the warehouse, potion merchant, repair merchant and world statue / teleport. Open the potion shop before saving its merchant. Saves your standing position for each approach. Uses collision-aware walking between services. Overrides the recorded walking restock while enabled.', 'muted'));
@@ -11459,9 +15954,9 @@ const UI = {
       services.append(this.select('Town', townOptions, () => this.townPick, v => this.townPick = v),
         this.button('Set up this town', () => Town.autoSetup(true, this.townPick)),
         this.button('Auto-set town services', () => Town.autoSetup(false)), this.button('Redo all automatically', () => Town.autoSetup(true)));
-      services.append(el('p', 'Pet loot: store elixirs, and Star / Moon / Sun gear when SoX deposit is on (needs the saved warehouse; SoX gear in your own bag goes in too, all other character items stay). Nothing is deposited right after pickup, only on the next town trip. Gear requiring one of the levels you list above (for example 85) is deposited the same way and never sold. SoX gear that is part of a saved buff set, the weapon chosen for alchemy, or matches the Keep names stays in your bag. Sell other unprotected pet items at the saved weapon / repair merchant before repairing. Other seal/rare equipment and equipment with unknown rarity stays in the pet. Ordinary equipment is sold regardless of + or blue options. Character bag items are sold only with the switch above, by the same rules as pet loot (never potions, scrolls, supplies, Keep names, buff-set gear or the alchemy weapon).', 'muted'));
+      services.append(el('p', 'Pet loot: store elixirs, and Star / Moon / Sun gear when SoX deposit is on (needs the saved warehouse; SoX gear in your own bag goes in too, all other character items stay). Nothing is deposited right after pickup, only on the next town trip. Gear requiring one of the levels you list above (for example 85) is deposited the same way and never sold. SoX gear that is part of a saved buff set, the weapon chosen for alchemy, or matches the Keep names stays in your bag. Sell other unprotected pet items at the saved weapon / repair merchant before repairing. Other seal/rare equipment and equipment with unknown rarity stays in the pet. Ordinary equipment is sold regardless of + or blue options. With Sell Star gear too, Star gear (not Moon or Sun) is sold like ordinary gear instead of deposited (Keep names, buff-set gear, the alchemy weapon and the level list above still protect it). With the switch above, ordinary weapons, armour, shields and accessories in the character bag are sold too; other bag items only with a Sell rule. Never sold from the bag: potions, scrolls, supplies, pet summons, avatars, devil spirits, job suits, item mall items, Keep names, buff-set gear or the alchemy weapon.', 'muted'));
       services.append(this.text('Keep in pet (names)', () => town().keep, v => town().keep = v),
-        el('p', 'Town buys X-Large potions using the Buy HP/MP switches, low-stock thresholds and refill counts above. Keep each low-stock threshold below its refill target. Potion selections apply to walking-route restock. Returns when the character bag has at most one free slot. Free at least two slots before hunting again; existing character items stay protected. Revival uses the saved town services and a reverse scroll, without using a return scroll in town. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. F8 cancels.', 'muted'));
+        el('p', 'Town buys X-Large potions using the Buy HP/MP switches, low-stock thresholds and refill counts above. Keep each low-stock threshold below its refill target. Potion selections apply to walking-route restock. Returns when the character bag has at most one free slot. Free at least two slots before hunting again; existing character items stay protected. Revival uses the saved town services without a return scroll in town, then reverses or walks back. Pet loot passes through one reserved character bag slot. Potions, return/reverse scrolls, beginner speed scrolls and matching Keep names are protected. Refills travel scrolls to two where sold for gold; otherwise carry spares. F8 cancels.', 'muted'));
       this.townNote = el('p', Town.status(), 'muted'); services.append(this.townNote); host.append(services);
   },
   section_townAmmo(host) {
@@ -11564,8 +16059,11 @@ const UI = {
         el('p', 'Auto-recruit registers your saved listing and accepts applicants whenever enabled, even with hunting stopped. Restores missing listings when space opens and retries unconfirmed registrations after fresh idle state, at most once every 30 seconds. Existing listings and party sharing settings are preserved; edits apply to the next new listing. Turning this off leaves the current listing in place.', 'muted'),
         this.check('Auto-accept party-matching joins', () => Settings.profile.party.autoAcceptMatching, v => Settings.profile.party.autoAcceptMatching = v),
         el('p', 'Accepts applications to your own listing while you are the leader or forming a new party. Works while hunting is stopped; turn this switch off to stop accepting. Ordinary invitations are left to you.', 'muted'),
-        this.check("Join the main account's party", () => party().joinMain, v => { party().joinMain = v; Party.reset(); }),
-        this.text('Main account character name', () => party().mainName, v => { party().mainName = v; Party.reset(); }, 'exact character name'),
+        this.text('Accept only these players (empty: everyone)', () => party().acceptNames, v => party().acceptNames = v, 'names, comma separated'),
+        el('p', 'Auto-accept answers only applicants on this list, matched on the exact character name. The list is saved per character. Leave it empty to accept everyone.', 'muted'),
+        this.check("Join the party leader's party", () => party().joinMain, v => { party().joinMain = v; Party.reset(); }),
+        this.text('Party leader name', () => party().mainName, v => { party().mainName = v; Party.reset(); }, 'exact character name'),
+        this.check('Leave the party if its leader is someone else', () => party().leaveIfNotLeader, v => { party().leaveIfNotLeader = v; Party.reset(); }),
         el('p', 'For your other accounts. While you are not in a party, the bot accepts a party invitation from that character, or finds their party listing on the party-matching board and applies to it. The main account needs Auto-recruit and Auto-accept party-matching joins ticked. It also rejoins after a disconnect, once the character is back in the game. Leave this off on the main account.', 'muted'),
         this.check('Accept resurrection from party members', () => party().acceptRes, v => party().acceptRes = v),
         el('p', 'When you are dead and a party member casts Rebirth on you, the bot answers Yes. Works during hunting and while stopped; resurrection offers from other players are left to you.', 'muted'),
@@ -11573,6 +16071,7 @@ const UI = {
         this.number('Maximum res distance from hunt spot (m)', () => party().resRadius / 10, v => party().resRadius = v * 10, 1, 100),
         el('p', 'Works during hunting and while stopped. Walks into skill range for visible dead members within the maximum radius, casts Rebirth, then returns. During hunting the radius is measured from the saved hunt spot; while stopped it uses your starting position. Collision data is required for walking. Travel stops after 30 seconds or 12 seconds without progress per leg. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
   },
+  section_combatLure(host) { Lure.draw(host); },
   section_partyTrace(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       Trace.draw(host);
@@ -11620,8 +16119,12 @@ const UI = {
   },
   section_settingsBehaviour(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+      this.autoStartNote = el('p', AutoStart.status(), 'muted');
       host.append(this.group('Behaviour',
-        ...(Town.autoRevive() ? [el('p', 'On death: the town cycle revives you in town and reverses back (Town → Scroll town cycle).', 'muted')]
+        this.check('Start the bot when this character enters the game', () => H().autoStart, v => { H().autoStart = v; this.autoStartNote.textContent = AutoStart.status(); }),
+        el('p', 'About 5 seconds after the character is in the game: at the hunting spot it starts hunting; in the town of your saved town services it does them and goes back (needs the scroll town cycle); anywhere else it walks back; dead, it revives first. Only once per entry. Stop, F8 or a reconnect cancel it.', 'muted'),
+        this.autoStartNote,
+        ...(Town.autoRevive() ? [el('p', 'On death: the town cycle revives you in town and goes back (Town → Scroll town cycle).', 'muted')]
           : [this.select('On death', [['stop', 'Stop'], ['wait', 'Wait'], ['revive', 'Revive and walk back']], () => H().onDeath, v => H().onDeath = v)]),
         this.check('Rest when low', () => H().sit.enabled, v => { H().sit.enabled = v; this.draw(); }),
         ...(H().sit.enabled ? [
@@ -11703,7 +16206,7 @@ const UI = {
   },
   // Items page: every item of the game's catalogue with its rule (sBot's item list). Filters re-render only the table,
   // so typing in the search box keeps its focus. 100 rows per page; bulk buttons apply to everything the filters show.
-  itemFilter: { query: '', group: 'all', race: '', gender: '', kind: '', degrees: new Set(), custom: false, page: 0 },
+  itemFilter: { query: '', group: 'all', race: '', gender: '', kind: '', sox: '', degrees: new Set(), custom: false, page: 0 },
   drawItems() {
     if (!Items.data.size) {
       this.pane.append(this.group('Items', el('div', 'Loading the game\u2019s item list…', 'empty')));
@@ -11739,12 +16242,21 @@ const UI = {
       choose('Race', [['', 'Any'], ['CH', 'Chinese'], ['EU', 'European']], 'race'),
       choose('Gender', [['', 'Any'], ['Male', 'Male'], ['Female', 'Female']], 'gender'),
       choose('Type', [['', 'Any'], ...kinds.map(k => [k, k])], 'kind'),
+      choose('SoX', [['', 'Any'], ['any', 'Any SoX (_A_, _B_, _C_)'], ['1', 'Star (_A_)'], ['2', 'Moon (_B_)'], ['3', 'Sun (_C_)']], 'sox'),
       el('div', 'Degree', 'muted'), degrees, search, customLabel, nearbyLabel);
     const bulk = el('div', null, 'row bulk'), table = el('div', null, 'item-table'), pager = el('div', null, 'row pager'), summary = el('p', '', 'muted');
     table.setAttribute('role', 'table'); table.setAttribute('aria-label', 'Item rules');
     const rules = this.group('Item rules', summary, bulk, table, pager,
       el('p', 'Pick: always takes the item whatever the Loot switches say, never leaves it. A rule is for that exact item (each size or degree is its own item), so tick Only items on the ground now to find what is dropping and set the rule on those. Store puts it in the warehouse on town trips (also from your bag, except potions and scrolls the trip needs). Sell sells it from the pet at the repair merchant; your own bag is never sold. Keep never stores or sells it. Drop throws it away from your bag or the pet while hunting, and it is never picked up again. Right-click a row for the same choices.', 'muted'));
-    this.pane.append(filters, rules);
+    const gearOptions = shield => () => [['', 'None'], ...ItemRules.gearChoices(shield).map(i => [BuffGear.key(i), `${Items.name(i.refObjId)}${i.plus ? ' +' + i.plus : ''} (${i.slot < 8 ? 'worn' : 'bag ' + (i.slot - (World.gp?.equipmentSlotCount || 13) + 1)})`])];
+    const gearPick = (title, slot, shield) => this.select(title, gearOptions(shield), () => ItemRules.cfg().gear?.[slot] || '', v => ItemRules.setGear(slot, v));
+    const gear = this.group('Pet and gear',
+      this.check('Balance free slots with the pickup pet', () => ItemRules.cfg().balance, v => ItemRules.cfg().balance = v),
+      el('p', 'While hunting, items with a Sell or Store rule move to the bag or pet, whichever has more free slots. Gear picked below and supplies never move.', 'muted'),
+      gearPick('Primary weapon', 'primaryWeapon', false), gearPick('Primary shield', 'primaryShield', true),
+      gearPick('Secondary weapon', 'secondaryWeapon', false), gearPick('Secondary shield', 'secondaryShield', true),
+      el('p', 'Pick from worn gear or your bag. Chosen gear is never sold, stored, dropped or moved to the pet, and the secondary weapon is the one buff swaps wear first.', 'muted'));
+    this.pane.append(filters, gear, rules);
     const set = (ids, change, label) => { ItemRules.set(ids, change); this.toast(`${label}: ${ids.length} item${ids.length === 1 ? '' : 's'}.`); renderTable(); };
     // Bulk buttons ask for a second click when they change more than one item.
     const bulkActions = [['Pick always', { pick: 'yes' }], ['Pick never', { pick: 'no' }], ['Store', { act: 'store' }], ['Sell', { act: 'sell' }], ['Keep', { act: 'keep' }],
@@ -11817,14 +16329,16 @@ const UI = {
     if (this.is('Combat', 'Buffs & imbue') && BuffGear.note) BuffGear.note.textContent = BuffGear.status();
     Reports.render();
     const diagnosticState = Diagnostics.sample();
-    if (this.waitNote) this.waitNote.textContent = Diagnostics.lines(diagnosticState);
+    if (this.waitNote) this.waitNote.textContent = this.waitNote.title = Diagnostics.lines(diagnosticState);
     this.updateOrb(); this.updateWide();
     if (this.townNote) this.townNote.textContent = Town.status();
     if (this.is('Settings') && AutoMastery.note) AutoMastery.note.textContent = AutoMastery.status();
     if (this.is('Settings') && AutoMastery.maxNote) AutoMastery.maxNote.textContent = AutoMastery.maxMessage;
     if (this.is('Settings') && StatPoints.note) StatPoints.note.textContent = StatPoints.status();
     if (this.stuckNote) this.stuckNote.textContent = AntiStuck.status();
+    if (this.autoStartNote) this.autoStartNote.textContent = AutoStart.status();
     if (this.is('Party') && Trace.note) Trace.note.textContent = Trace.status();
+    if (Lure.note) Lure.note.textContent = Lure.status();
     if (this.is('Party') && this.partyNote) {
       const notes = [Settings.profile.party.autoRecruit ? Party.message : 'Auto-recruit off.'];
       if (Settings.profile.party.joinMain && Party.joinMessage) notes.push(Party.joinMessage);
@@ -11854,9 +16368,10 @@ const UI = {
       }
     }
     if (!this.status) return;
-    if (this.is('Supplies') && this.petPotionNote) this.petPotionNote.textContent = PetPotion.message;
+    if (this.is('Supplies') && this.petPotionNote) { this.petPotionNote.textContent = this.petPotionNote.title = PetPotion.message; }
     if (this.is('Supplies') && this.speedNote) this.speedNote.textContent = SpeedScroll.message;
-    if (this.is('Loot') && this.petNote) { this.petNote.hidden = !Loot.petMode(); this.petNote.textContent = Loot.petStatus(); }
+    if (this.is('Supplies') && this.hammerNote) this.hammerNote.textContent = RepairHammer.message;
+    if (this.is('Loot') && this.petNote) { const text = Loot.petStatus(); this.petNote.style.visibility = Loot.petMode() ? '' : 'hidden'; this.petNote.textContent = text; this.petNote.title = text; }
     Learned.repair();
     if (this.is('Combat') && this.lastSkillKey !== this.skillKey()) { this.draw(); return; }
     const me = World.me(), center = Settings.profile.hunt.center;
@@ -12436,7 +16951,7 @@ Activity.userMessage = function( entry ) {
 		const phase = entry.text.replace( /^Town phase: /, "" );
 		const phases = {
 			recall: "Preparing to return to town.", "recall-wait": "Returning to town…",
-			"revive-arrival": "Waiting to revive in town.", "walk-storage": "Walking to the warehouse.",
+			"revive-arrival": "Waiting to revive in town.", "walk-arrival": "Walking to the town start.", "walk-storage": "Walking to the warehouse.",
 			"open-storage": "Opening the warehouse.", store: "Depositing loot.", "close-storage": "Finished at the warehouse.",
 			"walk-vendor": "Walking to the potion merchant.", "open-vendor": "Opening the potion shop.",
 			buy: "Buying supplies.", "close-vendor": "Finished buying supplies.",
@@ -12444,7 +16959,8 @@ Activity.userMessage = function( entry ) {
 			sell: "Selling loot.", ammo: "Buying ammunition.", repair: "Repairing equipment.",
 			"close-smith": "Finished at the repair merchant.", "walk-gate": "Walking to the return point.",
 			"open-gate": "Opening return travel.", reverse: "Preparing to return to the hunting area.",
-			"reverse-wait": "Returning to the hunting area…"
+			"reverse-wait": "Returning to the hunting area…",
+			leave: "Finished town services; walking back to the hunting spot."
 		};
 		return phases[phase] || "Continuing town services.";
 	}
@@ -12684,7 +17200,7 @@ UI.showActivityExport = function() {
 
 
 function toggleBot() {
-  if (Alchemy.run || Alchemy.pending || Stall.run || Hunt.running || Town.trip || WalkBack.active || Restock.trip || Resurrect.trip || Controller.resumeAfterRevive) stopAll();
+  if (Alchemy.run || Alchemy.pending || Stall.run || Hunt.running || Town.trip || WalkBack.active || Travel.active || Restock.trip || Resurrect.trip || Controller.resumeAfterRevive) stopAll();
   else if (Restock.recording) UI.toast('Finish or cancel route recording before starting the bot.', 'warn');
   else Hunt.start();
 }
@@ -12720,14 +17236,15 @@ function boot() {
     const key = name ? 'profile:' + name : 'profile:default';
     if (key !== Settings.profileKey) { Town.lastScrollPoint = null; Town.deathPoint = null; stopAll(); Settings.useCharacter(name); }
   });
-  bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); Trace.reset(); BuffGear.reset(); Team.reset(); TeamIntel.reset(); Town.lastScrollPoint = null; Town.deathPoint = null; SpeedScroll.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
+  bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); Trace.reset(); BuffGear.reset(); Team.reset(); TeamIntel.reset(); Town.lastScrollPoint = null; Town.deathPoint = null; SpeedScroll.reset(); RepairHammer.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
   bus.on('phase', phase => {
     if (phase !== 'world') {
-      BuffGear.interrupt('World transition interrupted buff swaps.');
+      BuffGear.interrupt('World transition interrupted buff swaps.', true);
       Party.reset();
       SpeedScroll.reset();
+      RepairHammer.reset();
       Resurrect.reset();
-      if (Town.phase(phase)) { Loot.reset(); return; }
+      if (Town.phase(phase) || Travel.phase(phase)) { Loot.reset(); return; }
       const revival = phase === 'entering-world' && Hunt.running && (Town.autoRevive() || Hunt.cfg().onDeath === 'revive') && (Hunt.state === 'dead' || Hunt.revived);
       stopAll(); Restock.cancelRecording(); Loot.reset();
       Controller.resumeAfterRevive = revival;
@@ -12735,12 +17252,12 @@ function boot() {
   });
   bus.on('failure', () => { BuffGear.interrupt('Connection failed during buff swaps.'); stopAll(); Restock.cancelRecording(); UI.toast('Game connection failed; bot stopped.', 'warn'); });
   bus.on('reset', () => {
-    BuffGear.interrupt('World reset interrupted buff swaps.');
+    BuffGear.interrupt('World reset interrupted buff swaps.', true);
     if (Town.trip) {
       if (['recall-wait', 'reverse-wait'].includes(Town.trip.phase)) Town.trip.transition = true;
       else Town.fail('Unexpected world reset during town service.');
     }
-    SpeedScroll.reset(); Party.reset(); Resurrect.reset(); Loot.reset(); Navigation.scene = null; Wardrobe.inv = Wardrobe.baseInv = Wardrobe.av = Wardrobe.baseAv = null; Wardrobe.body = '';
+    SpeedScroll.reset(); RepairHammer.reset(); Party.reset(); Resurrect.reset(); Loot.reset(); Navigation.scene = null; Wardrobe.inv = Wardrobe.baseInv = Wardrobe.av = Wardrobe.baseAv = null; Wardrobe.body = '';
   });
   bus.on('attached', ({ late }) => { if (late) UI.toast('Attached after the game started. Reload for complete character data.', 'warn'); });
   bus.on('potion-empty', kind => UI.toast('Out of ' + kind.toUpperCase() + ' potions.', 'warn'));
@@ -12749,6 +17266,7 @@ function boot() {
     const target = e.composedPath()[0];
     if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || '')) return;
     if (e.code === 'F8') { e.preventDefault(); e.stopImmediatePropagation(); toggleBot(); }
+    else if (e.code === 'F6') { e.preventDefault(); e.stopImmediatePropagation(); UI.toggleMinimised(); }
     else if (e.code === 'F7') {
       e.preventDefault(); e.stopImmediatePropagation();
       if (e.shiftKey) UI.toggleVisibility();
@@ -12758,9 +17276,9 @@ function boot() {
   }, true);
   Ticker.start(() => Controller.tick(), 100);
   setInterval(() => { Wardrobe.tick(); UI.update(); }, 500);
-  W.SROLean = { version: VERSION, stats: Stats, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, buffGear: BuffGear, stall: Stall, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, resurrect: Resurrect, team: Team, teamIntel: TeamIntel, teamKnowledge: TeamKnowledge, teamArbiter: TeamArbiter,
-    restock: Restock, town: Town, walkBack: WalkBack, antiStuck: AntiStuck, chase: Chase, trap: Trap, autoMastery: AutoMastery, statPoints: StatPoints, share: ProfileShare, trace: Trace, setup: Setup, reconnect: Reconnect, petPotion: PetPotion, navigation: Navigation, route: Route, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, activity: Activity, map: LeanMap, support: Support, items: ItemRules, stop: stopAll, log: Log };
-  Log.info('NIX ready. F8 starts/stops; F7 folds; the × minimises; Shift+F7 hides/shows the window.');
+  W.SROLean = { version: VERSION, stats: Stats, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, buffGear: BuffGear, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, repairHammer: RepairHammer, resurrect: Resurrect, stall: Stall, team: Team, teamIntel: TeamIntel, teamKnowledge: TeamKnowledge, teamArbiter: TeamArbiter,
+    restock: Restock, town: Town, walkBack: WalkBack, travel: Travel, antiStuck: AntiStuck, chase: Chase, trap: Trap, autoMastery: AutoMastery, statPoints: StatPoints, share: ProfileShare, trace: Trace, setup: Setup, reconnect: Reconnect, petPotion: PetPotion, navigation: Navigation, route: Route, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, activity: Activity, map: LeanMap, render: RenderControl, support: Support, items: ItemRules, stop: stopAll, log: Log };
+  Log.info('NIX ready. F8 starts/stops; F7 folds; F6 or the × minimises and restores; Shift+F7 hides/shows the window.');
 }
 
 installWorkerHook();

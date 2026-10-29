@@ -1,8 +1,16 @@
 // Outdoor routing over the collision product already admitted by the game.
 // A 20-unit A* grid respects blocked terrain, object walls and linked portals.
+// Every route is then checked with the game's own clipper, and planned with it
+// where the flat grid is wrong (lean-clip-route.js).
 // Native movement remains the final authority for height and collision response.
+const STALL_MS = 2500;      // standing still this long while moves are sent counts as a stall
+const STALL_TRIES = 4;      // sidesteps tried at one spot before the walk gives up
+const AVOID_AHEAD = 36;     // the suspected obstacle sits this far ahead of the stalled character
+const AVOID_RADIUS = 28;    // and is kept out of the next route by this much
+const AVOID_MS = 45000;
+const FLAT_NODES_WITH_CLIPPER = 2500;  // flat A* budget when the clipper can take over
 const Navigation = {
-  scene: null, revision: 0, error: '',
+  scene: null, revision: 0, error: '', avoidNow: null,
   bytes(value, size) {
     const raw = atob(value), out = Uint8Array.from(raw, c => c.charCodeAt(0));
     if (out.length !== size) throw Error('Invalid navigation grid');
@@ -11,7 +19,7 @@ const Navigation = {
   capture(command) {
     const c = command?.command || command;
     if (c?.kind !== 'navigation') return;
-    try { this.install(c.bundle); } catch (e) { this.scene = null; this.error = e.message; Log.warn('Walk-back navigation: ' + e.message); }
+    try { this.install(c.bundle); } catch (e) { this.scene = null; this.error = e.message; ClipRoute.reset(); Log.warn('Walk-back navigation: ' + e.message); }
   },
   install(product) {
     if (!product?.complete || (product.regionId & DUNGEON)) throw Error('Outdoor collision data required');
@@ -64,6 +72,7 @@ const Navigation = {
       }
     }
     this.scene = scene; this.error = ''; this.revision++;
+    ClipRoute.install(product);
   },
   local(p) {
     const d = regionDelta({ regionId: this.scene.regionId, x: 0, z: 0 }, p);
@@ -77,6 +86,7 @@ const Navigation = {
   open(x, z) {
     const sx = Math.floor(x / SECTOR), sz = Math.floor(z / SECTOR), grid = this.scene.grids.get(sx + ',' + sz);
     if (!grid) return false;
+    if (this.avoidNow) for (const a of this.avoidNow) if (Math.hypot(x - a.x, z - a.z) < a.r) return false;
     const tx = Math.floor((x - sx * SECTOR) / 20), tz = Math.floor((z - sz * SECTOR) / 20), i = tz * 96 + tx;
     return !grid.blocked[i] && grid.cells.getUint32(i * 4, true) < grid.count;
   },
@@ -114,6 +124,27 @@ const Navigation = {
   plan(from, to, arrivalRadius = 0, options = {}) {
     if (!this.scene || (from.regionId | to.regionId) & DUNGEON) return null;
     const start = this.local(from), goal = this.local(to);
+    // Spots a stalled walk bumped into are kept out of the route, but never the start itself.
+    const avoid = (options.avoid || []).map(a => ({ ...this.local(a), r: a.r })).filter(a => Number.isFinite(a.x) && start && Math.hypot(a.x - start.x, a.z - start.z) >= a.r);
+    // The clipper is already searching this way between frames: no flat search again.
+    if (options.clip !== false && ClipRoute.ready && Number.isFinite(from.y) && ClipRoute.busy(from, to, arrivalRadius, avoid)) {
+      return ClipRoute.plan(from, to, arrivalRadius, avoid);
+    }
+    this.avoidNow = avoid.length ? avoid : null;
+    // With the clipper behind it, the flat search stays short: a way it does not find
+    // quickly is searched by the clipper, in slices, instead of in one long freeze.
+    const clipping = options.clip !== false && ClipRoute.ready && Number.isFinite(from.y);
+    const flat = clipping ? { ...options, maxNodes: Math.min(options.maxNodes ?? Infinity, FLAT_NODES_WITH_CLIPPER) } : options;
+    let route;
+    try { route = this.planLocal(from, to, start, goal, arrivalRadius, flat); } finally { this.avoidNow = null; }
+    // The clipper checks the flat route and plans where the flat grid is wrong. A flat
+    // route it stops is never walked: it would run into a wall. Callers that plan often
+    // (pursuit, detour candidates) keep the flat grid alone: options.clip false.
+    if (options.clip === false || !ClipRoute.ready || !Number.isFinite(from.y) || !goal || !this.covered(goal.x, goal.z)) return route;
+    if (route?.length && ClipRoute.walks(from, route)) return route;
+    return ClipRoute.plan(from, to, arrivalRadius, avoid);
+  },
+  planLocal(from, to, start, goal, arrivalRadius, options) {
     if (!start || !goal || !this.open(start.x, start.z)) return null;
     if (Math.hypot(goal.x - start.x, goal.z - start.z) < 1800 && this.clear(start, goal)) return [to];
     const key = p => p.x + ',' + p.z, center = p => ({ x: p.x * 20 + 10, z: p.z * 20 + 10 });
@@ -210,19 +241,87 @@ const Navigation = {
       if (turned) candidates.push(turned);
     }
     for (const candidate of candidates) {
-      const route = this.plan(from, candidate, 0, { maxNodes: options.maxNodes ?? 20000 });
+      const route = this.plan(from, candidate, 0, { maxNodes: options.maxNodes ?? 20000, clip: false });
       if (route?.length && dist2D(route[route.length - 1], candidate) <= 15) return candidate;
     }
     return null;
   },
-  next(owner, destination, recorded = false, arrivalRadius = 0) {
+  // Stall watchdog shared by every walker that sends plain moves (WalkBack, Town, Restock). When the character has
+  // not moved for a few seconds although moves were sent, the spot just ahead is remembered on the owner as
+  // blocked, so next() routes around it; after a few tries at one place it reports 'giveup'. Returns '', 'recover'
+  // or 'giveup'. Only normal moves are ever sent; nothing here moves the character.
+  watch(owner, pose, sentAt, toward) {
+    const t = now();
+    let w = owner.stall;
+    if (!w || t - w.seen > 1500) w = owner.stall = { pose: { ...pose }, at: t, seen: t, tries: 0, origin: null };
+    w.seen = t;
+    const moved = dist2D(w.pose, pose);
+    if (!Number.isFinite(moved) || moved > 3) {
+      if (w.origin && !(dist2D(w.origin, pose) < 100)) { w.tries = 0; w.origin = null; owner.avoid = []; }
+      w.pose = { ...pose }; w.at = t;
+      return '';
+    }
+    if (t - w.at < STALL_MS || sentAt < w.at) return '';
+    w.at = t;
+    if (w.tries >= STALL_TRIES) { w.tries = 0; w.origin = null; owner.avoid = []; return 'giveup'; }
+    w.tries++; w.origin = w.origin || { ...pose };
+    const delta = toward && regionDelta(pose, toward), length = delta ? Math.hypot(delta[0], delta[1]) : 0;
+    if (length > 0) {
+      const spot = { regionId: pose.regionId, x: pose.x + delta[0] / length * AVOID_AHEAD, z: pose.z + delta[1] / length * AVOID_AHEAD, r: AVOID_RADIUS, until: t + AVOID_MS };
+      owner.avoid = [...(owner.avoid || []).filter(a => a.until > t), spot];
+    }
+    owner.travel = null;
+    return 'recover';
+  },
+  stepOut(pose) {
+    if (this.pointStatus(pose) !== 'blocked') return null;
+    const strict = this.escapeCandidates(pose)[0];
+    if (strict) return strict;
+    const p = this.local(pose);
+    for (let r = 20; r <= 160; r += 20) for (let i = 0; i < 16; i++) {
+      const ux = Math.cos(i * Math.PI / 8), uz = Math.sin(i * Math.PI / 8);
+      const to = this.pose({ x: p.x + ux * r, z: p.z + uz * r }, pose.y), ahead = { x: p.x + ux * 5, z: p.z + uz * 5 };
+      if (this.pointStatus(to) === 'open' && !this.crosses(p, ahead) && this.clear(ahead, this.local(to), true)) return to;
+    }
+    return null;
+  },
+  crosses(a, b) {
+    const cross = (p, q, r) => (q.x - p.x) * (r.z - p.z) - (q.z - p.z) * (r.x - p.x);
+    for (let x = Math.floor((Math.min(a.x, b.x) - 2) / 80); x <= Math.floor((Math.max(a.x, b.x) + 2) / 80); x++)
+      for (let z = Math.floor((Math.min(a.z, b.z) - 2) / 80); z <= Math.floor((Math.max(a.z, b.z) + 2) / 80); z++)
+        for (const w of this.scene.walls.get(x + ',' + z) || []) {
+          const c = { x: w[0], z: w[1] }, d = { x: w[2], z: w[3] };
+          if (cross(a, b, c) * cross(a, b, d) < 0 && cross(c, d, a) * cross(c, d, b) < 0) return true;
+        }
+    return false;
+  },
+  // near: the destination only gives a direction (a walk-back leg end); reaching within
+  // arrivalRadius of it is the plan, not a fallback.
+  next(owner, destination, recorded = false, arrivalRadius = 0, near = false) {
     const pose = World.pose(), previous = owner.travel;
     if (!this.scene || (pose.regionId & DUNGEON)) {
       return recorded ? { point: destination } : { waiting: true, error: this.error || 'Waiting for game collision data. Reload the game if attached late, or record a walking route.' };
     }
     if (!previous || previous.revision !== this.revision || dist2D(previous.destination, destination) > 1 || previous.index >= previous.route.length) {
-      let route = this.plan(pose, destination);
-      if (route && !route.length && arrivalRadius > 0) route = this.plan(pose, destination, arrivalRadius);
+      const avoid = (owner.avoid || []).filter(a => a.until > now());
+      const attempt = options => {
+        if (near) return this.plan(pose, destination, arrivalRadius, options);
+        let route = this.plan(pose, destination, 0, options);
+        if (route && route !== CLIP_PENDING && !route.length && arrivalRadius > 0) route = this.plan(pose, destination, arrivalRadius, options);
+        return route;
+      };
+      let route = attempt({ avoid });
+      // The clipper is still searching, between frames: wait for it.
+      if (route === CLIP_PENDING) return { waiting: true, planning: true, error: 'Finding a way through the game collision.' };
+      // Avoided spots are only a hint: if they leave no route, walk the plain one rather than nothing.
+      if (avoid.length && !route?.length) {
+        route = attempt({});
+        if (route === CLIP_PENDING) return { waiting: true, planning: true, error: 'Finding a way through the game collision.' };
+      }
+      if (!route?.length) {
+        const out = this.stepOut(pose);
+        if (out) { owner.travel = null; return { point: out, stepOut: true }; }
+      }
       if (!route) return { waiting: true, error: 'Waiting for collision coverage at the current position.' };
       if (!route.length) return { error: 'No walkable route found through the loaded collision map.' };
       owner.travel = { destination: { ...destination }, route, index: 0, revision: this.revision };

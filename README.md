@@ -17,10 +17,12 @@ The **Setup** page checks all this for you and fixes the next missing thing.
 
 - Combat rotation, buffs with weapon swapping, imbue, party heal/buff, resurrection
 - Pet and character looting with per-item rules (pick, store, sell, keep, drop)
+- Optional pickup-pet slot balancing, and a primary/secondary weapon and shield that are never sold, stored or dropped
 - Town trips by return scroll: potions, repair, warehouse, selling, reverse back
-- Optional selling of unprotected character bag items on town trips (off by default)
+- Optional selling of ordinary gear from the character bag on town trips (off by default)
 - Item alchemy, auto mastery and skills, stat points
-- Automatic reconnect, walk-back after death, anti-stuck, obstacle detours
+- Auto trade: buy specialty goods in one town, walk to another and sell them (needs a trader suit and a transport)
+- Automatic reconnect, optional start on entering the game, walk-back after death, anti-stuck, obstacle detours
 - Minimap, session stats, wardrobe, share and import settings
 - **Team edition:** relay presence, shared live intel and map layer, unique tracker, player hostility records, shared drops, assist, town sync, resurrection claims, optional public sharing, fleet console (see [the team plan](docs/TEAM.md) and [relay/](relay/))
 
@@ -31,6 +33,7 @@ Settings are saved per character.
 | Key | Action |
 | --- | --- |
 | **F8** | Start / stop |
+| **F6** | Minimise to an icon / bring the panel back |
 | **F7** | Fold panel (brings a minimised one back) |
 | **Shift+F7** | Hide / show panel |
 | **×** | Minimise to an icon, bot keeps running |

@@ -18,7 +18,7 @@ const images = ['ic_attack', 'ic_recovery', 'ic_autoget', 'ic_sit'].map((key, i)
 });
 const media = process.argv[4];
 if (media) for (const name of ['action/icon_cha_auto_attack', 'action/icon_cha_autoget', 'action/icon_cha_recovery', 'action/icon_cha_alchemy', 'action/icon_cha_shop',
-  'action/icon_cha_helper', 'action/icon_cha_party', 'action/icon_cha_camp', 'action/icon_cha_sit', 'item/etc/mall_return_scroll', 'item/etc/mall_warehouse_ticket', 'item/etc/all_potion_03', 'item/etc/mall_repair_hammer',
+  'action/icon_cha_helper', 'action/icon_cha_party', 'action/icon_cha_camp', 'action/icon_cha_sit', 'action/cos_cmd_inventory', 'item/etc/mall_return_scroll', 'item/etc/mall_warehouse_ticket', 'item/etc/all_potion_03', 'item/etc/mall_repair_hammer',
   'item/etc/mall_reverse_return_scroll', '../interface/minimap/mm_map_button']) {
   const raw = fs.readFileSync(path.join(media, 'icon', name + '.png'));
   images.push({ raw, compressed: zlib.gzipSync(raw), path: path.posix.normalize(`/assets/images/Media_extracted/icon/${name}.png`), transport: `/assets/test-icons/real-${images.length}.png.gz` });
@@ -73,7 +73,7 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
     await page.addInitScript(v => { try { localStorage.setItem('sroBotLean:v1:seenVersion', JSON.stringify(v)); } catch {} }, version);
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.addScriptTag({ content: script });
-    await page.getByText(/^nixxane bot 1\./).waitFor();
+    await page.getByText(/^NIX 1\./).waitFor();
     await page.evaluate(game => {
       const code = `onmessage = e => { if (e.data.kind === 'fixture') postMessage(e.data.message); };`;
       window.testSim = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })), { name: 'sro-simulation' });
@@ -132,7 +132,38 @@ const gameplay = { localGid: 1, target: 0, targetPending: false, inventoryPendin
     await page.setViewportSize({ width: 1200, height: 1000 });
     await page.evaluate(() => SROLean.ui.setWide(true));
     await tab('Party'); await snap('15-wide-party'); await tab('Settings'); await snap('15-wide-settings'); await tab('Alchemy'); await snap('15-wide-alchemy');
-    await page.evaluate(() => SROLean.ui.setWide(false)); await page.setViewportSize({ width: 1280, height: 900 }); await tab('Settings');
+    await page.evaluate(() => SROLean.ui.setWide(false)); await page.setViewportSize({ width: 760, height: 1010 });
+    // The easy guide: one step per picture, with numbered red rings on what to press.
+    // A target is a button's exact text, 'panel' for the whole window, or { sel } for any element in the panel.
+    const mark = targets => page.evaluate(list => {
+      const root = document.getElementById('sro-bot-lean').shadowRoot;
+      list.forEach((target, i) => {
+        const node = target === 'panel' ? root.host : typeof target === 'string' ? [...root.querySelectorAll('button')].find(b => b.offsetParent && b.textContent.trim() === target) : root.querySelector(target.sel);
+        if (!node) throw new Error('easy guide: nothing to mark for ' + JSON.stringify(target));
+        const r = node.getBoundingClientRect(), ring = document.createElement('div'), badge = document.createElement('div');
+        ring.className = badge.className = 'easy-mark';
+        Object.assign(ring.style, { position: 'fixed', left: r.left - 5 + 'px', top: r.top - 5 + 'px', width: r.width + 10 + 'px', height: r.height + 10 + 'px',
+          border: '4px solid #ff3b30', borderRadius: '8px', boxShadow: '0 0 0 2px #fff, 0 0 14px #ff3b30', zIndex: 2147483647, pointerEvents: 'none', boxSizing: 'border-box' });
+        Object.assign(badge.style, { position: 'fixed', left: Math.max(2, r.left - 18) + 'px', top: Math.max(2, r.top - 18) + 'px', width: '28px', height: '28px', borderRadius: '50%',
+          background: '#ff3b30', color: '#fff', font: '700 17px/28px system-ui, sans-serif', textAlign: 'center', border: '2px solid #fff', zIndex: 2147483647, pointerEvents: 'none' });
+        if (list.length > 1) badge.textContent = i + 1; else badge.remove();
+        document.body.append(ring); if (list.length > 1) document.body.append(badge);
+      });
+    }, targets);
+    const unmark = () => page.evaluate(() => document.querySelectorAll('.easy-mark').forEach(n => n.remove()));
+    const easy = async (name, targets) => { await page.waitForTimeout(300); await mark(targets); await snap(name); await unmark(); };
+    await tab('Combat'); await tab('Skills');
+    await easy('easy-1-panel', ['panel']);
+    await tab('Hunt area'); await easy('easy-2-spot', ['Combat', 'Hunt area', 'Set hunting spot here']);
+    await tab('Skills'); await easy('easy-3-skills', ['Skills', { sel: '[aria-label="Attack skill icons"]' }]);
+    await tab('Setup'); await easy('easy-4-check', ['Setup', 'Fix the next thing']);
+    await easy('easy-5-start', ['Start / stop · F8']);
+    // The Classic window (SBot layout, screens at least 900 px wide); the website shows its Skills tab.
+    await page.setViewportSize({ width: 1200, height: 1000 });
+    await page.evaluate(() => SROLean.ui.setClassic(true));
+    const classicTab = async name => { await page.locator('#sro-bot-lean nav').getByRole('button', { name, exact: true }).click(); await page.waitForTimeout(200); };
+    await classicTab('Skills'); await snap('16-classic-skills'); await classicTab('Party/Autores'); await snap('16-classic-party');
+    await page.evaluate(() => SROLean.ui.setClassic(false)); await page.setViewportSize({ width: 1280, height: 900 }); await tab('Settings');
     await page.getByRole('button', { name: 'Send bug report', exact: true }).click();
     await page.getByRole('textbox', { name: 'Report preview', exact: true }).waitFor();
     await page.setViewportSize({ width: 1000, height: 1010 });

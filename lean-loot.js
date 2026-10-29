@@ -58,7 +58,7 @@ const Loot = {
     if (Hunt.running && World.gp.inventoryPending) return 'Pet waiting for pickup / inventory transaction to finish.';
     if (Hunt.running && this.pressed()) return 'Pet waiting briefly for potion use.';
     if (this.active?.petGid === pet.rec.gid) return 'Pet collecting: ' + (this.active.name || this.active.gid) + (this.active.retryAt ? ' (retry pending).' : '.');
-    return `Pet ready: ${Math.max(0, pet.rec.status - pet.rec.inventory.length)} empty slots. Collects while hunting; auto-grab stays off when stopped.`;
+    return `Pet ready: ${Math.max(0, pet.rec.status - pet.rec.inventory.length)} empty slots. Collects while hunting and while the bot is stopped.`;
   },
   items(petGid = 0) { return petGid ? World.gp?.cosRecords?.find(r => r.gid === petGid)?.inventory || [] : World.items(); },
   pickup(gid, petGid = 0) {
@@ -140,7 +140,7 @@ const Loot = {
     const H = Hunt.cfg(), P = H.pickup, skip = this.skips.get(e.gid);
     if (skip && (skip.bag !== null ? skip.bag === this.bagSignature(e) : skip.until > now())) return 'failed';
     if (!(dist2D(World.pose(), e) <= P.radius)) return 'far';
-    if (H.center && dist2D(H.center, e) > H.radius + P.radius) return 'area';
+    if (Hunt.running && H.center && dist2D(H.center, e) > H.radius + P.radius) return 'area';
     if (!this.owned(e)) return 'owner';
     const tf = e.groundItem.typeFlags ?? e.tidWord ?? 0, name = (e.name || '').toLowerCase(), rule = ItemRules.get(e.refObjId);
     if (rule && (rule.pick === 'no' || rule.act === 'drop')) return 'rule';
@@ -186,7 +186,7 @@ const Loot = {
         this.skips.delete(e.gid);
       }
       const d = dist2D(pose, e);
-      if (!Number.isFinite(d) || d > P.radius || H.center && dist2D(H.center, e) > H.radius + P.radius || !this.allowed(e)) continue;
+      if (!Number.isFinite(d) || d > P.radius || Hunt.running && H.center && dist2D(H.center, e) > H.radius + P.radius || !this.allowed(e)) continue;
       const who = this.collector(e);
       if (by && who !== by) continue;
       const travel = dist2D(who === 'pet' ? this.pet()?.ent : pose, e);
@@ -254,6 +254,18 @@ const Loot = {
     // Movement cancels the outstanding worker pickup intent. Resubmit on a later tick.
     if (a.petGid || Cmd.move(World.pose())) { a.retryAt = now() + 700; a.failure = ''; }
     return true;
+  },
+  // The pet keeps collecting while the bot is stopped. Pet settings are left alone: with auto-grab on the game collects
+  // natively (allowed() refuses), otherwise selective requests go out as during hunting. Character pickups stay bot-only.
+  idleTick() {
+    if (Hunt.running || !this.petMode() || !Hunt.cfg().pickup.enabled || World.isDead() || World.gp?.storage || Restock.activeShop() ||
+        now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000) {
+      if (this.active?.petGid) this.suspend();
+      return;
+    }
+    if (this.active) { if (this.active.petGid) this.tick(); else this.suspend(); return; }
+    const drop = this.choose('pet');
+    if (drop) this.begin(drop);
   },
   suspend() { this.active = null; Hunt.lootGid = 0; },
   reset() { this.suspend(); this.skips.clear(); this.failureCounts.clear(); this.petSetup = null; this.fullAlert = null; },

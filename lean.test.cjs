@@ -3,13 +3,13 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, WalkBack, Navigation, Route, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, Team, TeamIntel, TeamKnowledge, TeamArbiter, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, stopAll, toggleBot, boot, Ticker, Sound, Stall};\n})();';
-function fixture() {
+  'globalThis.bot = {AutoStart, RenderControl, Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, Trade, WalkBack, Navigation, ClipRoute, Route, RouteCheck, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, Travel, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, RepairHammer, Stall, Team, TeamIntel, TeamKnowledge, TeamArbiter, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, Lure, stopAll, toggleBot, boot, Ticker, Sound, LeanMap};\n})();';
+function fixture(document) {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
   const win = { addEventListener() {}, localStorage: { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v) } };
-  const context = { window: win, performance: { now: () => time }, console,
-    setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout() {}, setInterval(fn, ms) { intervals.push({ fn, ms }); }, AbortController, Blob, FormData, URL, Map, Set, Date, ArrayBuffer, DataView, atob };
+  const context = { window: win, document, performance: { now: () => time }, console,
+    setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout() {}, clearInterval() {}, setInterval(fn, ms) { intervals.push({ fn, ms }); }, AbortController, Blob, FormData, URL, Map, Set, Date, ArrayBuffer, DataView, atob };
   vm.createContext(context); vm.runInContext(isolated, context);
   const b = context.bot;
   b.UI.toast = message => notices.push(message);
@@ -31,6 +31,76 @@ function fixture() {
   return { ...b, commands, notices, storage, drop, win, intervals, timers, advance: ms => { time += ms; } };
 }
 let passed = 0;
+function renderDocument(prototype = {}) {
+  const document = Object.create(prototype), nodes = [];
+  document.documentElement = { append(node) { nodes.push(node); } };
+  document.createElement = () => {
+    const attributes = {}, events = {};
+    return { attributes, style: {}, setAttribute(k, v) { attributes[k] = v; },
+      addEventListener(k, fn) { events[k] = fn; }, click() { events.click(); },
+      remove() { const i = nodes.indexOf(this); if (i >= 0) nodes.splice(i, 1); } };
+  };
+  return { document, nodes };
+}
+test('render button suspends the native drawing path and restores real tab visibility', () => {
+  let visibility = 'visible';
+  const { document, nodes } = renderDocument({ get visibilityState() { return visibility; } });
+  const f = fixture(document), button = f.RenderControl.button();
+  assert.equal(button.textContent, 'No Render');
+  f.Hunt.running = true;
+  button.click();
+  assert.equal(document.visibilityState, 'hidden');
+  assert.equal(button.textContent, 'Render');
+  assert.equal(button.attributes['aria-label'], 'Resume game rendering');
+  assert.equal(nodes.length, 1, 'black mask is outside the NIX panel');
+  assert.match(nodes[0].style.cssText, /background:#000!important/);
+  assert.match(nodes[0].style.cssText, /position:fixed!important;inset:0!important/);
+  assert.match(nodes[0].style.cssText, /z-index:2147483645!important/);
+  assert.equal(button.attributes['aria-pressed'], 'true');
+  assert.equal(f.Hunt.running, true); assert.equal(f.commands.length, 0);
+  petFight(f); f.drop(20, 3436); f.Settings.profile.hunt.pickup.afterKillOnly = false;
+  let fights = 0; f.Combat.fight = () => { fights++; };
+  f.Controller.tick();
+  assert.equal(fights, 1, 'combat still runs with rendering suspended');
+  assert.equal(f.commands.some(c => c.kind === 'cos-pickup'), true, 'pet pickup keeps running');
+  f.RenderControl.set(false); // Repeated suspension must retain the original descriptor.
+  assert.equal(nodes.length, 1, 'duplicate clicks do not add another mask');
+  f.stopAll();
+  assert.equal(document.visibilityState, 'hidden');
+  visibility = 'hidden'; button.click();
+  assert.equal(button.textContent, 'No Render');
+  assert.equal(button.attributes['aria-label'], 'Suspend game rendering');
+  assert.equal(nodes.length, 0, 'resuming removes the black mask');
+  assert.equal(Object.hasOwn(document, 'visibilityState'), false);
+  assert.equal(document.visibilityState, 'hidden', 'an actual hidden tab stays hidden');
+  visibility = 'visible'; assert.equal(document.visibilityState, 'visible');
+  assert.equal(button.attributes['aria-pressed'], 'false');
+});
+test('render toggle restores an existing own descriptor and tolerates unavailable documents', () => {
+  const { document, nodes } = renderDocument();
+  const descriptor = { configurable: true, enumerable: true, get: () => 'visible', set: undefined };
+  Object.defineProperty(document, 'visibilityState', descriptor);
+  const f = fixture(document);
+  assert.equal(f.RenderControl.set(false), true);
+  assert.equal(f.RenderControl.set(true), true);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(document, 'visibilityState'), descriptor);
+  Object.defineProperty(document, 'visibilityState', { configurable: false });
+  assert.equal(f.RenderControl.set(false), false);
+  assert.equal(f.RenderControl.suspended, false);
+  assert.equal(document.visibilityState, 'visible');
+  assert.equal(nodes.length, 0, 'a failed toggle leaves no black mask');
+  assert.match(f.notices.at(-1), /unavailable/);
+  assert.equal(fixture().RenderControl.set(false), false);
+});
+test('render toggle leaves a later visibility hook intact', () => {
+  const { document, nodes } = renderDocument(), f = fixture(document);
+  f.RenderControl.set(false);
+  const getter = () => 'visible';
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: getter });
+  f.RenderControl.set(true);
+  assert.equal(Object.getOwnPropertyDescriptor(document, 'visibilityState').get, getter);
+  assert.equal(nodes.length, 0);
+});
 function pickupPet(f, commandMode = 7) {
   const rec = { gid: 50, refObjId: 500, band: 4, hp: 100, status: 5, inventory: [], commandMode };
   f.World.gp.cosRecords = [rec];
@@ -46,6 +116,19 @@ test('pet disables only native auto-grab bit and waits for server confirmation',
   f.advance(1000); f.Loot.preparePet(); assert.equal(f.commands.length, 1);
   pet.commandMode = 0x147; assert.equal(f.Loot.preparePet(), true);
   assert.equal(f.Loot.begin(d), true); assert.equal(f.commands.at(-1).kind, 'cos-pickup');
+});
+test('pet keeps collecting while the bot is stopped, and the character does not', () => {
+  const f = fixture(), pet = pickupPet(f, 0x147); f.drop(20, 3436);
+  assert.equal(f.Hunt.running, false);
+  f.advance(60000); f.Controller.tick();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'cos-pickup', gid: 50, target: 20 });
+  assert.equal(f.Loot.active.petGid, 50);
+  const f2 = fixture(); pickupPet(f2, 0x1c7); f2.drop(20, 3436);
+  f2.Controller.tick();
+  assert.equal(f2.commands.length, 0, 'auto-grab is left alone while stopped');
+  const f3 = fixture(); f3.Settings.profile.hunt.pickup.by = { elixirs: 'character' }; f3.Settings.profile.hunt.pickup.collector = 'character'; f3.Loot.preset('elixirs'); f3.drop(20, 3436);
+  f3.Controller.tick();
+  assert.equal(f3.commands.some(c => c.kind === 'pickup' || c.kind === 'cos-pickup'), false);
 });
 test('an Items rule to always pick an item works with its kind switched off, and leaves the other items of that kind alone', () => {
   const f = fixture(), P = f.Settings.profile.hunt.pickup;
@@ -196,13 +279,14 @@ test('pet configuration retries are bounded and resummoning resets setup', () =>
   assert.equal(f.commands.length, 3); assert.match(f.Loot.petStatus(), /not disabled/);
   pet.commandMode = 7; assert.equal(f.Loot.preparePet(), true); assert.equal(f.Loot.petSetup, null);
 });
-test('pet retries retain pet recipient and stop prevents further pickups', () => {
+test('pet retries retain pet recipient and stopping hands the drop to the idle pet, never the character', () => {
   const f = fixture(); pickupPet(f); const d = f.drop(20, 3436); f.Loot.begin(d);
   f.advance(9000); f.Loot.tick(); f.advance(800); f.Loot.tick();
   assert.equal(f.commands.filter(c => c.kind === 'cos-pickup').length, 2);
   assert.equal(f.commands.some(c => c.kind === 'pickup'), false);
   f.stopAll(); f.advance(1000); f.Controller.tick();
-  assert.equal(f.commands.filter(c => c.kind === 'cos-pickup').length, 2);
+  assert.equal(f.commands.filter(c => c.kind === 'cos-pickup').length, 3);
+  assert.equal(f.commands.some(c => c.kind === 'pickup'), false);
 });
 test('hunt controller waits for pet settings, then collects with the pet only', () => {
   const f = fixture(), pet = pickupPet(f, 135); f.drop(20, 3436); f.Hunt.start();
@@ -287,6 +371,264 @@ function test(name, fn) {
   if (result && typeof result.then === 'function') { asyncTests.push(result.then(() => { passed++; console.log('PASS ' + name); }, error => { console.error('FAIL ' + name); throw error; })); return; }
   passed++; console.log('PASS ' + name);
 }
+// ---- Auto trade ----
+// A simulated game: the merchants answer shop-open, purchases and sales change the transport's bag and the purse.
+const TRADE_GOODS_OFFER = { refObjId: 5000, name: 'Silk', tab: 0, slot: 4, price: '100', maxStack: 50, purchaseLimit: 50, previews: [{ refObjId: 5000, typeFlags: 0x46c }] };
+const TRADE_POTION_OFFER = { refObjId: 15, name: 'HP potion', tab: 0, slot: 1, price: '10', maxStack: 100, purchaseLimit: 100, previews: [{ refObjId: 15, typeFlags: 2284 }] };
+function tradeFixture({ suit = true, vehicle = true, link = true, answer = true } = {}) {
+  const f = fixture(), gp = f.World.gp, c = f.Trade.cfg();
+  const from = f.Trade.town('CH'), to = f.Trade.town('WC');
+  c.from = 'CH'; c.to = 'WC'; c.trips = 1;
+  const merchants = [from, to].map((t, i) => {
+    const s = t.services.trade, e = { gid: 300 + i, kind: 'npc', name: 'Trade merchant', refObjId: s.refObjId, regionId: s.regionId, x: s.x, y: s.y, z: s.z };
+    f.World.ents.set(e.gid, e); return e;
+  });
+  const s0 = from.services.trade;
+  gp.pose = { regionId: s0.regionId, x: s0.x + 30, y: s0.y, z: s0.z };
+  f.World.pose = () => gp.pose;
+  gp.inventory = suit ? [{ slot: 8, refObjId: 4000, typeFlags: 940 | (1 << 11), name: 'Trader suit' }] : [];
+  const rec = { gid: 70, refObjId: 700, band: 2, hp: 100, status: 3, dead: false, inventory: [] };
+  if (vehicle) gp.cosRecords = [rec];
+  gp.progression.gold = '100000';
+  const stats = { buys: [], sells: [], potions: [], follows: 0, bought: 0 };
+  const sim = {
+    f, gp, rec, stats, merchants,
+    // One game step: let the bot act, then answer what it sent.
+    step(ms = 600) {
+      f.advance(ms);
+      f.Trade.tick();
+      const sent = f.commands.splice(0);
+      for (const cmd of sent) {
+        if (cmd.kind === 'select') gp.target = cmd.gid;
+        else if (cmd.kind === 'shop-open') {
+          gp.shopCompletionRevision++;
+          const potion = f.World.ents.get(cmd.gid)?.refObjId !== merchants[0].refObjId && f.World.ents.get(cmd.gid)?.refObjId !== merchants[1].refObjId;
+          gp.shop = potion ? { npc: cmd.gid, offers: [TRADE_POTION_OFFER] } : { npc: cmd.gid, cosGid: link ? 70 : 0, offers: [TRADE_GOODS_OFFER] };
+        } else if (cmd.kind === 'npc-close') gp.shop = null;
+        else if (cmd.kind === 'cos-follow') stats.follows++;
+        else if (cmd.kind === 'shop-buy') {
+          stats.potions.push(cmd.quantity);
+          gp.progression.gold = String(BigInt(gp.progression.gold) - BigInt(cmd.quantity) * 10n);
+          const row = gp.inventory.find(i => i.refObjId === 15); if (row) row.quantity += cmd.quantity;
+        } else if (cmd.kind === 'cos-shop-buy') {
+          stats.bought++;
+          if (!answer) continue;
+          stats.buys.push(cmd.quantity); gp.progression.gold = String(BigInt(gp.progression.gold) - BigInt(cmd.quantity) * 100n);
+          rec.inventory.push({ slot: rec.inventory.length, refObjId: 5000, typeFlags: 0x46c, quantity: cmd.quantity, name: 'Silk' });
+        } else if (cmd.kind === 'cos-shop-sell') {
+          stats.sells.push(cmd.quantity); gp.progression.gold = String(BigInt(gp.progression.gold) + BigInt(cmd.quantity) * 150n);
+          rec.inventory = rec.inventory.filter(i => i.slot !== cmd.slot);
+        }
+      }
+      return sent;
+    },
+    run(max = 300) { for (let i = 0; i < max && f.Trade.run; i++) sim.step(); },
+  };
+  // Walking is the route graph's job and has its own tests: arrive at once.
+  f.WalkBack.startTo = (dest, opts) => { gp.pose = { regionId: dest.regionId, x: dest.x + 30, y: dest.y, z: dest.z }; opts.onDone?.(); return true; };
+  return sim;
+}
+test('every supported town has a trade merchant in the town table, and the trade settings load with defaults', () => {
+  const f = fixture();
+  assert.deepEqual([...f.Trade.towns().map(t => t.key)].sort(), ['CA', 'CH', 'EU', 'KT', 'WC']);
+  for (const t of f.Trade.towns()) assert.ok(t.services.trade.refObjId > 0 && Number.isFinite(t.services.trade.x), t.key);
+  assert.equal(f.Settings.profile.trade.from, 'CH'); assert.equal(f.Settings.profile.trade.trips, 1);
+  const g = f.botProfile({ trade: { from: 'KT', to: 'EU', trips: 3, potions: false, extra: 1 } });
+  assert.equal(g.trade.from, 'KT'); assert.equal(g.trade.trips, 3); assert.equal(g.trade.potions, false); assert.equal('extra' in g.trade, false);
+});
+test('auto pot keeps drinking while an auto trade runs, from the Controller loop', () => {
+  const t = tradeFixture(), f = t.f;
+  t.gp.inventory.push({ slot: 13, refObjId: 101, typeFlags: 2284, quantity: 10, name: 'HP potion' });
+  f.World.me = () => ({ maxHp: 100, maxMp: 100, hpPct: 20, mpPct: 100, abnormal: 0 });
+  f.Settings.profile.potion.enabled = true; f.Settings.profile.potion.hp.on = true; f.Settings.profile.potion.hp.pct = 50;
+  f.Trade.start(); assert.ok(f.Trade.run, f.Trade.message);
+  f.advance(2000); f.Controller.tick();
+  assert.equal(f.Controller.mode, 'trading');
+  assert.ok(f.commands.some(c => c.kind === 'item-use' || c.kind === 'use-item' || /item/.test(c.kind)), 'an HP potion was used: ' + JSON.stringify(f.commands.map(c => c.kind)));
+});
+test('auto trade buys goods into the transport, delivers them to the other town and sells them all', () => {
+  const t = tradeFixture(), f = t.f;
+  f.Trade.start(); assert.ok(f.Trade.run, f.Trade.message);
+  t.run();
+  assert.equal(f.Trade.run, null, f.Trade.message);
+  assert.deepEqual([...t.stats.buys], [50, 50, 50], 'one full stack per transport slot');
+  assert.deepEqual([...t.stats.sells], [50, 50, 50]);
+  assert.equal(t.rec.inventory.length, 0);
+  assert.equal(t.stats.follows, 1, 'the transport is told to follow once');
+  assert.equal(t.gp.progression.gold, String(100000 + 3 * 50 * 50), 'bought at 100, sold at 150');
+  assert.match(f.Trade.message, /finished: 1 delivery/);
+  assert.equal(f.Trade.tick(), false, 'idle once finished');
+});
+test('auto trade with more deliveries buys the second town\'s goods and carries them back', () => {
+  const t = tradeFixture(), f = t.f; f.Trade.cfg().trips = 2;
+  f.Trade.start(); t.run();
+  assert.equal(f.Trade.run, null, f.Trade.message);
+  assert.equal(t.stats.buys.length, 6, 'a load in each direction'); assert.equal(t.stats.sells.length, 6);
+  assert.match(f.Trade.message, /finished: 2 deliveries/);
+});
+test('auto trade never starts without the job suit, the towns or a free hand, and summons a missing transport', () => {
+  let t = tradeFixture({ suit: false }); t.f.Trade.start(); t.run(5);
+  assert.equal(t.f.Trade.run, null); assert.match(t.f.Trade.message, /trader job suit/); assert.equal(t.stats.bought, 0);
+  t = tradeFixture({ vehicle: false }); t.f.Trade.start(); t.run(5);
+  assert.equal(t.f.Trade.run, null); assert.match(t.f.Trade.message, /no transport/);
+  t = tradeFixture({ vehicle: false }); t.gp.inventory.push({ slot: 14, refObjId: 4100, typeFlags: 4588, codename: 'ITEM_COS_C_HORSE1', name: 'Horse summon' });
+  t.f.Trade.start(); const sent = t.step(); assert.ok(t.f.Trade.run, t.f.Trade.message);
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [{ kind: 'item-use', slot: 14 }], 'the scroll is used');
+  t.gp.cosRecords = [t.rec]; t.run(); assert.equal(t.f.Trade.run, null, t.f.Trade.message); assert.equal(t.stats.sells.length, 3);
+  t = tradeFixture(); t.f.Trade.cfg().to = 'CH'; t.f.Trade.start(); assert.equal(t.f.Trade.run, null); assert.match(t.f.Trade.message, /two different towns/);
+  t = tradeFixture(); t.f.Hunt.running = true; t.f.Trade.start(); assert.equal(t.f.Trade.run, null); assert.match(t.f.Trade.message, /Stop hunting/);
+  t = tradeFixture(); t.f.Trade.start(); t.f.Hunt.start(); assert.equal(t.f.Hunt.running, false, 'hunting is refused while trading');
+});
+test('auto trade stops when the merchant is not linked to the transport, and never repeats an unconfirmed purchase', () => {
+  let t = tradeFixture({ link: false }); t.f.Trade.start(); t.run(40);
+  assert.equal(t.f.Trade.run, null); assert.match(t.f.Trade.message, /not linked to your transport/); assert.equal(t.stats.bought, 0);
+  t = tradeFixture({ answer: false }); t.f.Trade.start(); t.run(60);
+  assert.equal(t.stats.bought, 1, 'one purchase, never resent'); assert.equal(t.f.Trade.run, null); assert.match(t.f.Trade.message, /Goods purchase was not confirmed/);
+});
+test('auto trade stops on death, manual control and the Stop button, and closes an open merchant', () => {
+  let t = tradeFixture(); t.f.Trade.start(); t.step(); t.f.World.isDead = () => true; t.step();
+  assert.equal(t.f.Trade.run, null); assert.match(t.f.Trade.message, /died/);
+  t = tradeFixture(); t.f.Trade.start(); t.step(); t.f.Manual.lastAt = 999999; t.step();
+  assert.equal(t.f.Trade.run, null); assert.match(t.f.Trade.message, /manual control/);
+  t = tradeFixture(); t.f.Trade.start(); for (let i = 0; i < 6; i++) t.step(); assert.ok(t.gp.shop, 'the merchant is open');
+  t.f.Trade.cancel(); assert.equal(t.f.Trade.run, null); assert.ok(t.f.commands.some(c => c.kind === 'npc-close'));
+});
+test('auto trade takes the Controller turn and reports Trading', () => {
+  const t = tradeFixture(), f = t.f; f.Trade.start();
+  f.advance(600); f.Controller.tick(); assert.equal(f.Controller.mode, 'trading');
+  f.Trade.cancel(); f.advance(600); f.Controller.tick(); assert.notEqual(f.Controller.mode, 'trading');
+});
+test('auto trade refills potions at the town potion merchant before buying goods', () => {
+  const t = tradeFixture(), f = t.f, v = f.Trade.town('CH').services.vendor;
+  f.World.ents.set(400, { gid: 400, kind: 'npc', name: 'Potion merchant', refObjId: v.refObjId, regionId: v.regionId, x: v.x, y: v.y, z: v.z });
+  const r = f.Restock.cfg(); r.hp.on = true; r.hp.refObjId = 15; r.hp.low = 5; r.hp.target = 100; r.mp.on = false;
+  t.gp.inventory.push({ slot: 13, refObjId: 15, typeFlags: 2284, quantity: 10 });
+  f.Trade.start(); t.run();
+  assert.equal(f.Trade.run, null, f.Trade.message);
+  assert.deepEqual([...t.stats.potions], [90], 'topped up from 10 to the 100 target, once, before the goods');
+  assert.equal(t.stats.buys.length, 3);
+});
+test('WalkBack.startTo walks to any point, reports arrival inside the wider radius and failures to the caller', () => {
+  const f = fixture(); let done = 0, failed = '';
+  const dest = { regionId: 1, x: 1000, y: 0, z: 100 };
+  assert.equal(f.WalkBack.startTo(dest, { label: 'the trade merchant', stop: 120, onDone: () => done++, onFail: r => { failed = r; } }), true);
+  assert.match(f.WalkBack.status(), /Walking to the trade merchant/);
+  f.Controller.tick(); assert.equal(f.commands.at(-1).kind, 'move');
+  f.World.gp.pose.x = 850; f.advance(1000); f.WalkBack.tick();
+  assert.equal(done, 0, 'still outside the 120 radius');
+  f.World.gp.pose.x = 890; f.advance(1000); f.WalkBack.tick();
+  assert.equal(done, 1); assert.equal(f.WalkBack.active, null); assert.equal(f.Hunt.running, false, 'arrival never starts hunting');
+  f.WalkBack.startTo(dest, { label: 'x', onFail: r => { failed = r; } }); f.Manual.lastAt = 123456; f.WalkBack.tick();
+  assert.match(failed, /Manual control/); assert.equal(f.WalkBack.active, null);
+  assert.equal(f.WalkBack.startTo({ regionId: 1, x: 1, y: 0, z: 1 }, { onFail: r => { failed = r; } }) !== undefined, true);
+});
+function mapFixture() {
+  const f = fixture(), map = f.LeanMap;
+  const input = () => ({ _value: '', get value() { return this._value; }, set value(v) { this._value = String(v); },
+    focus() { this.focused = true; }, select() { this.selected = true; } });
+  map.spotX = input(); map.spotY = input(); map.coordinateText = input();
+  f.World.gp.pose = { regionId: (92 << 8) | 135, x: 125, y: 37, z: 459 };
+  return f;
+}
+test('Map groups coordinate fields and actions in compact rows', () => {
+  const nodes = [];
+  const document = { createElement(tag) {
+    const events = {}, node = { tag, children: [], className: '', value: '', dataset: {},
+      classList: { add() {} }, setAttribute() {}, append(...children) { this.children.push(...children); },
+      addEventListener(name, fn) { events[name] = fn; }, click() { events.click?.(); }, querySelectorAll() { return []; } };
+    nodes.push(node); return node;
+  } };
+  const f = fixture(document), map = f.LeanMap;
+  map.bind = () => {}; map.render = () => {};
+  const parent = document.createElement('div');
+  map.draw(parent);
+  const find = name => nodes.find(n => n.className === name);
+  assert.equal(find('map-spot-header').children[0].textContent, 'Set actual position');
+  assert.equal(find('map-spot-fields').children.length, 3);
+  assert.equal(find('map-spot-fields').children[0].children[1], map.spotX);
+  assert.equal(find('map-spot-fields').children[1].children[1], map.spotY);
+  assert.equal(find('map-spot-fields').children[2].textContent, 'Set spot');
+  assert.deepEqual(find('map-current-position').children.slice(1).map(n => n.textContent), ['Get position', 'Copy']);
+  assert.equal(map.coordinateText.readOnly, true);
+  map.spotX.value = '0'; map.spotY.value = '0';
+  find('map-spot-fields').children[2].click();
+  assert.equal(f.Settings.profile.hunt.center.regionId, (92 << 8) | 135);
+  let reads = 0, copies = 0;
+  map.getCoordinates = () => { reads++; }; map.copyCoordinates = () => { copies++; };
+  find('map-current-position').children[1].click(); find('map-current-position').children[2].click();
+  assert.equal(reads, 1); assert.equal(copies, 1);
+});
+test('map coordinates save the displayed X/Y in the correct region and character profile', () => {
+  const f = mapFixture(), map = f.LeanMap; let centers = 0;
+  f.Settings.useCharacter('MapTester'); f.bus.on('center', () => centers++);
+  map.spotX.value = '-193'; map.spotY.value = '192';
+  assert.equal(map.setCoordinates(), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(f.Settings.profile.hunt.center)), { regionId: (93 << 8) | 133, x: 1910, y: 37, z: 0 });
+  assert.equal(centers, 1); assert.equal(map.picked, null); assert.equal(map.dirty, true);
+  f.timers.filter(t => t.ms === 250).forEach(t => t.fn());
+  const saved = JSON.parse(f.storage.get('sroBotLean:v1:profile:MapTester'));
+  assert.equal(saved.hunt.center.x, 1910); assert.equal(saved.hunt.center.regionId, (93 << 8) | 133);
+  assert.equal(f.commands.length, 0, 'saving a spot sends no movement or combat command');
+});
+test('map coordinates reject empty, fractional, non-finite and out-of-world input without changing a mark or spot', () => {
+  const f = mapFixture(), map = f.LeanMap, center = f.Settings.profile.hunt.center;
+  const mark = map.picked = { regionId: 1, x: 20, z: 30 };
+  let saves = 0; f.Settings.saveProfile = () => saves++;
+  for (const [x, y] of [['', '1'], ['1', '  '], ['abc', '2'], ['Infinity', '0'], ['1.5', '0'], ['0', 'NaN'],
+    ['-25921', '0'], ['23232', '0'], ['0', '-17665'], ['0', '6912']]) {
+    map.spotX.value = x; map.spotY.value = y;
+    assert.equal(map.setCoordinates(), false, `${x}, ${y}`);
+    assert.equal(f.Settings.profile.hunt.center, center); assert.equal(map.picked, mark);
+  }
+  assert.equal(saves, 0); assert.equal(f.commands.length, 0);
+});
+test('map coordinates accept zero and outdoor bounds across sector boundaries', () => {
+  for (const [x, y, regionId, localX, localZ] of [[0, 0, (92 << 8) | 135, 0, 0],
+    [-25920, -17664, 0, 0, 0], [23231, 6911, (127 << 8) | 255, 1910, 1910]]) {
+    const f = mapFixture(), map = f.LeanMap;
+    map.spotX.value = x; map.spotY.value = y;
+    assert.equal(map.setCoordinates(), true);
+    assert.deepEqual(JSON.parse(JSON.stringify(f.Settings.profile.hunt.center)), { regionId, x: localX, y: 37, z: localZ });
+    f.World.gp.pose = f.Settings.profile.hunt.center;
+    assert.equal(map.getCoordinates(), `X ${x}, Y ${y}`);
+  }
+});
+test('current map coordinates fill the fields without changing the hunting spot', async () => {
+  const f = mapFixture(), map = f.LeanMap, center = f.Settings.profile.hunt.center;
+  let copied = '';
+  f.win.navigator = { clipboard: { writeText: async text => { copied = text; } } };
+  assert.equal(map.getCoordinates(), 'X 12, Y 45');
+  assert.equal(map.spotX.value, '12'); assert.equal(map.spotY.value, '45'); assert.equal(copied, '');
+  f.World.gp.pose.x = 200;
+  await map.copyCoordinates();
+  assert.equal(copied, 'X 20, Y 45', 'copy fetches a fresh position');
+  assert.equal(map.coordinateText.value, copied); assert.match(f.notices.at(-1), /copied/);
+  assert.equal(f.Settings.profile.hunt.center, center); assert.equal(f.commands.length, 0);
+});
+test('map copy offers selected coordinates when the clipboard API is missing or refused', async () => {
+  for (const navigator of [undefined, { clipboard: { writeText: async () => { throw Error('denied'); } } }]) {
+    const f = mapFixture(); f.win.navigator = navigator;
+    await f.LeanMap.copyCoordinates();
+    assert.equal(f.LeanMap.coordinateText.value, 'X 12, Y 45');
+    assert.equal(f.LeanMap.coordinateText.focused, true); assert.equal(f.LeanMap.coordinateText.selected, true);
+    assert.match(f.notices.at(-1), /Clipboard unavailable/);
+  }
+});
+test('map coordinate actions refuse disconnected, missing, partial and dungeon positions', async () => {
+  for (const state of ['disconnected', 'missing', 'partial', 'dungeon']) {
+    const f = mapFixture(), map = f.LeanMap, center = f.Settings.profile.hunt.center;
+    map.spotX.value = '1'; map.spotY.value = '2';
+    if (state === 'disconnected') f.World.phase = 'disconnected';
+    if (state === 'missing') f.World.gp = null;
+    if (state === 'partial') delete f.World.gp.pose.z;
+    if (state === 'dungeon') f.World.gp.pose.regionId = 0x8001;
+    let copies = 0; f.win.navigator = { clipboard: { writeText: async () => { copies++; } } };
+    assert.equal(map.getCoordinates(), null); await map.copyCoordinates();
+    assert.equal(map.setCoordinates(), false);
+    assert.equal(copies, 0); assert.equal(f.Settings.profile.hunt.center, center);
+    assert.equal(map.spotX.value, '1'); assert.equal(map.spotY.value, '2'); assert.equal(f.commands.length, 0);
+  }
+});
 test('filters foreign ownership and permits own/party claims', () => {
   const f = fixture(), d = f.drop(); d.groundItem.ownerJid = 2;
   assert.equal(f.Loot.choose(), null);
@@ -415,6 +757,31 @@ test('item rules decide what the town trip stores and sells', () => {
   f.World.gp.inventory.push({ slot: 20, refObjId: 1003, typeFlags: 108, quantity: 1, name: 'Other item' });
   assert.equal(f.Town.depositItem(f.World.gp.inventory.at(-1), true), true, 'other bag items with a store rule are deposited');
 });
+test('chosen primary and secondary gear is protected and balance moves rule items between bag and pet', () => {
+  const f = townFixture(), gp = f.World.gp, pet = f.pet;
+  const spare = { slot: 20, refObjId: 1003, typeFlags: 108, quantity: 1 };
+  gp.inventory.push(spare);
+  const key = f.BuffGear.key(spare);
+  f.ItemRules.set([1003], { act: 'sell' });
+  assert.equal(f.Town.sellableBag(spare), true, 'a Sell rule sells it');
+  f.ItemRules.setGear('secondaryWeapon', key);
+  assert.deepEqual([f.Town.sellableBag(spare), f.Town.sellable(spare), f.Town.depositItem(spare, true)], [false, false, false], 'chosen gear is never sold or stored');
+  f.ItemRules.set([1003], { act: 'drop' }); f.ItemRules.dropTick();
+  assert.equal(f.commands.some(c => c.kind === 'item-drop' && c.slot === 20), false, 'nor dropped');
+  f.ItemRules.set([1003], { act: 'store' }); f.ItemRules.setGear('secondaryWeapon', null);
+  // balance: off by default, then moves a rule item toward the side with more room
+  pet.status = pet.inventory.length + 10; const n = f.commands.length;
+  f.ItemRules.balanceTick(); assert.equal(f.commands.length, n, 'off by default');
+  f.ItemRules.cfg().balance = true; f.ItemRules.setGear('secondaryWeapon', key); f.ItemRules.balanceTick();
+  assert.equal(f.commands.slice(n).some(c => c.kind === 'cos-transfer'), false, 'chosen gear does not move');
+  f.ItemRules.setGear('secondaryWeapon', null);
+  const free = f.World.freeBagSlots();
+  for (let s = 21; s < gp.inventorySlotCount && f.World.freeBagSlots() > 0; s++) gp.inventory.push({ slot: s, refObjId: 2000 + s, typeFlags: 108, quantity: 1 });
+  f.ItemRules.balanceTick();
+  const cmd = f.commands.at(-1);
+  assert.equal(cmd.kind, 'cos-transfer'); assert.equal(cmd.toCos, true); assert.equal(cmd.source, 20, 'the rule item goes to the roomier pet');
+  assert.ok(free >= 0);
+});
 test('item rules drop from the bag and the pet, one at a time, never worn gear', () => {
   const f = townFixture(), gp = f.World.gp;
   gp.inventory.push({ slot: 20, refObjId: 1003, typeFlags: 108, quantity: 1 });
@@ -445,6 +812,7 @@ test('item codenames give race, gender, degree, type and the filters', () => {
   assert.deepEqual([f.ItemRules.info(502).group, f.ItemRules.info(8).group, f.ItemRules.info(503).group], ['accessory', 'potion', 'alchemy']);
   const ids = filter => JSON.parse(JSON.stringify(f.ItemRules.list(filter).map(i => i.id)));
   assert.deepEqual(ids({ group: 'equipment', degrees: new Set([9]) }), [97, 4040]);
+  assert.deepEqual(ids({ sox: 'any' }), [4040]); assert.deepEqual(ids({ sox: '3' }), [4040]); assert.deepEqual(ids({ sox: '1' }), []);
   assert.deepEqual(ids({ race: 'EU', kind: 'Protector' }), [500]);
   assert.deepEqual(ids({ query: 'potion' }), [8]);
   f.ItemRules.set([502], { act: 'sell' }); assert.deepEqual(ids({ custom: true }), [502], 'custom: only items with a rule');
@@ -458,6 +826,11 @@ test('native metadata checks flat and percent MP costs', () => {
   const f = fixture(); f.World.rebuildCatalog([{ id: 5, mp: 10, mpPercent: 20 }]);
   assert.equal(f.Combat.mpOk(5, { mp: 29, maxMp: 100 }), false);
   assert.equal(f.Combat.mpOk(5, { mp: 30, maxMp: 100 }), true);
+});
+test('skill names use the official English text, also after the catalog is rebuilt', () => {
+  const f = fixture(); f.Learned.english.set(7, 'Thunderdragon force');
+  f.World.rebuildCatalog([{ id: 7, name: 'SKILL_CH_LIGHTNING_A' }]);
+  assert.equal(f.World.skillName(7), 'Thunderdragon force');
 });
 test('return mode owns movement; arrival can start hunting', () => {
   const f = fixture(); f.Settings.profile.hunt.center.x = 300; f.WalkBack.start(true); f.Controller.tick();
@@ -572,19 +945,148 @@ test('walk-back chains short legs across regions and starts hunting 10 km away',
   const legLog = f.Log.lines.find(e => e.code === 'walk-leg');
   assert.ok(legLog, 'leg progress is logged'); assert.match(f.Activity.userMessage(legLog), /^Walking to the hunting spot: leg \d+ of about \d+\.$/);
 });
-test('a blocked leg end is snapped to a nearby walkable tile and the walk continues', () => {
+test('a blocked leg end is walked to its neighbourhood and the walk continues', () => {
   const f = fixture();
   f.Settings.profile.hunt.center = { regionId: 6, x: 500, y: 0, z: 100 };
   const blocked = new Uint8Array(9216);
   blocked[5 * 96 + 29] = 1; // the straight leg end, about (2500, 100) from the start
   f.Navigation.install(navWindow(1, blocked));
   f.WalkBack.start(true); f.WalkBack.tick();
-  assert.ok(f.WalkBack.active, 'the walk is not cancelled');
-  assert.equal(f.WalkBack.active.legTries, 1, 'the blocked end was replaced');
-  const local = f.Navigation.local(f.WalkBack.active.leg.target);
-  assert.equal(f.Navigation.open(local.x, local.z), true, 'the new leg end is walkable');
-  f.advance(1000); f.WalkBack.tick();
+  const a = f.WalkBack.active;
+  assert.ok(a, 'the walk is not cancelled');
+  // A leg end only gives the direction: no replacement end is searched for.
+  assert.equal(a.legTries, 0, 'the leg end is kept');
+  const end = f.Navigation.local(a.travel.route.at(-1)), target = f.Navigation.local(a.leg.target);
+  assert.equal(f.Navigation.open(end.x, end.z), true, 'the route ends on a walkable tile');
+  assert.ok(Math.hypot(end.x - target.x, end.z - target.z) <= 240, 'near the leg end');
   assert.equal(f.commands.at(-1).kind, 'move');
+});
+// The game's clipper stands in as a fake: it walks every move except those its barrier
+// stops, so it can disagree with the flat grid both ways (lean-clip-route.js).
+function fakeClipper(f, barrier = () => false) {
+  const clipper = { clips: 0, install() {}, clip(from, to) { clipper.clips++; return barrier(from, to) ? { ...from } : { ...to, y: from.y }; } };
+  f.ClipRoute.clipper = clipper; f.ClipRoute.ready = true; f.ClipRoute.moves = new Map();
+  return clipper;
+}
+const touches = (a, b, x) => Math.min(a.x, b.x) <= x && Math.max(a.x, b.x) >= x && a.x !== b.x;
+test('the clipper keeps a flat route it walks', () => {
+  const f = fixture(); f.Navigation.install(navWindow(1));
+  const clipper = fakeClipper(f), to = { regionId: 1, x: 900, y: 0, z: 400 };
+  assert.equal(JSON.stringify(f.Navigation.plan({ regionId: 1, x: 100, y: 0, z: 100 }, to)), JSON.stringify([to]));
+  assert.ok(clipper.clips > 0, 'the route was checked');
+});
+test('the clipper plans around a wall the flat grid does not know, and never returns the flat route through it', () => {
+  const f = fixture(); f.Navigation.install(navWindow(1));
+  const wall = (a, b) => touches(a, b, 1000) && Math.min(a.z, b.z) < 1100;
+  fakeClipper(f, wall);
+  const from = { regionId: 1, x: 900, y: 0, z: 900 }, route = f.Navigation.plan(from, { regionId: 1, x: 1100, y: 0, z: 900 });
+  assert.ok(route.length > 1);
+  let p = from;
+  for (const q of route) {
+    const n = Math.max(1, Math.ceil(Math.hypot(q.x - p.x, q.z - p.z) / 40));
+    for (let i = 1; i <= n; i++) assert.ok(!wall(p, { x: p.x + (q.x - p.x) * i / n, z: p.z + (q.z - p.z) * i / n }), 'no step crosses the wall');
+    p = q;
+  }
+  fakeClipper(f, (a, b) => touches(a, b, 500));
+  assert.equal(f.Navigation.plan({ regionId: 1, x: 100, y: 0, z: 100 }, { regionId: 1, x: 900, y: 0, z: 400 }).length, 0, 'a stopped flat route is not walked');
+});
+test('the clipper walks a floor the flat grid sees as closed', () => {
+  const f = fixture(), blocked = new Uint8Array(9216);
+  for (let tz = 0; tz < 96; tz++) blocked[tz * 96 + 50] = 1;
+  f.Navigation.install(navProduct([], blocked));
+  const from = { regionId: 1, x: 800, y: 0, z: 400 }, to = { regionId: 1, x: 1200, y: 0, z: 400 };
+  assert.equal(f.Navigation.plan(from, to)?.length ?? 0, 0, 'the flat grid is closed');
+  fakeClipper(f, (a, b) => touches(a, b, 1010) && !(a.z >= 520 && a.z <= 600 && b.z >= 520 && b.z <= 600));
+  const route = f.Navigation.plan(from, to);
+  assert.ok(route.length > 1 && route.every(p => Number.isFinite(p.y)));
+});
+test('pursuit and detour candidates plan on the flat grid alone, without clipper searches', () => {
+  const f = fixture(); f.Navigation.install(navWindow(1));
+  const clipper = fakeClipper(f, (a, b) => touches(a, b, 500));
+  const route = f.Navigation.plan({ regionId: 1, x: 100, y: 0, z: 100 }, { regionId: 1, x: 900, y: 0, z: 400 }, 0, { clip: false });
+  assert.equal(route.length, 1, 'the flat route, unchecked');
+  assert.equal(clipper.clips, 0);
+});
+test('a long clipper search is answered later, slice by slice, while the walker waits', () => {
+  const f = fixture(); f.Navigation.install(navWindow(1));
+  // Each clip takes a millisecond, so a search spans several 5 ms slices.
+  const wall = (a, b) => touches(a, b, 1000) && Math.min(a.z, b.z) < 1100;
+  const clipper = fakeClipper(f, wall), clip = clipper.clip;
+  clipper.clip = (...args) => { f.advance(1); return clip(...args); };
+  f.World.gp.pose = { regionId: 1, x: 900, y: 0, z: 900 };
+  const owner = {}, goal = { regionId: 1, x: 1100, y: 0, z: 900 };
+  const first = f.Navigation.next(owner, goal);
+  assert.equal(first.planning, true, 'still searching');
+  for (let n = 0; n < 200 && f.timers.length; n++) f.timers.shift().fn();
+  const move = f.Navigation.next(owner, goal);
+  assert.ok(move.point, 'the route is ready');
+  assert.ok(owner.travel.route.length > 1);
+});
+test('a destination the clipper cannot reach is not searched again at once', () => {
+  const f = fixture(); f.Navigation.install(navWindow(1));
+  const clipper = fakeClipper(f, (a, b) => touches(a, b, 500));
+  const from = { regionId: 1, x: 100, y: 0, z: 100 }, to = { regionId: 1, x: 900, y: 0, z: 400 };
+  assert.equal(f.Navigation.plan(from, to).length, 0);
+  const clips = clipper.clips;
+  assert.equal(f.Navigation.plan(from, to).length, 0);
+  assert.ok(clipper.clips - clips < 20, 'only the flat route was checked again');
+  f.advance(31000);
+  f.Navigation.plan(from, to);
+  assert.ok(clipper.clips - clips > 20, 'searched again after 30 s');
+});
+test('a search that failed only around avoided spots does not hold back the plain one', () => {
+  const f = fixture(); f.Navigation.install(navWindow(1));
+  // The clipper's only way across x = 1000 is the gap at z 1000-1080, off the straight line
+  // and covered by the avoided spot; it keeps the walker in the home region, so no other
+  // region's gap offers a way.
+  const wall = (a, b) => a.regionId !== 1 || b.regionId !== 1 || touches(a, b, 1000) && !(Math.min(a.z, b.z) >= 1000 && Math.max(a.z, b.z) <= 1080);
+  fakeClipper(f, wall);
+  const from = { regionId: 1, x: 900, y: 0, z: 900 }, to = { regionId: 1, x: 1100, y: 0, z: 900 };
+  assert.equal(f.Navigation.plan(from, to, 0, { avoid: [{ regionId: 1, x: 1000, y: 0, z: 1040, r: 80 }] }).length, 0, 'no way around the avoided spot');
+  const plain = f.Navigation.plan(from, to);
+  assert.ok(plain.length > 0, 'the plain search still runs');
+});
+// An object the collision map does not know about: the character stops against it while moves are sent.
+function pillarWorld(f, pillar = { x: 270, z: 100, r: 15 }) {
+  return () => {
+    const move = [...f.commands].reverse().find(c => c.kind === 'move');
+    if (!move) return;
+    const pose = f.World.gp.pose, dx = move.destination.x - pose.x, dz = move.destination.z - pose.z, d = Math.hypot(dx, dz);
+    if (!d) return;
+    const k = Math.min(18, d) / d, next = { ...pose, x: pose.x + dx * k, z: pose.z + dz * k };
+    if (Math.hypot(next.x - pillar.x, next.z - pillar.z) >= pillar.r) f.World.gp.pose = next;
+  };
+}
+test('a walk that stops against an unmapped object sidesteps it instead of sitting', () => {
+  const f = fixture(), step = pillarWorld(f);
+  f.WalkBack.startTo({ regionId: 1, x: 600, y: 0, z: 100 }, { label: 'the test spot', stop: 12 });
+  let ticks = 0;
+  while (f.WalkBack.active && ticks++ < 120) { f.WalkBack.tick(); step(); f.advance(900); }
+  assert.equal(f.WalkBack.active, null, 'the walk ended');
+  assert.ok(f.World.gp.pose.x >= 590, 'the character got past the pillar');
+});
+test('a walk that cannot get past reports a clear message and stops after a bounded number of tries', () => {
+  const f = fixture(); let failed = '';
+  const step = pillarWorld(f, { x: 270, z: 100, r: 1e5 });
+  f.WalkBack.startTo({ regionId: 1, x: 600, y: 0, z: 100 }, { label: 'the test spot', onFail: r => { failed = r; } });
+  let ticks = 0;
+  while (f.WalkBack.active && ticks++ < 200) { f.WalkBack.tick(); step(); f.advance(900); }
+  assert.equal(f.WalkBack.active, null);
+  assert.match(failed, /blocked|obstacle/i);
+  assert.ok(ticks < 30, 'gave up within about half a minute, not after minutes of standing');
+});
+test('town and restock walking recover from an unmapped object the same way', () => {
+  let f = fixture(), step = pillarWorld(f);
+  const dest = { regionId: 1, x: 600, y: 0, z: 100 };
+  f.Town.trip = { phase: 'walk-vendor', at: f.Ticker ? 0 : 0, travel: null, lastPose: null, progressAt: 100000, movedAt: -Infinity, retryAt: 0 };
+  let ticks = 0, arrived = false;
+  while (!arrived && f.Town.trip && ticks++ < 150) { arrived = f.Town.walk(dest); step(); f.advance(900); }
+  assert.equal(arrived, true, 'town walk got past the pillar');
+  f = fixture(); step = pillarWorld(f);
+  f.Restock.trip = { phase: 'vendor', route: [{ regionId: 1, x: 100, y: 0, z: 100 }, dest], index: 1, at: 0, movedAt: 0, best: Infinity, progressAt: 100000, manualAt: f.Manual.lastAt };
+  ticks = 0; arrived = false;
+  while (!arrived && f.Restock.trip && ticks++ < 150) { arrived = f.Restock.walk(); step(); f.advance(900); }
+  assert.ok(f.Restock.trip, 'restock walk was not failed'); assert.equal(arrived, true, 'restock walk got past the pillar');
 });
 test('resume hunting walks to a far spot instead of asking for manual steps', () => {
   const f = fixture();
@@ -658,6 +1160,68 @@ test('walk-back follows a navdata route and starts hunting on arrival', async ()
   assert.equal(f.Hunt.running, true, 'hunting started on arrival');
   assert.ok(f.Log.lines.some(entry => /using navdata \(line\)/.test(entry.text)), 'the log names the route source');
 });
+// A clipper stand-in: the game map has a wall at x 5500 below z 5700 that the route data does not know.
+function wallClipper() {
+  const abs = p => ({ x: (p.regionId & 255) * 1920 + p.x, z: (p.regionId >>> 8 & 127) * 1920 + p.z });
+  const blocked = (a, b) => (a.x < 5500) !== (b.x < 5500) && a.z + (b.z - a.z) * (5500 - a.x) / (b.x - a.x) < 5700;
+  return { surface: p => ({ ...p }), available: () => true, clip: (from, to) => blocked(abs(from), abs(to)) ? { ...from } : { ...to } };
+}
+function checkedArea(f, name, columns = 6) {
+  const grid = navGrid(5000, 5000, columns, 6, 200);
+  const buffer = navBinary(grid.nodes, grid.edges, { originX: 5000, originZ: 5000 });
+  f.Route.setAreas([navArea(name, grid.nodes, buffer)]); f.Route.setLoader(() => buffer);
+  f.Hook.assetUrl = 'https://opensro.online/assets/entry-test.js';
+  return { from: navPose(5000, 5000), to: navPose(5000 + (columns - 1) * 200, 5000) };
+}
+test('a corridor is checked against the game map: an edge the collision does not walk is banned and walked around', async () => {
+  const f = fixture(), { from, to } = checkedArea(f, 'cliff'), clipper = wallClipper();
+  f.RouteCheck.region = async regionId => ({ regionId, clipper });
+  assert.equal(f.RouteCheck.available(), true);
+  const route = await f.Route.checked(from, to);
+  assert.ok(route, f.Route.message);
+  assert.ok(route.points.some(p => navAbs(p).z >= 5400), 'the corridor crosses where a short way round the wall exists');
+  assert.ok(f.Route.bans('cliff').has('2>3') && f.Route.bans('cliff').has('3>2'), 'the edge straight through the wall is banned, both ways, for the session');
+  assert.ok(f.Route.plan(from, to).points.some(p => navAbs(p).z >= 5400), 'later plans in the area keep the bans');
+  const g = fixture(), ends = checkedArea(g, 'unknown');
+  g.RouteCheck.region = async () => null;
+  const straight = await g.Route.checked(ends.from, ends.to);
+  assert.ok(straight); assert.equal(straight.points.some(p => navAbs(p).z > 5000), false, 'without collision data the corridor is walked as before');
+  assert.equal(g.Route.bans('unknown').size, 0);
+  const h = fixture(), shut = checkedArea(h, 'shut');
+  h.RouteCheck.region = async regionId => ({ regionId, clipper: { surface: p => ({ ...p }), available: () => true, clip: from => ({ ...from }) } });
+  assert.equal(await h.Route.checked(shut.from, shut.to), null, 'no corridor walks on the game map');
+  assert.match(h.Route.message, /walks on the game map/);
+});
+test('the asset worker is read from the page bootstrap when the worker hook ran too late; without it the walk is unchecked and says so', async () => {
+  const f = fixture(), bootstrap = { querySelector: () => ({ src: 'https://opensro.online/assets/bootstrap-X.js' }) };
+  assert.equal(f.RouteCheck.available(), false, 'no hook and no page: unchecked');
+  f.win.document = bootstrap;
+  f.win.fetch = async () => ({ text: async () => 'a=1;const w=new Worker(new URL("/assets/entry-C_test.js",""+import.meta.url),{type:"module",name:"sro-assets"});' });
+  assert.equal(f.RouteCheck.available(), true);
+  assert.equal(await f.RouteCheck.locate(), 'https://opensro.online/assets/entry-C_test.js');
+  assert.equal(f.Hook.assetUrl, 'https://opensro.online/assets/entry-C_test.js', 'found once for the session');
+  const g = fixture();
+  g.win.document = bootstrap; g.win.fetch = async () => ({ text: async () => 'no worker here' });
+  assert.equal(await g.RouteCheck.locate(), '');
+  const graph = { count: 2, x: Int32Array.from([5000, 5200]), z: Int32Array.from([5000, 5000]), y: Int16Array.from([0, 0]) };
+  assert.equal(await g.RouteCheck.verify('none', graph, 0, 1), null, 'the check did not run');
+  assert.ok(g.Log.lines.some(entry => /asset loader was not found/.test(entry.text)), 'the log says the route is unchecked');
+});
+test('walk-back waits for the checked corridor, then walks round the wall the route data does not know', async () => {
+  const f = fixture(), { from, to } = checkedArea(f, 'checked', 15), clipper = wallClipper();
+  f.RouteCheck.region = async regionId => ({ regionId, clipper });
+  assert.equal(await f.Route.ensure(from, to), true);
+  f.World.gp.pose = { ...from }; f.Settings.profile.hunt.center = { ...to };
+  f.Navigation.install(navWindow(from.regionId));
+  f.WalkBack.start(true);
+  assert.equal(f.WalkBack.active.source, 'planning');
+  f.advance(7000); f.WalkBack.tick();
+  assert.equal(f.WalkBack.active.source, 'planning', 'a running check is not cut short by the plain loading wait');
+  for (let n = 0; n < 200 && f.WalkBack.active.source === 'planning'; n++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.WalkBack.active.source, 'navdata');
+  assert.ok(f.WalkBack.active.route.some(p => navAbs(p).z >= 5400), 'the walked corridor goes round the wall');
+  assert.ok(f.Log.lines.some(entry => /checking it against the game map/.test(entry.text)));
+});
 test('walk-back falls back to legs without route data or between different areas', async () => {
   let f = fixture();
   f.Route.setAreas([]);
@@ -683,7 +1247,7 @@ test('walk-back falls back to legs without route data or between different areas
   assert.ok(f.notices.some(n => /Walking back to the hunting spot/.test(n)));
   assert.ok(f.Log.lines.some(entry => /walking in legs/.test(entry.text)), 'the log names the fallback source');
 });
-test('a stuck navdata route re-plans once, then hands over to the leg fallback', async () => {
+test('a stuck navdata route skips two unreachable points, re-plans once, then hands over to the leg fallback', async () => {
   const f = fixture();
   const grid = navGrid(5000, 5000, 15, 1, 200);
   const buffer = navBinary(grid.nodes, grid.edges, { originX: 5000, originZ: 5000 });
@@ -697,8 +1261,13 @@ test('a stuck navdata route re-plans once, then hands over to the leg fallback',
   assert.equal(f.WalkBack.active.source, 'navdata');
   f.Navigation.next = () => ({ error: 'No walkable route found through the loaded collision map.' });
   f.WalkBack.tick();                                // consume the start waypoint
-  f.advance(1000); f.WalkBack.tick();               // the next hop fails, so re-plan
+  const index = f.WalkBack.active.index;
+  f.advance(1000); f.WalkBack.tick();               // an unreachable waypoint is skipped
+  f.advance(1000); f.WalkBack.tick();               // and the next one
+  assert.equal(f.WalkBack.active.index, index + 2); assert.equal(f.WalkBack.active.navReplans, 0);
+  f.advance(1000); f.WalkBack.tick();               // a third in a row re-plans
   assert.equal(f.WalkBack.active.source, 'navdata'); assert.equal(f.WalkBack.active.navReplans, 1);
+  assert.equal(f.WalkBack.active.skips, 0, 'a new corridor may skip again');
   f.Route.plan = () => null;
   f.advance(21000); f.WalkBack.tick();               // the re-planned start is at the current pose
   f.advance(21000); f.WalkBack.tick();               // no progress now, so the leg fallback takes over
@@ -876,6 +1445,28 @@ test('alt account applies to the main account listing and waits for the answer',
   const f = joinMainFixture({ rows: [{ id: 7, name: 'mainchar', members: 1, type: 1, min: 1, max: 90 }] });
   f.Controller.tick(); assert.deepEqual(jm(f.commands[0]), { kind: 'party-match-join', id: 7 });
   f.advance(5000); f.Controller.tick(); assert.equal(f.commands.length, 1);
+});
+
+test('auto-accept answers only applicants on the name list, and everyone when the list is empty', () => {
+  let f = fixture(); partyApplication(f);
+  f.Settings.profile.party.acceptNames = 'Friend, other'; f.Party.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'party-match-answer').length, 0, 'Applicant is not listed');
+  f.Settings.profile.party.acceptNames = 'friend,  APPLICANT'; f.Party.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'party-match-answer').length, 1, 'listed, case-insensitively');
+  f = fixture(); partyApplication(f); f.Settings.profile.party.acceptNames = ''; f.Party.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'party-match-answer').length, 1, 'empty list accepts everyone');
+});
+
+test('the alt leaves a party led by someone else only when asked to, and keeps the named leader party', () => {
+  const f = joinMainFixture(); const party = f.Settings.profile.party;
+  const inParty = leaderName => { f.World.gp.social = { localName: 'AltChar', self: 2, leader: 1, options: 1, members: [{ id: 1, name: leaderName }, { id: 2, name: 'AltChar' }], invitation: null }; };
+  inParty('Stranger'); f.Party.tick(); assert.equal(f.commands.filter(c => c.kind === 'party-leave').length, 0, 'off by default');
+  party.leaveIfNotLeader = true; f.Party.tick();
+  assert.equal(f.commands.filter(c => c.kind === 'party-leave').length, 1, 'leader is someone else');
+  f.advance(1000); f.Party.tick(); assert.equal(f.commands.filter(c => c.kind === 'party-leave').length, 1, 'not repeated at once');
+  const g = joinMainFixture(); g.Settings.profile.party.leaveIfNotLeader = true;
+  g.World.gp.social = { localName: 'AltChar', self: 2, leader: 1, options: 1, members: [{ id: 1, name: 'mainchar' }, { id: 2, name: 'AltChar' }], invitation: null };
+  g.Party.tick(); assert.equal(g.commands.filter(c => c.kind === 'party-leave').length, 0, 'the named leader, any letter case');
 });
 
 test('alt account applies again when the main never answered its application', () => {
@@ -1197,6 +1788,8 @@ test('party support is off by default, then heals the lowest member in range bef
   f.World.gp.attachedEffects = [{ gid: 60, skill: 2002, token: 1 }]; f.commands.length = 0;
   f.advance(2000); f.Controller.tick(); assert.deepEqual(casts(f), ['select 61', 'skill 2002 61'], 'Tank has it, Mage is next');
   f.World.gp.attachedEffects.push({ gid: 61, skill: 2002, token: 2 }); f.commands.length = 0;
+  f.advance(2000); f.Controller.tick(); assert.deepEqual(casts(f), ['skill 2002 1'], 'party is buffed: the caster gets it last');
+  f.World.gp.attachedEffects.push({ gid: 1, skill: 2002, token: 3 }); f.commands.length = 0;
   f.advance(2000); f.Controller.tick(); assert.deepEqual(casts(f), [], 'everyone is buffed');
   assert.match(f.Support.message, /healed and buffed/);
 });
@@ -1340,6 +1933,46 @@ test('speed scroll works during return travel and cannot interrupt a resurrectio
   f.advance(1000); f.WalkBack.start(); f.Controller.tick(); assert.equal(f.commands.at(-1).kind,'item-use');
   const g=fixture(); beginnerScroll(g); g.Resurrect.holdUntil=110000;
   assert.equal(g.SpeedScroll.tick(),false); assert.equal(g.commands.filter(c=>c.kind==='item-use').length,0);
+});
+function wornWithHammer(f, durability = 4) {
+  f.Settings.profile.potion.repairHammer.on = true;
+  f.World.gp.inventory.push(
+    { slot: 6, refObjId: 900, typeFlags: 44 | (6 << 7), durability, variance: '0', magic: [], tooltip: { fields: { canRepair: 1, varianceIntMin1c0: 10, varianceIntMax1c4: 10 } } },
+    { slot: 16, refObjId: 2401, typeFlags: 3820, quantity: 3, codename: 'ITEM_MALL_REPAIR_HAMMER' });
+  f.Hunt.start();
+}
+test('repair hammer is opt-in, used below the durability threshold and confirmed by the repair', () => {
+  const f = fixture(); const R = f.Settings.profile.potion.repairHammer; assert.deepEqual([R.on, R.pct], [false, 50]);
+  wornWithHammer(f); f.Settings.profile.potion.repairHammer.on = false;
+  f.Controller.tick(); assert.equal(f.commands.some(c => c.kind === 'item-use'), false, 'off by default');
+  f.Settings.profile.potion.repairHammer.on = true; f.Controller.tick();
+  assert.equal(f.commands.at(-1).kind, 'item-use'); assert.equal(f.commands.at(-1).slot, 16);
+  assert.equal(f.Controller.mode, 'repair hammer');
+  f.advance(1000); f.Controller.tick(); assert.equal(f.commands.filter(c => c.kind === 'item-use').length, 1, 'waits for the repair');
+  f.World.gp.inventory.find(i => i.slot === 6).durability = 10; f.Controller.tick();
+  assert.equal(f.RepairHammer.pending, null); assert.equal(f.RepairHammer.attempts, 0); assert.match(f.RepairHammer.message, /fine/);
+  f.advance(10000); f.Controller.tick(); assert.equal(f.commands.filter(c => c.kind === 'item-use').length, 1);
+});
+test('repair hammer waits for real wear, a hammer in the bag and hunting', () => {
+  const f = fixture(); wornWithHammer(f, 6); f.Controller.tick();
+  assert.equal(f.commands.some(c => c.kind === 'item-use'), false, '60% is above 50%');
+  const g = fixture(); wornWithHammer(g); g.World.gp.inventory = g.World.gp.inventory.filter(i => i.slot !== 16);
+  g.Controller.tick(); assert.equal(g.commands.some(c => c.kind === 'item-use'), false); assert.match(g.RepairHammer.message, /no repair hammer/);
+  const h = fixture(); wornWithHammer(h); h.Hunt.stop(); h.commands.length = 0; h.Controller.tick();
+  assert.equal(h.commands.some(c => c.kind === 'item-use'), false);
+  const k = fixture(); wornWithHammer(k); delete k.World.gp.inventory.find(i => i.slot === 6).tooltip; k.Controller.tick();
+  assert.equal(k.commands.some(c => c.kind === 'item-use'), false, 'an unknown maximum is not guessed');
+});
+test('unconfirmed repair hammer use backs off and stops after three attempts', () => {
+  const f = fixture(); wornWithHammer(f); f.Controller.tick();
+  for (let i = 0; i < 4; i++) { f.advance(9000); f.Controller.tick(); f.advance(90000); f.Controller.tick(); }
+  assert.equal(f.commands.filter(c => c.kind === 'item-use').length, 3); assert.match(f.RepairHammer.message, /3 attempts/);
+});
+test('a repair hammer or idle pet pickup error is logged without stopping the bot', () => {
+  const f = fixture(); wornWithHammer(f); f.RepairHammer.tick = () => { throw Error('boom'); };
+  f.Controller.tick(); assert.equal(f.Hunt.running, true); assert.notEqual(f.Controller.mode, 'error');
+  const g = fixture(); g.Hunt.stop(); g.Loot.idleTick = () => { throw Error('boom'); };
+  g.Controller.tick(); assert.equal(g.Controller.mode, 'idle');
 });
 test('res travel returns when radius shrinks and stops hunting if return cannot progress', () => {
   const f=resurrectionTravel(); f.Controller.tick(); f.World.gp.pose.x=270;
@@ -2105,6 +2738,57 @@ test('after reconnecting in town, far from the hunting spot, the bot does town s
   f.advance(4000); f.Controller.tick(); f.advance(4000); f.Controller.tick();
   assert.equal(began, true, 'revival-style town trip'); assert.equal(f.WalkBack.active, null); assert.equal(f.Reconnect.active(), false);
 });
+test('hunting from town far from the spot (dead at login, woke in town) does town services and reverses instead of walking', () => {
+  const f = fixture(); let began = null, arrived = 0;
+  f.Town.cfg().enabled = true; f.Town.detect = () => ({ key: 'KT' });
+  f.Town.begin = revival => { began = revival; f.Town.trip = { phase: 'revive-arrival' }; };
+  f.Town.arrived = () => { arrived++; };
+  f.Settings.profile.hunt.center = { regionId: 1, x: 1500, y: 0, z: 100 };
+  f.Hunt.start(); f.commands.length = 0;
+  f.Hunt.tick();
+  assert.equal(began, true, 'revival-style town trip'); assert.equal(arrived, 1, 'services start from where the character stands');
+  assert.equal(f.commands.some(c => c.kind === 'move' && c.destination?.x === 1500), false, 'no straight walk from town to the spot');
+  assert.equal(f.WalkBack.active, null);
+});
+test('far from the spot outside the town, hunting still returns the old way (town cycle untouched)', () => {
+  const f = fixture(); let began = null;
+  f.Town.cfg().enabled = true; f.Town.detect = () => null;
+  f.Town.begin = revival => { began = revival; };
+  f.Settings.profile.hunt.center = { regionId: 1, x: 1500, y: 0, z: 100 };
+  f.Hunt.start(); f.commands.length = 0;
+  f.Hunt.tick();
+  assert.equal(began, null, 'no town trip outside town');
+  assert.ok(f.commands.some(c => c.kind === 'move' && c.destination?.x === 1500), 'moves back toward the spot as before');
+});
+test('resume hunting in town with the town cycle on reverses instead of walking; elsewhere it still walks', () => {
+  let f = fixture(), began = null;
+  f.Town.cfg().enabled = true; f.Town.detect = () => ({ key: 'KT' });
+  f.Town.begin = revival => { began = revival; f.Town.trip = { phase: 'buy' }; };
+  f.Settings.profile.hunt.center = { regionId: 6, x: 500, y: 0, z: 100 };
+  assert.equal(f.Controller.resumeHunting('Back in the game'), 'town'); assert.equal(began, true); assert.equal(f.WalkBack.active, null);
+  f = fixture(); f.Town.cfg().enabled = false; f.Town.detect = () => ({ key: 'KT' });
+  f.Settings.profile.hunt.center = { regionId: 6, x: 500, y: 0, z: 100 };
+  assert.equal(f.Controller.resumeHunting('Back in the game'), 'walking', 'town cycle off: walks as before');
+});
+test('after reconnecting in town away from the scroll landing spot, the services start from where the character stands', () => {
+  const town = { key: 'KT' }, setup = f => {
+    const c = f.Town.cfg(); c.enabled = true; c.revive = true; c.arrival = { regionId: 1, x: 190000, y: 0, z: 100 };
+    for (const [index, role] of ['storage', 'vendor', 'smith', 'gate'].entries()) c[role] = { gid: 60 + index, refObjId: 600 + index, regionId: 1, x: 200100 + index * 40, y: 0, z: 100 };
+    const r = f.Restock.cfg(); r.hp.on = false; r.mp.refObjId = 15; r.mp.low = 5; r.mp.target = 50;
+    f.World.gp.inventory = [{ slot: 13, refObjId: 200, typeFlags: 0x09ec, quantity: 3 }, { slot: 14, refObjId: 201, typeFlags: 0x19ec, quantity: 2 }, { slot: 15, refObjId: 15, typeFlags: 4332, quantity: 1 }];
+  };
+  const { f, lose, back } = reconnectFixture(); f.Town.detect = () => town; setup(f);
+  lose(); back(); setup(f); f.World.gp.pose = { ...f.World.gp.pose, x: 200000 }; f.World.pose = () => f.World.gp.pose;
+  f.advance(4000); f.Controller.tick(); f.advance(4000); f.Controller.tick();
+  assert.ok(f.Town.trip, f.Town.message); assert.equal(f.Town.trip.revival, true);
+  assert.equal(f.Town.trip.phase, 'walk-storage', 'no waiting at the landing spot 1 km away');
+  assert.equal(f.Reconnect.active(), false);
+  // In another town none of the saved services are near: no town cycle (it would only time out).
+  const g = reconnectFixture(); let n = 0; g.f.Town.detect = () => (n++ % 2 ? { key: 'KT' } : { key: 'DW' }); setup(g.f);
+  g.lose(); g.back(); setup(g.f); g.f.World.gp.pose = { ...g.f.World.gp.pose, x: 200000 }; g.f.World.pose = () => g.f.World.gp.pose;
+  g.f.advance(4000); g.f.Controller.tick(); g.f.advance(4000); g.f.Controller.tick();
+  assert.equal(g.f.Town.trip, null); assert.equal(g.f.Reconnect.active(), false);
+});
 test('reconnect never fights the player: logout, disconnect, exit or a manual login cancel it; a lost login is reported', () => {
   for (const kind of ['logout', 'disconnect', 'exit', 'restart', 'login', 'enter-world']) {
     const { f, sent, lose } = reconnectFixture(); lose(); f.Hook.observers.forEach(fn => fn({ kind, password: 'secret' }));
@@ -2336,6 +3020,195 @@ test('town cycle recalls, confirms pet storage and purchases, repairs, reverses 
   assert.equal(commands.filter(c => c.kind === 'travel-gate').length, 1);
   assert.match(f.Town.message, /complete/);
 });
+test('without a reverse scroll the town cycle still runs, skips the statue and walks back to hunt', () => {
+  const f = townFixture(), gp = f.World.gp, commands = f.commands;
+  gp.inventory = gp.inventory.filter(i => i.slot !== 14);
+  f.UI.mount = f.UI.draw = f.UI.update = f.Ticker.start = () => {}; f.boot();
+  const phases = [];
+  let handled = 0;
+  for (let n = 0; n < 200; n++) {
+    f.Controller.tick();
+    if (f.Town.trip) phases.push(f.Town.trip.phase);
+    while (handled < commands.length) {
+      const c = commands[handled++];
+      if (c.kind === 'item-use') {
+        gp.inventory.find(i => i.slot === 13).quantity--;
+        f.bus.emit('phase', 'entering-world'); f.bus.emit('reset');
+        gp.pose.x = 100; f.Navigation.install(navProduct());
+      } else if (c.kind === 'move') gp.pose = { ...c.destination };
+      else if (c.kind === 'select') { gp.target = c.gid; gp.targetCapabilities = {60:4,61:1,62:9,63:0x20000080}[c.gid]; }
+      else if (c.kind === 'storage-open') gp.storage = { npc: c.gid, phase: 'open', capacity: 30, items: [] };
+      else if (c.kind === 'cos-transfer') {
+        const i = f.pet.inventory.find(i => i.slot === c.source);
+        gp.inventory.push({ ...i, slot: c.destination }); f.pet.inventory = f.pet.inventory.filter(i => i.slot !== c.source);
+      } else if (c.kind === 'storage-move') {
+        const i = gp.inventory.find(i => i.slot === c.move.source);
+        gp.storage.items.push({ ...i, slot: c.move.destination }); gp.inventory = gp.inventory.filter(i => i.slot !== c.move.source);
+      } else if (c.kind === 'shop-open') {
+        gp.shop = { npc: c.gid, offers: [{ refObjId: 15, name: 'MP', tab: 0, slot: 0, maxStack: 100, price: '10', previews: [{ refObjId: 15, typeFlags: 4332 }] }] };
+        gp.shopCompletionRevision++;
+      } else if (c.kind === 'cos-shop-sell') f.pet.inventory = f.pet.inventory.filter(i => i.slot !== c.slot);
+      else if (c.kind === 'shop-buy') gp.inventory.find(i => i.refObjId === 15).quantity += c.quantity;
+      else if (c.kind === 'shop-repair') gp.inventory.find(i => i.slot === 6).durability = 10;
+      else if (c.kind === 'npc-close') { gp.target = 0; gp.shop = null; gp.storage = null; }
+    }
+    f.advance(600);
+    if (phases.includes('leave') && !f.Town.trip && !f.WalkBack.active) break;
+  }
+  assert.equal(f.Town.trip, null, f.Town.message);
+  assert.ok(phases.includes('leave'), 'the trip ends with the walk back');
+  assert.equal(phases.some(p => /gate|reverse/.test(p)), false, 'the world statue is not visited');
+  assert.equal(commands.some(c => c.kind === 'travel-gate'), false);
+  assert.equal(commands.some(c => c.kind === 'select' && c.gid === 63), false);
+  assert.equal(f.WalkBack.active, null, 'the walk reached the hunting spot');
+  const center = f.Settings.profile.hunt.center;
+  assert.ok(Math.hypot(gp.pose.x - center.x, gp.pose.z - center.z) <= 12, JSON.stringify(gp.pose));
+  assert.equal(f.Hunt.running, true, 'hunting resumes on arrival');
+});
+test('Back to the hunting spot: Walk needs no world statue, never refills or spends reverse scrolls', () => {
+  const f = townFixture(), c = f.Town.cfg(), gp = f.World.gp;
+  assert.equal(f.botProfile({}).potion.restock.town.returnBy, 'reverse', 'the default keeps the reverse return');
+  assert.equal(f.botProfile({ potion: { restock: { town: { returnBy: 'fly' } } } }).potion.restock.town.returnBy, 'reverse');
+  assert.equal(f.botProfile({ potion: { restock: { town: { returnBy: 'walk' } } } }).potion.restock.town.returnBy, 'walk');
+  c.returnBy = 'walk'; c.gate = null;
+  assert.equal(f.Town.validate(), ''); assert.equal(f.Town.reverses(), false, 'a carried reverse scroll is kept, not used');
+  assert.deepEqual([...f.Town.order(false)], ['storage', 'vendor', 'smith']);
+  assert.equal(f.Town.closeNext('close-smith'), 'leave');
+  f.Town.begin(); f.Town.enter('buy'); gp.inventory.find(i => i.refObjId === 15).quantity = 50; gp.target = 61;
+  gp.inventory = gp.inventory.filter(i => i.slot !== 14);
+  gp.shop = { npc: 61, offers: [{ refObjId: 201, tab: 0, slot: 4, maxStack: 50, price: '50', currency: 1, previews: [{ refObjId: 201, typeFlags: 0x19ec }] }] };
+  f.Town.buy(); assert.equal(f.commands.some(cmd => cmd.kind === 'shop-buy'), false, 'no reverse scroll is bought');
+  assert.equal(f.Town.trip.phase, 'close-vendor');
+});
+test('reverse chosen but none carried: the vendor refill is tried, else the trip walks back instead of stopping', () => {
+  const f = townFixture(), gp = f.World.gp;
+  gp.inventory = gp.inventory.filter(i => i.slot !== 14);
+  assert.equal(f.Town.validate(), ''); assert.equal(f.Town.validate(true), '', 'revival no longer needs a reverse scroll');
+  assert.equal(f.Town.closeNext('close-smith'), 'leave');
+  f.Town.begin(); f.Town.enter('buy'); gp.inventory.find(i => i.refObjId === 15).quantity = 50; gp.target = 61;
+  const offer = { refObjId: 201, tab: 0, slot: 4, maxStack: 50, price: '50', currency: 1, previews: [{ refObjId: 201, typeFlags: 0x19ec }] };
+  gp.shop = { npc: 61, offers: [offer] }; f.Town.buy();
+  assert.equal(f.commands.at(-1).kind, 'shop-buy'); assert.equal(f.commands.at(-1).slot, 4, 'a gold reverse offer is still used');
+  gp.inventory.push({ slot: 14, refObjId: 201, typeFlags: 0x19ec, quantity: 2 });
+  assert.equal(f.Town.closeNext('close-smith'), 'walk-gate', 'with a bought reverse scroll the trip reverses');
+  const g = townFixture(); g.World.gp.inventory = g.World.gp.inventory.filter(i => i.slot !== 14);
+  g.Town.begin(); g.Town.enter('buy'); g.World.gp.inventory.find(i => i.refObjId === 15).quantity = 50; g.World.gp.target = 61;
+  g.World.gp.shop = { npc: 61, offers: [] }; g.Town.buy();
+  assert.ok(g.Town.trip, g.Town.message); assert.equal(g.Town.trip.phase, 'close-vendor', 'no reverse offer is not an error');
+});
+test('the walk back leaves only after the final checks and stops clearly when it cannot start', () => {
+  const ready = f => {
+    const gp = f.World.gp; gp.inventory.find(i => i.refObjId === 15).quantity = 50; gp.inventory.find(i => i.slot === 6).durability = 10;
+    gp.inventory = gp.inventory.filter(i => i.slot !== 14); gp.pose.x = 100; f.Town.begin(); f.Town.enter('leave');
+  };
+  let f = townFixture(); ready(f); f.World.gp.inventory.find(i => i.slot === 6).durability = 5;
+  f.Town.tick(); assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false); assert.match(f.Town.message, /Final supply, repair/);
+  f = townFixture(); ready(f); f.World.gp.inventoryPending = true;
+  f.Town.tick(); assert.equal(f.Town.trip.phase, 'leave', 'waits for the inventory to settle');
+  f = townFixture(); ready(f); f.Settings.profile.hunt.center = null;
+  f.Town.tick(); assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false); assert.match(f.Town.message, /No saved hunting spot/);
+  f = townFixture(); ready(f); f.World.gp.inventoryPending = false; f.Town.tick();
+  assert.equal(f.Town.trip, null); assert.ok(f.WalkBack.active, f.Town.message); assert.equal(f.WalkBack.active.resume, true);
+  assert.equal(f.Hunt.running, false, 'hunting waits for the arrival'); assert.match(f.Town.message, /walking back to the hunting spot/);
+  assert.ok(f.Town.blocked(), 'no new trip starts during the walk');
+});
+test('a trapped-character recovery trip stops in town instead of walking back into the trap', () => {
+  for (const setup of [f => f.World.gp.inventory = f.World.gp.inventory.filter(i => i.slot !== 14), f => f.Town.cfg().returnBy = 'walk']) {
+    const f = townFixture(), gp = f.World.gp; setup(f);
+    gp.inventory.find(i => i.refObjId === 15).quantity = 50; gp.inventory.find(i => i.slot === 6).durability = 10; gp.pose.x = 100;
+    f.Town.begin(); f.Town.trip.recovery = true;
+    assert.equal(f.Town.closeNext('close-smith'), 'leave');
+    f.Hunt.running = true; f.Town.enter('leave'); f.Town.tick();
+    assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false); assert.equal(f.WalkBack.active, null);
+    assert.ok(f.notices.some(n => /Recovery town services completed/.test(n)), f.notices.join(' | '));
+  }
+});
+test('resume hunting in town says it walks back when no reverse scroll is carried', () => {
+  const f = townFixture(); f.Hunt.stop(); f.Town.detect = () => ({ key: 'KT' });
+  f.World.gp.inventory = f.World.gp.inventory.filter(i => i.slot !== 14);
+  f.Settings.profile.hunt.center = { regionId: 1, x: 1500, y: 0, z: 100 }; f.World.gp.pose.x = 60;
+  assert.equal(f.Controller.resumeHunting('Back in the game'), 'town');
+  assert.ok(f.Town.trip, f.Town.message); assert.ok(f.notices.some(n => /then walking to the hunting spot/.test(n)), f.notices.join(' | '));
+});
+test('travel plans Hotan to a spot across the western river through the ferry, and walks when it can', () => {
+  const f = fixture(), hotan = { regionId: 23687, x: 844, y: 0, z: 1055 }, spot = { regionId: 22388, x: 1130, y: 0, z: 1730 };
+  const steps = f.Travel.plan(hotan, spot);
+  assert.ok(steps, 'a route exists');
+  assert.equal(steps.map(s => s.kind).join(), 'walk,hop,walk');
+  const hop = steps[1];
+  assert.ok([20, 21].includes(hop.from.id), 'boards a ferry on the Hotan bank (SN_ZONE_25031)');
+  assert.ok([22, 23].includes(hop.to.id), 'lands on the western bank (SN_ZONE_25033)');
+  assert.equal(hop.fee, 500); assert.equal(steps[0].to, hop.from.pose); assert.deepEqual(steps[2].to, spot);
+  f.World.gp.progression.gold = '499';
+  assert.equal(f.Travel.plan(hotan, spot), null, 'an unaffordable ferry is never planned');
+  f.World.gp.progression.gold = '100000';
+  const banned = new Set(['20>22', '20>23', '21>22', '21>23']), detour = f.Travel.plan(hotan, spot, banned);
+  assert.ok(detour, 'another crossing further north is found');
+  assert.equal(detour.some(s => s.kind === 'hop' && banned.has(s.from.id + '>' + s.to.id)), false, 'refused links stay out');
+  assert.ok(detour.filter(s => s.kind === 'hop').length >= 2);
+  assert.equal(f.Travel.begin(hotan, { ...hotan, x: 1500 }, false), false, 'a walkable spot stays a plain walk');
+  f.Settings.profile.hunt.travel = false; assert.equal(f.Travel.begin(hotan, spot, false), false, 'switched off');
+  assert.equal(f.Travel.nodes().get(11).label, 'the Hotan world statue', 'town statues are placed from the town table');
+});
+function travelFixture() {
+  const f = fixture(); f.UI.mount = f.UI.draw = f.UI.update = f.Ticker.start = () => {}; f.boot();
+  const near = { regionId: 1, x: 300, y: 0, z: 100 }, far = { regionId: 5, x: 300, y: 0, z: 100 }, spot = { regionId: 5, x: 900, y: 0, z: 100 };
+  f.Travel.places = new Map([[1, { id: 1, refObjId: 900, label: 'the teleporter', pose: near }], [2, { id: 2, refObjId: 901, label: 'the teleporter', pose: far }]]);
+  f.Travel.links = () => [[1, 2, 500]];
+  f.Travel.walkable = (a, b) => (a.regionId === 5) === (b.regionId === 5);
+  f.Route.setAreas([]);
+  f.World.ents.set(77, { gid: 77, kind: 'npc', refObjId: 900, regionId: 1, x: 310, y: 0, z: 100 });
+  f.Settings.profile.hunt.center = { ...spot };
+  return { ...f, near, far, spot };
+}
+test('travel walks to the teleporter, opens its menu, hops, walks on and resumes hunting', () => {
+  const f = travelFixture(), gp = f.World.gp;
+  f.WalkBack.start(true);
+  assert.ok(f.Travel.active, f.notices.join(' | ')); assert.equal(f.WalkBack.active.label, 'the teleporter');
+  gp.pose = { ...f.near }; f.Controller.tick();
+  assert.equal(f.WalkBack.active, null); assert.equal(f.Travel.active.phase, 'select');
+  f.Controller.tick(); assert.equal(f.commands.at(-1).kind, 'select'); assert.equal(f.commands.at(-1).gid, 77);
+  gp.target = 77; gp.targetCapabilities = 0x80; gp.npcConversation = { gid: 77, phase: 'menu' };
+  f.advance(1000); f.Controller.tick(); f.Controller.tick();
+  const hop = f.commands.find(c => c.kind === 'travel-gate');
+  assert.ok(hop, 'the portal request is sent'); assert.equal(hop.gid, 77); assert.equal(hop.type, 2); assert.equal(hop.target, 2);
+  f.bus.emit('phase', 'entering-world'); assert.ok(f.Travel.active, 'the load screen is expected');
+  f.World.phase = 'world'; gp.pose = { ...f.far }; f.advance(3000); f.Controller.tick();
+  assert.ok(f.WalkBack.active, 'walks on from the landing'); assert.equal(f.WalkBack.active.label, 'the hunting spot');
+  gp.pose = { ...f.spot }; f.Controller.tick();
+  assert.equal(f.Travel.active, null); assert.equal(f.WalkBack.active, null); assert.equal(f.Hunt.running, true);
+});
+test('a refused or unanswered hop is left out; with no other way the trip stops with the reason', () => {
+  let f = travelFixture(), gp = f.World.gp;
+  f.WalkBack.start(true); gp.pose = { ...f.near }; f.Controller.tick(); f.Controller.tick();
+  gp.target = 77; gp.targetCapabilities = 0x80; gp.npcConversation = { gid: 77, phase: 'menu' };
+  f.Controller.tick(); f.Controller.tick(); assert.equal(f.Travel.active.phase, 'arrive');
+  f.bus.emit('notice', { sequence: 1, key: 'UIIT_MSG_INTERACTION_FAIL_NOT_ENOUGH_MONEY' }); f.Controller.tick();
+  assert.equal(f.Travel.active, null); assert.match(f.Travel.message, /not enough gold/); assert.equal(f.Hunt.running, false);
+  f = travelFixture(); gp = f.World.gp;
+  f.WalkBack.start(true); gp.pose = { ...f.near }; f.Controller.tick(); f.Controller.tick();
+  gp.target = 77; gp.targetCapabilities = 0x80; gp.npcConversation = { gid: 77, phase: 'menu' };
+  f.Controller.tick(); f.Controller.tick(); f.advance(16000); f.Controller.tick();
+  assert.equal(f.Travel.active, null); assert.match(f.Travel.message, /no answer from the game/);
+  f = travelFixture(); gp = f.World.gp;
+  f.WalkBack.start(true); gp.pose = { ...f.near }; f.Controller.tick(); f.Controller.tick();
+  gp.target = 77; gp.targetCapabilities = 0x01; f.Controller.tick();
+  assert.equal(f.Travel.active, null); assert.match(f.Travel.message, /offers no teleport/);
+  assert.equal(f.commands.some(c => c.kind === 'travel-gate'), false);
+});
+test('a world change during a travel walk, manual control or Stop end the trip without a hop', () => {
+  let f = travelFixture();
+  f.WalkBack.start(true); f.bus.emit('phase', 'entering-world');
+  assert.equal(f.Travel.active, null); assert.equal(f.WalkBack.active, null); assert.match(f.Travel.message, /unexpected travel/);
+  f = travelFixture(); f.WalkBack.start(true); f.World.gp.pose = { ...f.near }; f.Controller.tick();
+  f.Manual.lastAt = 123; f.Controller.tick(); assert.equal(f.Travel.active, null); assert.match(f.Travel.message, /manual control/);
+  f = travelFixture(); f.WalkBack.start(true); f.World.gp.pose = { ...f.near }; f.Controller.tick();
+  f.toggleBot(); assert.equal(f.Travel.active, null); assert.equal(f.Hunt.running, false);
+  f = travelFixture(); f.WalkBack.start(true);
+  f.AutoStart.entry = { at: 0 }; f.Settings.profile.hunt.autoStart = true; f.AutoStart.tick();
+  assert.equal(f.AutoStart.entry, null, 'auto-start never starts the bot during a trip');
+  assert.ok(f.Travel.active);
+});
 test('abnormal pill restocking uses only the strongest universal pill and preserves existing profiles', () => {
   const f = fixture(), r = f.Restock.cfg();
   assert.equal(r.cure.on, false); assert.equal(r.cure.target, 50);
@@ -2416,7 +3289,7 @@ test('best pills participate in low-stock, full-bag and revival town trips with 
 });
 
 test('town preflight stops before consuming scrolls when setup, scrolls or gold are missing', () => {
-  for (const change of [f => f.Town.cfg().gate = null, f => f.World.gp.inventory = f.World.gp.inventory.filter(i => i.slot !== 14),
+  for (const change of [f => f.Town.cfg().gate = null, f => f.World.gp.inventory = f.World.gp.inventory.filter(i => i.slot !== 13),
       f => f.World.gp.progression.gold = '0']) {
     const f = townFixture(); change(f); f.Town.tick();
     assert.equal(f.Hunt.running, false); assert.equal(f.Town.trip, null);
@@ -2432,6 +3305,30 @@ test('town cycle is opt-in, hunting-only and overrides walking restock without r
   f.World.gp.inventory.find(i => i.refObjId === 15).quantity = 5;
   f.Town.tick(); f.advance(600); f.Town.tick(); f.advance(100); f.Town.tick();
   assert.equal(f.Town.trip.phase, 'recall-wait');
+});
+test('town trip started while already in town never uses a return scroll', () => {
+  const f = townFixture(); f.Hunt.start();
+  f.Town.detect = () => ({ key: 'town' });
+  f.Town.begin();
+  assert.ok(f.Town.trip, 'the trip starts');
+  assert.ok(f.Town.trip.phase.startsWith('walk-'), 'goes straight to the services');
+  assert.equal(f.commands.some(c => c.kind === 'item-use'), false);
+  f.Town.cancel();
+  f.World.gp.inventory = f.World.gp.inventory.filter(i => i.typeFlags !== 0x09ec);
+  f.Town.begin(); assert.ok(f.Town.trip, 'no return scroll needed in town');
+});
+test('town trip started in town returns to the hunt, not the town', () => {
+  const f = townFixture(); f.Hunt.start(); f.Town.detect = () => ({ key: 'town' });
+  const hunt = { ...f.Hunt.cfg().center }; f.Town.lastScrollPoint = null;
+  f.Town.begin();
+  assert.deepEqual({ x: f.Town.trip.origin.x, y: f.Town.trip.origin.y }, { x: hunt.x, y: hunt.y }, 'return target is the hunt point');
+  assert.equal(f.Town.trip.inTown, true);
+  f.Town.enter('reverse-wait'); f.Town.phase('entering-world'); f.World.gp.pose = { ...f.World.gp.pose, x: hunt.x, y: hunt.y };
+  f.Town.tick(); assert.equal(f.Town.trip, null, f.Town.message);
+  const g = townFixture(); g.Hunt.start(); g.Town.detect = () => ({ key: 'town' }); g.Town.lastScrollPoint = { ...g.World.pose(), x: 1500 };
+  g.Town.begin(); assert.equal(g.Town.trip.origin.x, 1500, 'uses the remembered scroll point');
+  g.Hunt.cfg().center = null; g.Town.cancel(); g.Town.lastScrollPoint = null; g.Town.begin();
+  assert.equal(g.Town.trip, null); assert.match(g.Town.message, /hunting/);
 });
 test('pet storage protects supplies, keep names and items with missing metadata', () => {
   const f = townFixture(); f.Town.cfg().store.others = true;
@@ -2583,7 +3480,7 @@ test('stones follow the old alchemy switch and Berserk migrates to Giants only',
   let f = fixture(); f.storage.set('sroAsistan:v7:profile:default', JSON.stringify({ hunt: { pickup: { alchemy: false } }, macro: { berserk: 'strong' } }));
   f.Settings.importOriginal();
   assert.equal(f.Settings.profile.hunt.pickup.magicStones, false); assert.equal(f.Settings.profile.hunt.pickup.attrStones, false);
-  assert.deepEqual(JSON.parse(JSON.stringify(f.Settings.profile.macro.berserkClasses)), { normal: false, champion: false, giant: true, party: false, elite: false, unique: false, titan: false });
+  assert.deepEqual(JSON.parse(JSON.stringify(f.Settings.profile.macro.berserkClasses)), { normal: false, champion: false, giant: true, giantParty: false, party: false, elite: false, unique: false, titan: false });
   f = fixture(); f.storage.set('sroAsistan:v7:profile:default', JSON.stringify({ macro: { berserk: 'off' } })); f.Settings.importOriginal();
   assert.equal(Object.values(f.Settings.profile.macro.berserkClasses).some(Boolean), false);
   f = fixture(); f.storage.set('sroAsistan:v7:profile:default', JSON.stringify({ macro: { berserk: 'always' } })); f.Settings.importOriginal();
@@ -2599,6 +3496,142 @@ test('Berserk fires only on ticked classes, with a full gauge', () => {
   f.advance(2000); f.World.berserkGauge = 4; assert.equal(f.Combat.berserk('giant'), false);
   f.World.berserkGauge = 5; f.Settings.profile.macro.berserkClasses.champion = true; assert.equal(f.Combat.berserk('champion'), true);
   f.advance(2000); f.Settings.profile.macro.berserkClasses.giant = false; assert.equal(f.Combat.berserk('giant'), false);
+});
+test('Berserk on party Giants follows its own switch', () => {
+  const f = fixture(), kinds = () => f.commands.filter(c => c.kind === 'berserk').length, B = f.Settings.profile.macro.berserkClasses;
+  f.World.berserkGauge = 5;
+  f.World.ents.set(70, { gid: 70, rarity: 4, rarityAuxIcon: 1 }); f.World.ents.set(71, { gid: 71, rarity: 0, rarityAuxIcon: 1 });
+  B.party = true; f.World.gp.target = 70; assert.equal(f.Combat.berserk('party'), false, 'Party monsters alone does not cover party Giants');
+  B.giantParty = true; assert.equal(f.Combat.berserk('party'), true); assert.equal(kinds(), 1);
+  f.advance(2000); B.party = false; f.World.gp.target = 71; assert.equal(f.Combat.berserk('party'), false, 'Giant party does not cover other party monsters');
+  B.party = true; assert.equal(f.Combat.berserk('party'), true); assert.equal(kinds(), 2);
+});
+test('saved Berserk choices give party Giants the old Party monsters setting', () => {
+  const f = fixture();
+  assert.equal(f.botProfile({ macro: { berserkClasses: { giant: true, party: true } } }).macro.berserkClasses.giantParty, true);
+  assert.equal(f.botProfile({ macro: { berserkClasses: { giant: true, party: false } } }).macro.berserkClasses.giantParty, false);
+  assert.equal(f.botProfile({ macro: { berserkClasses: { party: true, giantParty: false } } }).macro.berserkClasses.giantParty, false, 'A saved Giant party choice wins');
+  assert.equal(f.botProfile({}).macro.berserkClasses.giantParty, false);
+});
+// Lure: points A (30 m east of the spot) and B (20 m north), a single-target taunt and an area taunt.
+function lure() {
+  const f = fixture();
+  f.World.gp.skills = [3001, 3002];
+  f.World.rebuildCatalog([
+    { id: 3001, group: 950, level: 1, name: 'Taunt', targetRequired: true, targets: 4, range: 150 },
+    { id: 3002, group: 951, level: 1, name: 'Howling', targetRequired: false, targets: 1 },
+  ]);
+  Object.assign(f.Settings.profile.lure, { enabled: true, points: [{ regionId: 1, x: 400, y: 0, z: 100 }, { regionId: 1, x: 100, y: 0, z: 300 }],
+    taunt: { id: 3001, group: 950 }, area: { id: 3002, group: 951 }, holdS: 4 });
+  const mob = (gid, x, z = 100) => { const e = { gid, kind: 'monster', name: 'Mob ' + gid, rarity: 0, regionId: 1, x, y: 0, z, attackFlags: 16, appearanceState: [0] }; f.World.ents.set(gid, e); return e; };
+  const at = (x, z = 100) => { f.World.gp.pose = { regionId: 1, x, y: 0, z }; };
+  const step = () => { f.advance(1000); f.Hunt.tick(); };
+  const casts = id => f.commands.filter(c => c.kind === 'skill' && c.skillId === id);
+  // The game's cooldowns: 5 s for the single-target taunt, 10 s for the area taunt.
+  const post = f.Hook.post; f.World.gp.skillCooldowns = [];
+  f.Hook.post = msg => { post(msg); const c = msg.command.command; if (c.kind === 'skill') f.World.gp.skillCooldowns.push({ skill: c.skillId, startedAtMs: f.World.simNow(), durationMs: c.skillId === 3001 ? 5000 : 10000 }); };
+  f.Hunt.start();
+  return { f, mob, at, step, casts };
+}
+test('the lure walks to a pull point, taunts the nearest monster there and never attacks', () => {
+  const { f, mob, at, step, casts } = lure();
+  mob(40, 410); mob(41, 520);
+  step(); assert.equal(f.Lure.index, 0, 'starts with point A'); step(); assert.equal(f.Hunt.state, 'lure'); assert.equal(f.Lure.phase, 'out');
+  assert.equal(f.commands.at(-1).kind, 'move', 'walks towards point A');
+  assert.equal(casts(3002).length, 0, 'no area taunt with no monster near');
+  at(400); step(); assert.equal(casts(3002).length, 1, 'the area taunt goes out as soon as a monster is near');
+  step(); assert.equal(f.Lure.phase, 'taunt');
+  step(); assert.deepEqual(f.commands.filter(c => c.kind === 'select').map(c => c.gid), [40], 'the monster nearest the point');
+  f.World.gp.target = 40; step();
+  assert.equal(casts(3001).length, 1); assert.equal(casts(3001)[0].gid, 40);
+  assert.equal(f.Lure.phase, 'back'); assert.equal(f.Lure.pulled, true);
+  assert.equal(f.commands.some(c => c.kind === 'attack'), false, 'the lure never attacks');
+});
+test('the lure waits for the next pull while enough monsters are already in the training area', () => {
+  const { f, mob, step } = lure();
+  f.Settings.profile.lure.stopAt = 2; mob(50, 110); mob(51, 120);
+  step(); step(); step(); assert.equal(f.Lure.phase, 'out');
+  assert.match(f.Lure.message, /Enough monsters at the spot \(2\)/);
+  const moves = () => f.commands.filter(c => c.kind === 'move').length, before = moves();
+  step(); step(); assert.equal(moves(), before, 'does not walk to the pull point');
+  f.World.ents.delete(51); step(); step(); step();
+  assert.ok(moves() > before, 'one left: the next pull starts');
+  const g = lure(); g.f.Settings.profile.lure.stopAt = 0; g.mob(50, 110); g.mob(51, 120); g.step(); g.step(); g.step();
+  assert.ok(g.f.commands.some(c => c.kind === 'move'), 'off by default');
+});
+test('after a pull the lure brings the monsters back, holds without the area taunt, then goes to the next point', () => {
+  const { f, mob, at, step, casts } = lure();
+  mob(40, 410); step(); at(400); step(); step(); step(); f.World.gp.target = 40; step();
+  assert.equal(f.Lure.phase, 'back');
+  const area = casts(3002).length;
+  at(100); f.World.ents.get(40).x = 110; step();
+  assert.equal(f.Lure.phase, 'hold');
+  f.World.gp.skillCooldowns = []; // the area taunt is ready and the monster is near
+  step(); step(); assert.equal(f.Lure.phase, 'hold', 'holds for the configured 4 s');
+  assert.equal(casts(3002).length, area, 'no area taunt while the party takes over');
+  assert.equal(f.commands.some(c => c.kind === 'attack'), false);
+  step(); step(); assert.equal(f.Lure.phase, 'out'); assert.equal(f.Lure.index, 1);
+  f.World.ents.delete(40); step(); const move = f.commands.at(-1);
+  assert.equal(move.kind, 'move'); assert.ok(move.destination.z > 100, 'walks towards point B');
+});
+test('bringing monsters back, the lure stops for 4 s after every 10 m; a 10 s hold by default', () => {
+  assert.equal(fixture().Settings.profile.lure.holdS, 10);
+  const { f, mob, at, step } = lure();
+  f.Settings.profile.lure.area = { id: 0, group: 0 }; // only the single-target taunt, so no cast interrupts the timing
+  mob(40, 410); step(); at(400); step(); step(); step(); f.World.gp.target = 40; step();
+  assert.equal(f.Lure.phase, 'back');
+  step(); assert.equal(f.commands.at(-1).kind, 'move'); assert.ok(f.commands.at(-1).destination.x < 400, 'heads back');
+  at(350); step(); assert.notEqual(f.Lure.message, 'Waiting for the monsters to follow.', 'only 5 m so far');
+  const moves = f.commands.filter(c => c.kind === 'move').length;
+  at(300); step(); assert.equal(f.Lure.message, 'Waiting for the monsters to follow.', '10 m walked: pause');
+  assert.deepEqual([f.commands.at(-1).kind, f.commands.at(-1).destination.x], ['move', 300], 'stops where it stands');
+  step(); step(); step(); assert.equal(f.commands.filter(c => c.kind === 'move').length, moves + 1, 'stands still during the pause');
+  step(); assert.equal(f.Lure.message, 'Bringing monsters back to the party.'); assert.ok(f.commands.at(-1).destination.x < 300, 'walks on after 4 s');
+  f.Settings.profile.lure.pauseEveryM = 0; at(150); step(); assert.equal(f.Lure.message, 'Bringing monsters back to the party.', '0 m turns the pauses off');
+});
+test('a pull point with no monster sends the lure straight back with no hold', () => {
+  const { f, at, step } = lure();
+  step(); at(400); step(); assert.equal(f.Lure.phase, 'taunt');
+  step(); assert.equal(f.Lure.phase, 'back'); assert.equal(f.Lure.pulled, false);
+  at(100); step(); assert.equal(f.Lure.phase, 'out', 'nothing pulled, so no hold'); assert.equal(f.Lure.index, 1);
+});
+test('the lure gives up a pull below the HP threshold and brings the character back', () => {
+  const { f, mob, at, step } = lure();
+  mob(40, 410); step(); at(300); step(); assert.equal(f.Lure.phase, 'out');
+  f.World.me = () => ({ hpPct: 30, mpPct: 100 }); step();
+  assert.equal(f.Lure.phase, 'back'); assert.ok(f.commands.at(-1).destination.x < 300, 'walks back to the spot');
+});
+test('the Lure panel picks the two taunts and adds or removes pull points', () => {
+  const nodes = [];
+  const document = { createElement(tag) {
+    const events = {}, node = { tag, children: [], className: '', value: '', dataset: {}, style: {},
+      classList: { add() {} }, setAttribute() {}, append(...children) { this.children.push(...children); }, replaceChildren(...children) { this.children = children; },
+      addEventListener(name, fn) { events[name] = fn; }, click() { events.click?.(); }, querySelectorAll() { return []; } };
+    nodes.push(node); return node;
+  } };
+  const f = fixture(document); f.UI.draw = () => {};
+  f.World.gp.skills = [3001, 3002];
+  f.World.rebuildCatalog([{ id: 3001, group: 950, level: 1, name: 'Taunt', targetRequired: true, targets: 4 }, { id: 3002, group: 951, level: 1, name: 'Howling', targetRequired: false, targets: 1 }]);
+  f.Lure.draw(document.createElement('div'));
+  const text = n => n.textContent ?? '', labels = nodes.map(text);
+  for (const label of ['Lure instead of hunting', 'Single-target taunt', 'Area taunt', 'Hold at the spot (s)', 'Add pull point here']) assert.ok(labels.includes(label), label);
+  f.World.gp.pose = { regionId: 1, x: 400, y: 0, z: 100 };
+  nodes.find(n => n.tag === 'button' && text(n) === 'Add pull point here').click();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.Settings.profile.lure.points)), [{ regionId: 1, x: 400, y: 0, z: 100 }]);
+  nodes.length = 0; f.Lure.draw(document.createElement('div'));
+  assert.ok(nodes.some(n => text(n) === 'Point A: 30 m from the spot'));
+  nodes.find(n => n.tag === 'button' && text(n) === 'Remove point A').click();
+  assert.equal(f.Settings.profile.lure.points.length, 0);
+});
+test('the lure needs points and a saved spot, and pull points stay with their character', () => {
+  const { f, step } = lure();
+  f.Settings.profile.lure.points = []; assert.equal(f.Lure.on(), false, 'no points: hunting as usual');
+  f.Settings.profile.lure.points = [{ regionId: 1, x: 400, y: 0, z: 100 }]; f.Settings.profile.hunt.center = null; step();
+  assert.equal(f.Hunt.running, false, 'no hunting spot: stops instead of guessing');
+  const points = [{ regionId: 1, x: 1, y: 0, z: 2 }];
+  assert.deepEqual(JSON.parse(JSON.stringify(f.botProfile({ lure: { points } }).lure.points)), points);
+  assert.equal(f.botProfile({}).lure.enabled, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(f.ProfileShare.personal(f.Settings.profile).pullPoints)), [{ regionId: 1, x: 400, y: 0, z: 100 }]);
 });
 test('town cycle does not repeat unconfirmed pet transfers and stops on full storage', () => {
   const f = townFixture(); f.Town.begin(); f.Town.enter('store');
@@ -2712,8 +3745,17 @@ test('a stalled walk to a town service says why, in plain words and without NPC 
   assert.equal(snap.townDetail, f.Town.message); assert.equal(snap.navigationReady, false); assert.equal(snap.navigationError, 'Unsupported collision data');
   f.Town.cancel(); assert.equal(f.Diagnostics.snapshot().townDetail, '');
 });
+test('a warehouse walk that cannot get around an obstacle is skipped, other services still stop the trip', () => {
+  const f = townFixture(); f.Town.begin(); f.Town.enter('walk-storage'); f.World.gp.pose.x = 50;
+  f.Navigation.watch = () => 'giveup';
+  f.Town.tick();
+  assert.ok(f.Town.trip, 'the trip carries on'); assert.equal(f.Town.trip.phase, 'walk-vendor');
+  const g = townFixture(); g.Town.begin(); g.Town.enter('walk-vendor'); g.World.gp.pose.x = 50;
+  g.Navigation.watch = () => 'giveup';
+  g.Town.tick(); assert.equal(g.Town.trip, null); assert.match(g.Town.message, /Blocked on the way to the potion merchant/);
+});
 test('town movement retries blocked routes at intervals and remains cancellable', () => {
-  const f = townFixture(); f.Town.begin(); f.Town.enter('walk-storage');
+  const f = townFixture(); f.Town.begin(); f.Town.enter('walk-storage'); f.World.gp.pose.x = 50;
   let plans = 0;
   f.Navigation.next = () => { plans++; return { error: 'No walkable route found.' }; };
   const moves = f.commands.filter(c => c.kind === 'move').length;
@@ -2842,7 +3884,7 @@ test('town never sells items the game marks unsellable, and skips a refused sale
 test('town sells unprotected character bag items only when the bag switch is on', () => {
   const ware = { slot: 30, refObjId: 1100, typeFlags: 44 | (6 << 7), quantity: 1, name: 'Sword', plus: 0, magic: [], tooltip: { fields: { rarity: 0 } } };
   const run = on => {
-    const f = townFixture(), gp = f.World.gp; f.Town.cfg().sellBag = on; f.Town.cfg().storeSox = false;
+    const f = townFixture(), gp = f.World.gp; f.Town.cfg().sellBag = on; f.Items.data.set(1100, { name: 'Sword', code: 'ITEM_CH_SWORD_01_A' }); f.Town.cfg().storeSox = false;
     f.pet.inventory = []; gp.inventory.push({ ...ware });
     f.Town.begin(); f.Town.enter('sell'); gp.target = 62; gp.shop = { npc: 62 };
     return f;
@@ -2871,6 +3913,71 @@ test('with bag selling on, a full bag sells at the repair merchant before potion
   const off = townFixture(); off.Town.cfg().sellBag = false;
   off.Town.begin(); assert.equal(off.Town.closeNext('close-storage'), 'walk-vendor'); assert.equal(off.Town.closeNext('close-vendor'), 'walk-smith');
   assert.equal(off.Town.trip.sellFirst, false);
+});
+
+test('bag selling sells only ordinary race gear: never pet summons, avatars, job suits, mall items or unknown gear', () => {
+  // Item types from 1.150 itemdata, all of which the merchant buys (CanSell 1).
+  const kinds = [
+    { refObjId: 1200, typeFlags: 12 | (2 << 5) | (1 << 7) | (2 << 11), code: 'ITEM_COS_P_RABBIT_SCROLL', name: 'Rabbit summon scroll' },
+    { refObjId: 1201, typeFlags: 44 | (13 << 7), code: 'ITEM_MALL_AVATAR_M_HAT', name: 'Avatar hat', tooltip: { fields: { rarity: 0 } } },
+    { refObjId: 1202, typeFlags: 44 | (7 << 7), code: 'ITEM_CH_M_TRADE_01', name: 'Trader suit', tooltip: { fields: { rarity: 0 } } },
+    { refObjId: 1203, typeFlags: 108 | (13 << 7) | (14 << 11), code: 'ITEM_MALL_PREMIUM_GOLDTIME', name: 'Premium' },
+    { refObjId: 1204, typeFlags: 108 | (11 << 7) | (3 << 11), code: 'ITEM_ETC_ARCHEMY_MAGICTABLET_STR_01', name: 'Tablet' },
+    { refObjId: 1205, typeFlags: 44 | (6 << 7), code: 'ITEM_FORT_FORTRESS_SWORD', name: 'Fortress sword', tooltip: { fields: { rarity: 0 } } },
+    { refObjId: 1206, typeFlags: 44 | (6 << 7), code: '', name: 'Uncatalogued blade', tooltip: { fields: { rarity: 0 } } },
+  ];
+  const f = townFixture(), gp = f.World.gp; f.Town.cfg().sellBag = true; f.Town.cfg().storeSox = false; f.pet.inventory = [];
+  kinds.forEach((k, n) => { if (k.code) f.Items.data.set(k.refObjId, { name: k.name, code: k.code }); gp.inventory.push({ slot: 40 + n, quantity: 1, magic: [], ...k, code: undefined }); });
+  for (const item of f.World.items().filter(i => i.slot >= 40)) assert.equal(f.Town.sellableBag(item), false, item.name);
+  f.Town.begin(); f.Town.enter('sell'); gp.target = 62; gp.shop = { npc: 62 }; f.Town.tick();
+  assert.equal(f.commands.some(c => c.kind === 'shop-sell'), false); assert.equal(f.Town.trip.phase, 'repair');
+  // An explicit Sell rule still sells a non-gear item from the bag; plain race gear needs none.
+  f.ItemRules.set([1204], { act: 'sell' }); assert.equal(f.Town.sellableBag(f.World.items().find(i => i.refObjId === 1204)), true);
+  f.Items.data.set(1300, { name: 'Bow', code: 'ITEM_CH_BOW_02_B' });
+  assert.equal(f.Town.sellableBag({ slot: 60, refObjId: 1300, typeFlags: 44 | (6 << 7), quantity: 1, magic: [], tooltip: { fields: { rarity: 0 } } }), true);
+});
+
+test('with bag selling on and a full bag, the trip sells before the warehouse so pet loot has a bag slot to pass through', () => {
+  const f = townFixture(), gp = f.World.gp; f.Town.cfg().sellBag = true; f.Town.cfg().petFull = false;
+  const equip = gp.equipmentSlotCount || 13, held = f.World.items().length;
+  gp.inventorySlotCount = equip + held + 2;
+  for (let n = 0; n < 2; n++) gp.inventory.push({ slot: equip + held + n, refObjId: 3100 + n, typeFlags: 44 | (6 << 7), quantity: 1, name: 'Spare ' + n, magic: [], tooltip: { fields: { rarity: 0 } } });
+  assert.equal(f.World.freeBagSlots(), 0); assert.ok(f.pet.inventory.some(i => f.Town.eligible(i)), 'the pet holds warehouse loot');
+  f.Town.begin(); f.Town.arrived();
+  assert.equal(f.Town.trip.phase, 'walk-smith');
+  assert.deepEqual([...f.Town.trip.order], ['smith', 'storage', 'vendor', 'gate']);
+  for (const [from, to] of [['close-smith', 'walk-storage'], ['close-storage', 'walk-vendor'], ['close-vendor', 'walk-gate']]) assert.equal(f.Town.closeNext(from), to);
+  // With room in the bag the warehouse still comes first.
+  const g = townFixture(); g.Town.cfg().sellBag = true; g.Town.cfg().petFull = false; g.Town.begin(); g.Town.arrived();
+  assert.equal(g.Town.trip.phase, 'walk-storage'); assert.equal(g.Town.closeNext('close-storage'), 'walk-smith'); assert.equal(g.Town.closeNext('close-smith'), 'walk-vendor');
+});
+
+test('pet summon scrolls and flutes are never sold, from the pet or the bag, even with a Sell rule', () => {
+  const summons = [
+    { refObjId: 9000, typeFlags: 12 | (2 << 5) | (1 << 7) | (2 << 11), quantity: 1, name: 'Rabbit summon scroll' },
+    { refObjId: 9001, typeFlags: 12 | (2 << 5) | (1 << 7) | (1 << 11), quantity: 1, name: 'Pet flute' },
+  ];
+  const f = townFixture(), gp = f.World.gp; f.Town.cfg().sellBag = true;
+  f.pet.inventory = summons.map((s, n) => ({ slot: n, ...s }));
+  summons.forEach((s, n) => { gp.inventory.push({ slot: 40 + n, ...s }); f.Items.data.set(s.refObjId, { name: s.name, code: 'ITEM_COS_P_RABBIT_SCROLL' }); });
+  f.Town.begin(); f.Town.enter('sell'); gp.target = 62; gp.shop = { npc: 62 }; f.Town.tick();
+  assert.equal(f.commands.some(c => /sell/.test(c.kind)), false, 'nothing offered to the merchant');
+  assert.equal(f.Town.trip.phase, 'repair'); assert.equal(f.pet.inventory.length, 2);
+  f.ItemRules.set([9000, 9001], { act: 'sell' });
+  for (const s of summons) { assert.equal(f.Town.sellable(s), false, s.name); assert.equal(f.Town.sellableBag({ slot: 40, ...s }), false, s.name); }
+});
+
+test('Sell Star gear too sells Star instead of depositing it, and leaves Moon and Sun', () => {
+  const f = townFixture(); f.Town.cfg().sellBag = true; f.Town.cfg().storeSox = true; f.Town.cfg().keep = '';
+  f.Items.data.set(1400, { name: 'Star blade', code: 'ITEM_CH_SWORD_11_A_RARE' });
+  const sox = { slot: 60, refObjId: 1400, name: 'Star blade', typeFlags: 44 | (6 << 7), quantity: 1, magic: [], codename: 'ITEM_CH_SWORD_11_A_RARE', tooltip: { fields: { rarity: 2, itemClass: 1 } } };
+  assert.deepEqual([f.Town.depositItem(sox), f.Town.sellable(sox), f.Town.sellableBag(sox)], [true, false, false], 'default: SoX is deposited');
+  f.Town.cfg().sellStar = true;
+  assert.deepEqual([f.Town.depositItem(sox), f.Town.sellable(sox), f.Town.sellableBag(sox)], [false, true, true], 'switch on: SoX is sold');
+  const moon = { ...sox, slot: 61, refObjId: 1401, name: 'Moon blade', codename: 'ITEM_CH_SWORD_11_B_RARE', tooltip: { fields: { rarity: 2, itemClass: 2 } } };
+  assert.deepEqual([f.Town.depositItem(moon), f.Town.sellable(moon)], [true, false], 'Moon is still deposited');
+  f.Town.cfg().keep = 'star blade';
+  assert.equal(f.Town.sellable(sox), false, 'Keep names still protect it');
 });
 
 test('town refuses selling at the wrong merchant or after the pet is replaced', () => {
@@ -2960,12 +4067,13 @@ test('town rejects invalid potion counts and low-stock thresholds at the refill 
   f.Town.begin(); assert.equal(f.Town.trip, null); assert.match(f.Town.message, /low-stock/);
 });
 
-test('town never substitutes small potions if X-Large is unavailable', () => {
+test('town falls back to the merchant own MP potion instead of stopping when X-Large is unavailable', () => {
   const f = townFixture(), gp = f.World.gp;
   f.Restock.cfg().mp.refObjId = 102; f.Town.begin(); f.Town.enter('buy'); gp.target = 61;
   gp.shop = { npc: 61, offers: [{ refObjId: 102, tab: 0, slot: 0, maxStack: 100, price: '10', previews: [{ refObjId: 102, typeFlags: 4332 }] }] };
-  f.Town.buy(); assert.equal(f.Town.trip, null); assert.match(f.Town.message, /X-Large MP/);
-  assert.equal(f.commands.some(c => c.kind === 'shop-buy'), false);
+  f.Town.buy(); f.advance(1000); f.Town.buy(); assert.ok(f.Town.trip, f.Town.message);
+  assert.equal(f.commands.some(c => c.kind === 'shop-buy' && c.slot === 0), true);
+  f.Town.tier = {};
 });
 
 test('town purchase requires exact quantity gain and enough gold, without duplicate buys', () => {
@@ -2978,6 +4086,16 @@ test('town purchase requires exact quantity gain and enough gold, without duplic
   f.advance(15000); f.Town.buy(); assert.equal(f.Town.trip, null);
   const g = townFixture(); g.Town.begin(); g.Town.enter('buy'); g.World.gp.target = 61; g.World.gp.shop = gp.shop; g.World.gp.progression.gold = '1';
   g.Town.buy(); assert.equal(g.commands.some(c => c.kind === 'shop-buy'), false); assert.match(g.Town.message, /gold/);
+});
+test('town buys what the gold covers and moves on instead of failing in the potion shop', () => {
+  const f = townFixture(), gp = f.World.gp;
+  f.Town.begin(); f.Town.enter('buy'); gp.target = 61; gp.progression.gold = '200';
+  gp.shop = { npc: 61, offers: [{ refObjId: 15, tab: 0, slot: 0, maxStack: 100, price: '10', previews: [{ refObjId: 15, typeFlags: 4332 }] }] };
+  f.Town.buy(); assert.equal(f.commands.at(-1).quantity, 20);
+  gp.inventory.find(i => i.refObjId === 15).quantity += 20; gp.progression.gold = '5'; f.advance(1000); f.Town.buy();
+  gp.progression.gold = '5'; f.advance(1000); f.Town.buy();
+  assert.ok(f.Town.trip, 'trip continues'); assert.equal(f.commands.filter(c => c.kind === 'shop-buy').length, 1);
+  assert.ok(f.Town.trip.buySkipped.includes(15));
 });
 test('town repairs require restored durability and reverse return requires all final checks', () => {
   const f = townFixture(), gp = f.World.gp;
@@ -3132,12 +4250,15 @@ test('full character bag recalls before requiring space in town', () => {
   assert.equal(f.Hunt.running, false); assert.match(f.Town.message, /Returned to town; free/);
 });
 
-test('protected full pet recalls before asking for manual emptying', () => {
+test('a pet full of protected items never sends the bot to town, and never strands it there', () => {
   const f = townFixture(); f.pet.inventory = [f.pet.inventory[2]]; f.pet.status = 1;
+  assert.equal(f.Town.petClearable(f.Loot.pet()), false);
+  assert.notEqual(f.Town.reason(), 'pickup pet nearly full');
+  // A trip for another reason arrives without stopping the hunt because the pet cannot be emptied.
   f.Controller.tick(); assert.equal(f.Town.trip.phase, 'recall-wait');
   f.Town.phase('entering-world'); f.World.gp.pose.x = 100;
   f.advance(1000); f.Controller.tick();
-  assert.equal(f.Hunt.running, false); assert.match(f.Town.message, /Returned to town; pet is full/);
+  assert.equal(f.Hunt.running, true); assert.doesNotMatch(f.Town.message, /pet is full/);
 });
 
 test('town revival overrides stop default and preserves reverse intent through bootstrap', () => {
@@ -3872,7 +4993,9 @@ test('diagnostics show real pet transaction and potion waits plus town refill pr
   t.World.gp.inventory.find(i => i.refObjId === 15).quantity = 650;
   assert.equal(t.Diagnostics.main(), 'Refilling MP: 650 / 1000');
   t.Town.trip = null; t.World.gp.inventory = t.World.gp.inventory.filter(i => i.refObjId !== 201);
-  assert.match(t.Diagnostics.town(), /reverse scroll missing/);
+  assert.doesNotMatch(t.Diagnostics.town(), /blocked/, 'a missing reverse scroll only means walking back');
+  t.World.gp.inventory = t.World.gp.inventory.filter(i => i.refObjId !== 200);
+  assert.match(t.Diagnostics.town(), /return scroll missing/);
 });
 
 test('diagnostic reports omit names, raw errors, chat, locations and sensitive settings', () => {
@@ -3900,6 +5023,141 @@ test('diagnostic history is bounded, retained across stops and tolerates incompl
   f.stopAll(); assert.equal(f.Diagnostics.history.length, 30);
   f.World.gp = null; assert.doesNotThrow(() => JSON.parse(f.Diagnostics.report()));
   f.World.simOffset = null; assert.doesNotThrow(() => f.Diagnostics.sample());
+});
+test('F6 minimises and restores the panel like the ×, and the game never sees the key', () => {
+  const f = fixture(), keydown = [], minimised = [];
+  f.win.addEventListener = (type, fn) => { if (type === 'keydown') keydown.push(fn); };
+  f.UI.mount = f.UI.draw = f.UI.update = f.Ticker.start = () => {}; f.boot();
+  f.UI.root = { host: { hidden: false } }; f.UI.body = { hidden: false };
+  f.UI.minimise = function (on) { minimised.push(on); this.minimised = on; };
+  const press = (code, extra = {}) => {
+    const e = { isTrusted: true, repeat: false, isComposing: false, shiftKey: false, ctrlKey: false, metaKey: false, code,
+      composedPath: () => [{ tagName: 'CANVAS' }], preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; }, ...extra };
+    for (const fn of keydown) fn(e);
+    return e;
+  };
+  const first = press('F6');
+  assert.deepEqual(minimised, [true]); assert.equal(first.prevented, true); assert.equal(first.stopped, true, 'the game never sees F6');
+  press('F6'); assert.deepEqual(minimised, [true, false], 'a second F6 brings the panel back');
+  press('F6', { repeat: true }); press('F6', { composedPath: () => [{ tagName: 'INPUT' }] });
+  assert.deepEqual(minimised, [true, false], 'a held key or typing in a field does nothing');
+  f.UI.root.host.hidden = true; press('F6');
+  assert.equal(f.UI.root.host.hidden, false, 'a panel hidden with Shift+F7 comes back');
+  assert.deepEqual(minimised, [true, false, false]);
+  assert.equal(f.Hunt.running, false); assert.equal(f.commands.length, 0, 'F6 never starts or stops the bot');
+});
+function autoStartFixture(f = fixture()) { f.Settings.profile.hunt.autoStart = true; return f; }
+const manualMove = f => f.Hook.observers.forEach(fn => fn({ kind: 'gameplay', command: { kind: 'move' } }));
+test('auto-start is off by default; on, it starts hunting at the spot once the game settles, once per entry', () => {
+  let f = fixture(); f.Controller.tick(); f.advance(6000); f.Controller.tick();
+  assert.equal(f.Settings.profile.hunt.autoStart, false); assert.equal(f.Hunt.running, false, 'off by default');
+  f = autoStartFixture(); f.Controller.tick();
+  assert.equal(f.Hunt.running, false, 'waits for the game to settle'); assert.match(f.Diagnostics.main(), /^Auto-start: starting in \d s\.$/);
+  f.advance(5000); f.Controller.tick();
+  assert.equal(f.Hunt.running, true); assert.match(f.AutoStart.message, /hunting started at the hunting spot/);
+  f.stopAll(); f.advance(10000); f.Controller.tick(); assert.equal(f.Hunt.running, false, 'a stop by the player holds for this entry');
+  f.bus.emit('phase', 'entering-world', 'world', false); f.advance(10000); f.Controller.tick();
+  assert.equal(f.Hunt.running, false, 'a teleport is not a new entry');
+  f.World.phase = 'character'; f.bus.emit('phase', 'character', 'world', true); f.Controller.tick(); f.World.phase = 'world';
+  f.Controller.tick(); assert.equal(f.Hunt.running, false);
+  f.advance(5000); f.Controller.tick(); assert.equal(f.Hunt.running, true, 'entering the game again starts it again');
+});
+test('auto-start waits out manual control and gives way to the player and to a reconnect', () => {
+  let f = autoStartFixture(); f.Controller.tick(); f.advance(4000); manualMove(f);
+  f.advance(1500); f.Controller.tick(); assert.equal(f.Hunt.running, false); assert.match(f.AutoStart.message, /manual-control pause/);
+  f.advance(6000); f.Controller.tick(); assert.equal(f.Hunt.running, true, 'starts once the manual pause is over');
+  f = autoStartFixture(); f.Controller.tick(); f.stopAll(); f.advance(10000); f.Controller.tick();
+  assert.equal(f.Hunt.running, false); assert.match(f.AutoStart.message, /cancelled/);
+  f = autoStartFixture(); f.Controller.tick(); f.toggleBot(); assert.equal(f.Hunt.running, true);
+  f.Controller.tick(); assert.equal(f.AutoStart.entry, null, 'started by the player: nothing left to do');
+  const r = reconnectFixture(); autoStartFixture(r.f); r.f.Hunt.stop(); r.lose(); r.back();
+  for (let i = 0; i < 6; i++) { r.f.advance(4000); r.f.Controller.tick(); }
+  assert.equal(r.f.Hunt.running, false, 'the player had stopped the bot; the reconnect owns this entry and does not start it');
+  assert.match(r.f.AutoStart.message, /reconnect/);
+});
+test('auto-start in the town of the saved services does the town services, then reverses to the hunting spot', () => {
+  const f = townFixture(); autoStartFixture(f); f.Hunt.stop();
+  f.Town.detect = () => ({ key: 'KT' }); f.Settings.profile.hunt.center = { regionId: 1, x: 1500, y: 0, z: 100 };
+  f.World.gp.pose.x = 60; f.Controller.tick(); f.advance(5000); f.Controller.tick();
+  assert.ok(f.Town.trip, f.Town.message); assert.equal(f.Town.trip.revival, true, 'a revival-style trip: no return scroll in town');
+  assert.equal(f.Town.trip.phase, 'walk-storage'); assert.equal(f.Hunt.running, true);
+  assert.equal(f.commands.some(c => c.kind === 'item-use'), false, 'no return scroll is used');
+  assert.match(f.AutoStart.message, /in town\. Doing town services, then back to the hunting spot/);
+});
+test('auto-start away from the spot outside town walks back; dead it revives first; without a spot it says so', () => {
+  let f = autoStartFixture(); f.World.gp.pose.x = 1800; f.Controller.tick(); f.advance(5000); f.Controller.tick();
+  assert.ok(f.WalkBack.active); assert.match(f.AutoStart.message, /walking to the hunting spot/);
+  f = autoStartFixture(); f.World.isDead = () => true; f.Controller.tick(); f.advance(5000); f.Controller.tick();
+  assert.equal(f.Hunt.running, false); assert.match(f.AutoStart.message, /On death is set to Stop/);
+  f = autoStartFixture(); f.World.isDead = () => true; f.Hunt.cfg().onDeath = 'revive'; f.Controller.tick(); f.advance(5000); f.Controller.tick();
+  assert.equal(f.Hunt.running, true); assert.match(f.AutoStart.message, /revives and returns first/);
+  f = autoStartFixture(); f.Settings.profile.hunt.center = null; f.Controller.tick();
+  assert.equal(f.Hunt.running, false); assert.ok(f.notices.some(n => /no hunting spot is saved/.test(n)));
+  f = autoStartFixture(); f.World.gp.inventoryPending = true; f.Controller.tick(); f.advance(8000); f.Controller.tick();
+  assert.equal(f.Hunt.running, false); assert.match(f.AutoStart.message, /waiting for the character to load/);
+  f.World.gp.inventoryPending = false; f.Controller.tick(); assert.equal(f.Hunt.running, true);
+  f = fixture(); f.storage.set('sroBotLean:v1:profile:Hero', JSON.stringify({ hunt: { autoStart: true, center: { regionId: 1, x: 100, y: 0, z: 100 } } }));
+  f.World.charName = 'Hero'; f.Controller.tick(); f.advance(5000); f.Controller.tick();
+  assert.equal(f.Hunt.running, false, 'the default profile is not read as the character\'s choice');
+  assert.match(f.AutoStart.message, /waiting for the character settings/);
+  f.Settings.useCharacter('Hero'); f.Controller.tick(); assert.equal(f.Hunt.running, true, 'the character\'s own setting decides');
+  f = fixture(); f.World.charName = 'Hero'; f.Controller.tick(); f.advance(121000); f.Controller.tick();
+  assert.equal(f.AutoStart.entry, null, 'a profile that never loads still gives up');
+  assert.match(f.AutoStart.message, /gave up/);
+});
+test('a walk that starts on a blocked tile or against a wall steps out to open ground first, never through the wall', () => {
+  const wall = { x: 0, y: 0, z: 0, yaw: 0, mesh: { vertices: [200,0,0,200,0,1920], edges: [0,1,0,65535,3,0] } };
+  let f = fixture(); f.Navigation.capture({ kind: 'gameplay', command: { kind: 'navigation', bundle: navProduct([wall]) } });
+  const owner = {}, goal = { regionId: 1, x: 100, y: 0, z: 100 };
+  f.World.gp.pose = { regionId: 1, x: 199, y: 0, z: 100 };
+  assert.equal(f.Navigation.pointStatus(f.World.pose()), 'blocked', 'right against the wall');
+  assert.equal(f.Navigation.plan(f.World.pose(), goal).length, 0, 'no route from there');
+  let step = f.Navigation.next(owner, goal);
+  assert.equal(step.stepOut, true); assert.ok(step.point.x < 200, 'steps away from the wall, not through it');
+  assert.equal(f.Navigation.pointStatus(step.point), 'open');
+  f.World.gp.pose = { ...step.point }; step = f.Navigation.next(owner, goal);
+  assert.ok(step.point && !step.stepOut, 'from open ground the normal route takes over');
+  f.World.gp.pose = { regionId: 1, x: 201, y: 0, z: 100 };
+  assert.ok(f.Navigation.next({}, { ...goal, x: 400 }).point.x > 200, 'the other side steps out on its own side');
+  const blocked = new Uint8Array(9216); blocked[5 * 96 + 5] = 1;
+  f = fixture(); f.Navigation.install(navProduct([], blocked)); f.World.gp.pose = { regionId: 1, x: 110, y: 0, z: 110 };
+  assert.equal(f.Navigation.pointStatus(f.World.pose()), 'blocked', 'standing on a blocked tile');
+  step = f.Navigation.next({}, { regionId: 1, x: 500, y: 0, z: 110 });
+  assert.equal(step.stepOut, true); assert.equal(f.Navigation.pointStatus(step.point), 'open');
+  f.World.gp.pose = { regionId: 1, x: 300, y: 0, z: 300 }; assert.equal(f.Navigation.stepOut(f.World.pose()), null, 'open ground needs no step out');
+});
+test('auto-start in town on a blocked spot steps out, walks to the warehouse with real routing and opens it', () => {
+  const f = townFixture(); autoStartFixture(f); f.Hunt.stop();
+  const blocked = new Uint8Array(9216); blocked[5 * 96 + 1] = 1;
+  f.Navigation.install(navProduct([], blocked));
+  f.Town.detect = () => ({ key: 'KT' }); f.Settings.profile.hunt.center = { regionId: 1, x: 1500, y: 0, z: 100 };
+  f.World.gp.pose = { regionId: 1, x: 30, y: 0, z: 110 };
+  assert.equal(f.Navigation.pointStatus(f.World.pose()), 'blocked');
+  const moves = [];
+  for (let n = 0; n < 40 && f.Town.trip?.phase !== 'open-storage'; n++) {
+    const sent = f.commands.length; f.advance(1000); f.Controller.tick();
+    for (const c of f.commands.slice(sent)) if (c.kind === 'move') { moves.push({ ...c.destination }); f.World.gp.pose = { ...c.destination }; }
+  }
+  assert.equal(f.Town.trip?.phase, 'open-storage', f.Town.message);
+  const steps = moves.filter(m => Math.hypot(m.x - 30, m.z - 110) > 1);
+  assert.ok(steps.length >= 2); assert.equal(f.Navigation.pointStatus(steps[0]), 'open', 'the first step leaves the blocked tile');
+  assert.ok(Math.hypot(steps[0].x - 30, steps[0].z - 110) <= 40, 'a short step out, not a long blind walk');
+  assert.equal(f.commands.some(c => c.kind === 'item-use'), false);
+});
+test('a town walk that is stuck goes to the town start first, then on to the service, without looping', () => {
+  const f = townFixture(); f.Town.begin(); f.Town.enter('walk-storage');
+  let stuck = 1; f.Navigation.watch = () => (stuck-- > 0 ? 'giveup' : '');
+  f.Town.tick();
+  assert.equal(f.Town.trip.phase, 'walk-arrival'); assert.match(f.Town.message, /no way to the warehouse from here; going to the town start first/);
+  f.World.gp.pose.x = 100; f.Town.tick(); assert.equal(f.Town.trip.phase, 'walk-storage', 'at the town start it heads for the service again');
+  f.World.gp.pose.x = 40; stuck = 1; f.Town.tick();
+  assert.equal(f.Town.trip.phase, 'walk-vendor', 'stuck again on the same walk: the old fallback, no second detour');
+  const g = townFixture(); g.Town.begin(); g.Town.enter('walk-vendor');
+  let plans = 0; g.Navigation.next = () => { plans++; return { error: 'No walkable route found.' }; };
+  for (let i = 0; i < 6; i++) { g.advance(100); g.Town.tick(); }
+  assert.equal(plans, 3, 'one try via the town start, then the usual timed retries');
+  assert.equal(g.Town.trip.phase, 'walk-vendor'); assert.match(g.Town.message, /waiting; retrying collision route/);
+  assert.equal(g.Log.lines.filter(l => /going to the town start first/.test(l.text)).length, 1);
 });
 
 
@@ -3948,6 +5206,30 @@ test('buff gear runs cleric and bard sets and restores arbitrary combat weapon a
   const count=f.commands.length; f.BuffGear.tick(); assert.equal(f.commands.length,count);
 });
 
+test('dying with a buff weapon on puts the combat weapon back after revival and keeps hunting', () => {
+  const f = buffGearFixture(), home = JSON.stringify(f.BuffGear.setup());
+  assert.equal(f.BuffGear.tick(), true);
+  for (let n = 0; n < 20 && JSON.stringify(f.BuffGear.setup()) === home; n++) { f.BuffGear.tick(); if (f.BuffGear.run?.pending) f.confirmMove(); f.advance(300); }
+  assert.notEqual(JSON.stringify(f.BuffGear.setup()), home, 'a buff weapon is on');
+  f.World.isDead = () => true; f.BuffGear.tick();
+  assert.equal(f.BuffGear.run, null); assert.ok(f.BuffGear.recovery); assert.equal(f.Hunt.running, true, 'dying does not stop hunting');
+  f.World.isDead = () => false; f.BuffGear.resume();
+  assert.ok(f.BuffGear.run?.restoring, 'restoring starts on its own');
+  f.drive();
+  assert.equal(JSON.stringify(f.BuffGear.setup()), home); assert.equal(f.BuffGear.recovery, null);
+});
+test('the pet status notes have a fixed height and are never hidden, so the panel below does not shift', () => {
+  const fs = require('fs'), css = fs.readFileSync(__dirname + '/lean-skin.css', 'utf8'), ui = fs.readFileSync(__dirname + '/lean-ui.js', 'utf8');
+  assert.match(css, /\.pet-note\{height:[\d.]+em;[^}]*overflow-y:auto/);
+  assert.match(ui, /petNote = el\('p', '', 'muted pet-note'\)/); assert.match(ui, /petPotionNote = el\('p', PetPotion\.message, 'muted pet-note'\)/);
+  assert.doesNotMatch(ui, /petNote\.hidden/);
+});
+test('the wait status box keeps one height for short and long text, so the panel below does not shift', () => {
+  const fs = require('fs'), css = fs.readFileSync(__dirname + '/lean-skin.css', 'utf8'), ui = fs.readFileSync(__dirname + '/lean-ui.js', 'utf8');
+  assert.match(css, /(^|\n)\.waiting\{[^}]*height:\d+lh;[^}]*overflow-y:auto/);
+  assert.doesNotMatch(css, /\.waiting\{[^}]*min-height/, 'a minimum height still lets long text grow the box');
+  assert.match(ui, /waitNote\.title = /, 'the full text stays readable in the tooltip');
+});
 test('buff gear says why a due buff is not being swapped in, instead of staying silent', () => {
   const f = buffGearFixture(), gp = f.World.gp;
   gp.inventory = gp.inventory.filter(i => i.slot !== 15);
@@ -3969,6 +5251,97 @@ test('buff gear status lists each assigned buff, and a cast that was only unconf
   assert.equal(f.BuffGear.due(f.Settings.profile.macro.buffs[1]), 0);
   f.BuffGear.skipped.set(group, { signature: f.BuffGear.signature(), until: 0, why: 'x' });
   assert.ok(f.BuffGear.due(f.Settings.profile.macro.buffs[1]) > 0, 'the skip has expired'); assert.equal(f.BuffGear.skipped.has(group), false);
+});
+// Skill-driven swapping: the game's own weaponKinds say which weapon a buff needs; no saved set is involved.
+function autoGearFixture(){
+  const f=buffGearFixture(), gp=f.World.gp;
+  f.World.catalog.set(20,{...f.World.catalog.get(20),admit:{weaponKinds:[15,255]}});
+  f.World.catalog.set(30,{...f.World.catalog.get(30),admit:{weaponKinds:[14,255]}});
+  f.Settings.profile.macro.buffSets=[]; f.Settings.profile.macro.buffAuto=true;
+  f.Settings.profile.macro.buffs=[{id:20,group:20,gearSet:0,enabled:true,mode:'hunt'},{id:30,group:30,gearSet:0,enabled:true,mode:'hunt'}];
+  return f;
+}
+test('buff gear wears the weapon each buff needs and restores the combat weapon and shield',()=>{
+  const f=autoGearFixture(), gp=f.World.gp, home=JSON.stringify(f.BuffGear.setup());
+  assert.equal(f.BuffGear.owns(f.Settings.profile.macro.buffs[0]),true);
+  assert.equal(f.BuffGear.tick(),true);
+  const casts=[]; const cast=f.Combat.cast.bind(f.Combat); f.Combat.cast=(id,...a)=>{casts.push([id,gp.inventory.find(i=>i.slot===6).refObjId,gp.inventory.find(i=>i.slot===7)?.refObjId]);return cast(id,...a);};
+  f.drive();
+  assert.deepEqual(casts.map(c=>c[0]),[20,30]);
+  assert.deepEqual(casts[0].slice(1),[200,101],'one-handed staff keeps the shield on');
+  assert.deepEqual(casts[1].slice(1),[300,undefined],'the harp is worn without the shield');
+  assert.equal(JSON.stringify(f.BuffGear.setup()),home);
+  assert.equal(f.BuffGear.recovery,null);
+});
+test('buff gear wears a bag shield (and a one-handed weapon) for a shield buff, then restores the two-handed weapon',()=>{
+  const f=autoGearFixture(), gp=f.World.gp, home=JSON.stringify({}) ;
+  gp.inventory=gp.inventory.filter(i=>i.slot!==7&&i.slot!==15);
+  f.World.catalog.set(20,{...f.World.catalog.get(20),admit:{weaponKinds:[255],reqi:[{shield:true}]}});
+  f.Settings.profile.macro.buffs=[f.Settings.profile.macro.buffs[0]];
+  const before=JSON.stringify(f.BuffGear.setup());
+  assert.equal(f.BuffGear.owns(f.Settings.profile.macro.buffs[0]),true);
+  assert.equal(f.BuffGear.tick(),true);
+  const casts=[]; const cast=f.Combat.cast.bind(f.Combat); f.Combat.cast=(id,...a)=>{casts.push([id,gp.inventory.find(i=>i.slot===6).refObjId,gp.inventory.find(i=>i.slot===7)?.refObjId]);return cast(id,...a);};
+  f.drive();
+  assert.deepEqual(casts.map(c=>c[0]),[20]);
+  assert.deepEqual(casts[0].slice(1),[200,201]);
+  assert.equal(JSON.stringify(f.BuffGear.setup()),before);
+});
+test('buff gear leaves buffs the worn weapon already satisfies to the normal buff loop',()=>{
+  const f=autoGearFixture(), gp=f.World.gp;
+  gp.inventory.find(i=>i.slot===6).typeFlags=(15<<11)|(6<<7)|44;
+  assert.equal(f.BuffGear.owns(f.Settings.profile.macro.buffs[0]),false);
+  assert.equal(f.BuffGear.owns(f.Settings.profile.macro.buffs[1]),true);
+  f.Settings.profile.macro.buffAuto=false; assert.equal(f.BuffGear.owns(f.Settings.profile.macro.buffs[1]),false);
+});
+test('buff gear says when no bag weapon fits a buff and sends nothing',()=>{
+  const f=autoGearFixture(), gp=f.World.gp;
+  gp.inventory=gp.inventory.filter(i=>i.slot!==15);
+  f.Settings.profile.macro.buffs=[f.Settings.profile.macro.buffs[1]];
+  const count=f.commands.length;
+  assert.equal(f.BuffGear.tick(),false); assert.equal(f.commands.length,count);
+  assert.match(f.BuffGear.waiting,/needs a harp, and none you can use is in your bag/);
+  assert.match(f.BuffGear.status(),/needs a harp/);
+});
+test('buff gear takes any copy of identical weapons and skips ones above the character level or broken',()=>{
+  const f=autoGearFixture(), gp=f.World.gp;
+  gp.inventory.push({...gp.inventory.find(i=>i.slot===15),slot:16});
+  f.Settings.profile.macro.buffs=[f.Settings.profile.macro.buffs[1]];
+  assert.equal(f.BuffGear.tick(),true,'identical copies do not block the swap');
+  f.BuffGear.run=null;
+  gp.inventory.find(i=>i.slot===15).durability=0;
+  assert.equal(f.BuffGear.pick([14]).slot,16,'a broken weapon is not picked');
+  gp.progression={level:10}; for(const i of gp.inventory.filter(i=>i.slot>=13))i.tooltip={fields:{reqLevelType1:1,requiredLevel:50}};
+  assert.equal(f.BuffGear.pick([14]),null,'a weapon the character cannot wield is not picked');
+});
+test('buff gear never picks a weapon the game refused to equip again',()=>{
+  const f=autoGearFixture(), gp=f.World.gp;
+  f.Settings.profile.macro.buffs=[f.Settings.profile.macro.buffs[0]];
+  f.BuffGear.tick(); f.BuffGear.tick();
+  assert.ok(f.BuffGear.run.pending,'the move is sent and waits for confirmation');
+  for(let n=0;n<60;n++){f.advance(300);f.BuffGear.tick();}
+  assert.equal(f.BuffGear.run,null); assert.equal(f.Hunt.running,true);
+  assert.ok(f.BuffGear.bad.size===1);
+  assert.equal(f.BuffGear.pick([15]),null);
+});
+test('buff gear carries on when the game refuses a picked weapon, and restores gear',()=>{
+  const f=autoGearFixture(), gp=f.World.gp, home=JSON.stringify(f.BuffGear.setup());
+  f.Settings.profile.macro.buffs=[f.Settings.profile.macro.buffs[0]];
+  f.BuffGear.tick(); f.BuffGear.tick();
+  assert.ok(f.BuffGear.run.pending);
+  for(let n=0;n<20&&f.BuffGear.run?.pending;n++){f.advance(300);f.BuffGear.tick();}
+  assert.equal(f.BuffGear.run?.pending??null,null,'a refused move is dropped without waiting fifteen seconds');
+  assert.equal(f.BuffGear.recovery,null); assert.equal(f.Hunt.running,true,'hunting is not stopped');
+  assert.equal(f.BuffGear.bad.size,1);
+  for(let n=0;n<10&&f.BuffGear.run;n++){f.BuffGear.tick();f.advance(1200);}
+  assert.equal(JSON.stringify(f.BuffGear.setup()),home);
+  assert.match(f.BuffGear.message,/would not equip/);
+});
+test('buff gear failure names the move that was not confirmed',()=>{
+  const f=buffGearFixture(); f.BuffGear.tick(); f.BuffGear.tick();
+  f.World.gp.inventoryPending=true;
+  for(let n=0;n<60;n++){f.advance(300);f.BuffGear.tick();}
+  assert.match(f.BuffGear.message,/Equipment move unconfirmed \(.*slot \d+ to \d+\)/);
 });
 test('buff gear waits for actual inventory confirmation and never casts with stale equipment',()=>{
   const f=buffGearFixture(); f.BuffGear.tick(); f.BuffGear.tick();
@@ -4031,7 +5404,7 @@ test('buff gear death and disconnect reset never dispatch gear commands',()=>{
   for(const mode of ['dead','offline']){
     const f=buffGearFixture();f.BuffGear.tick();f.BuffGear.tick();const count=f.commands.length;
     if(mode==='dead')f.World.isDead=()=>true;else f.World.phase='login';
-    f.BuffGear.tick();assert.equal(f.BuffGear.run,null);assert.equal(f.commands.length,count);assert.ok(f.BuffGear.recovery);assert.equal(f.Hunt.running,false);
+    f.BuffGear.tick();assert.equal(f.BuffGear.run,null);assert.equal(f.commands.length,count);assert.ok(f.BuffGear.recovery);assert.equal(f.Hunt.running,true,'hunting carries on; gear is restored after revival');assert.equal(f.BuffGear.autoRestore,true);
   }
 });
 
@@ -4065,6 +5438,17 @@ test('assigned buffs never cast on combat gear when swapping is off; ordinary bu
   assert.equal(f.Combat.buffs(true),false);assert.equal(f.commands.length,0);
   f.Settings.profile.macro.buffs[0].gearSet=0;
   assert.equal(f.Combat.buffs(true),true);assert.equal(f.commands.at(-1).skillId,20);
+});
+
+test('self-castable target buffs (Holy Spell, Body Blessing) are listed and cast on yourself',()=>{
+  const f=buffGearFixture();f.Settings.profile.macro.buffs=[];
+  f.World.gp.skills=[40,41];
+  f.World.catalog.set(40,{id:40,group:40,name:'Holy Spell',targetRequired:true,targets:1|16|32,actionMs:1000,durationMs:60000});
+  f.World.catalog.set(41,{id:41,group:41,name:'Heal',targetRequired:true,targets:16|32,actionMs:1000});
+  assert.equal(f.UI.learnedSkills(true).map(s=>s.id).join(),'40');
+  f.Settings.profile.macro.buffs=[{id:40,group:40,enabled:true,mode:'hunt'}];
+  assert.equal(f.Combat.buffs(true),true);
+  assert.equal(f.commands.at(-1).skillId,40);assert.equal(f.commands.at(-1).targetGid ?? f.commands.at(-1).gid ?? f.World.localGid(),f.World.localGid());
 });
 
 test('buff gear unconfirmed cast returns home and suppresses repeated failed swaps',()=>{
@@ -4258,8 +5642,8 @@ async function updateTests() {
   }
   await check('updates compare numeric version components and ignore malformed versions', async () => {
     const f = fixture();
-    for (const v of ['9.9.9', '1.4.4', '2.0.0']) assert.equal(f.Updates.newer(v), true);
-    for (const v of ['1.2.9', '1.2.36', '1.3.0', '1.4.0', '1.4.1', '1.4.2', '1.4.3', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
+    for (const v of ['9.9.9', '1.5.1', '2.0.0']) assert.equal(f.Updates.newer(v), true);
+    for (const v of ['1.2.9', '1.2.36', '1.2.169', '1.3.0', '1.4.3', '1.5.0', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
   });
   await check('updates pin metadata and user-initiated installer to the same trusted commit', async () => {
     const f = fixture(), calls = updater(f); f.UI.updateButton = {};
@@ -4436,6 +5820,7 @@ updateTests().catch(error => { console.error(error); process.exitCode = 1; });
 function reloadFixture() {
   const { f, sent, lose, back } = reconnectFixture(); let reloads = 0, failure = '';
   f.Reconnect.doReload = () => { reloads++; };
+  f.Reconnect.jitter = () => 0;
   f.Reconnect.loadFailure = () => failure;
   return { f, sent, lose, back, reloads: () => reloads, fail: text => { failure = text; } };
 }
@@ -4452,7 +5837,7 @@ test('a game that fails to load is reloaded after a wait, remembering the charac
 
 test('after the reload the character is entered again and hunting resumes', () => {
   const r = reloadFixture(), f = r.f;
-  f.storage.set('sro-lean-reload', JSON.stringify({ pending: { character: 'Tester', hunting: true, at: Date.now() }, times: [Date.now()] }));
+  f.storage.set('sro-lean-reload', JSON.stringify({ pending: { character: 'Tester', hunting: true, at: Date.now() }, reloads: { count: 1, first: Date.now(), last: Date.now() } }));
   f.stopAll(); f.World.gp = null; f.World.phase = 'listing-servers'; r.sent.length = 0;
   f.Controller.tick(); assert.equal(f.Reconnect.active(), true); assert.match(f.Reconnect.message, /restore your login/);
   f.advance(4000); f.Controller.tick(); assert.equal(r.sent.length, 0, 'waits while the game restores the login');
@@ -4460,13 +5845,14 @@ test('after the reload the character is entered again and hunting resumes', () =
   assert.deepEqual(r.sent[0], { kind: 'enter-world', character: 'Tester' }, 'no resume attempt: the page is fresh');
   r.back(); f.advance(100); f.Controller.tick(); f.advance(3500); f.Controller.tick();
   assert.equal(f.Hunt.running, true); assert.equal(f.Reconnect.active(), false); assert.equal(stored(f).pending, null);
+  assert.equal(stored(f).reloads, null, 'back in the game: the next reload waits the shortest time again');
 });
 
 test('a reload that is not wanted or not allowed never happens', () => {
-  const r = reloadFixture(), f = r.f; r.fail('Renderer failed: x');
-  f.storage.set('sro-lean-reload', JSON.stringify({ times: [Date.now() - 1000, Date.now() - 2000, Date.now() - 3000] }));
-  f.Controller.tick(); f.advance(16000); f.Controller.tick(); f.advance(60000); f.Controller.tick();
-  assert.equal(r.reloads(), 0); assert.match(f.Reconnect.message, /not reloading again/);
+  const r = reloadFixture(), f = r.f; r.fail('Renderer failed: x'); f.World.phase = 'failed'; f.World.gp = null;
+  f.storage.set('sro-lean-reload', JSON.stringify({ reloads: { count: 9, first: Date.now() - 13 * 3600000, last: Date.now() - 60000 } }));
+  f.Controller.tick(); f.advance(31 * 60000); f.Controller.tick(); f.advance(60000); f.Controller.tick();
+  assert.equal(r.reloads(), 0, 'after 12 hours of reloads it stops'); assert.match(f.Reconnect.message, /over 12 hours without getting back in; not reloading again/);
   const g = reloadFixture(); g.f.storage.set('sro-lean-reload', JSON.stringify({ pending: { character: 'Tester', hunting: true, at: Date.now() - 3600000 } }));
   g.f.stopAll(); g.f.World.gp = null; g.f.World.phase = 'signed-out'; g.f.Controller.tick(); assert.equal(g.f.Reconnect.active(), false, 'a stale reload is not resumed');
   const h = reloadFixture(); h.f.storage.set('sro-lean-reload', JSON.stringify({ pending: { character: 'Tester', hunting: true, at: Date.now() } }));
@@ -4484,25 +5870,229 @@ test('an expired world session skips the futile resume, enters afresh, then relo
   f.advance(25000); f.Controller.tick(); assert.equal(r.reloads(), 1);
   assert.equal(stored(f).pending.character, 'Tester');
   const g = reloadFixture(); g.lose(); g.f.World.session = { phase: 'disconnected', disconnectMessage: 'Your session ended while the connection was gone.' };
-  g.f.storage.set('sro-lean-reload', JSON.stringify({ times: [Date.now(), Date.now(), Date.now()] }));
-  g.f.advance(3000); g.f.Controller.tick(); g.f.advance(40000); g.f.Controller.tick(); assert.equal(g.reloads(), 0); assert.equal(g.f.Reconnect.gaveUp, true);
+  g.f.storage.set('sro-lean-reload', JSON.stringify({ reloads: { count: 3, first: Date.now(), last: Date.now() } }));
+  g.f.advance(3000); g.f.Controller.tick(); g.f.advance(40000); g.f.Controller.tick();
+  assert.equal(g.reloads(), 0, 'the fourth reload in a row waits 8 times as long: 4 minutes'); assert.equal(g.f.Reconnect.gaveUp, false);
+  g.f.advance(205000); g.f.Controller.tick(); assert.equal(g.reloads(), 1); assert.equal(stored(g.f).reloads.count, 4);
 });
 
-test('a plain "Disconnected from the server." that nothing recovers ends in a page reload, and the reload limit is only a pause', () => {
+test('a plain "Disconnected from the server." that nothing recovers ends in a page reload, and reloads in a row wait longer, never stopping early', () => {
   const r = reloadFixture(), f = r.f; r.sent.length = 0;
   r.lose(); f.World.session = { phase: 'disconnected', disconnectMessage: '' };
   for (let i = 0; i < 40 && r.reloads() === 0; i++) { f.advance(10000); f.Controller.tick(); }
   assert.equal(r.reloads(), 1, 'stuck reconnecting: the page is reloaded to restore the login');
   assert.ok(r.sent.filter(c => c.kind === 'reconnect').length === 1, 'one resume attempt only');
   const g = reloadFixture(); g.lose(); g.f.World.session = { phase: 'disconnected', disconnectMessage: '' };
-  g.f.storage.set('sro-lean-reload', JSON.stringify({ times: [Date.now(), Date.now(), Date.now()] }));
-  for (let i = 0; i < 40; i++) { g.f.advance(10000); g.f.Controller.tick(); }
-  assert.equal(g.reloads(), 0); assert.equal(g.f.Reconnect.gaveUp, true);
-  assert.ok(g.f.Reconnect.retryAt > Date.now() + 25 * 60000, 'paused until the oldest reload is 30 minutes old'); g.f.Reconnect.retryAt = Date.now() - 1; g.f.storage.set('sro-lean-reload', JSON.stringify({ times: [Date.now() - 31 * 60000, Date.now() - 32 * 60000, Date.now() - 33 * 60000] }));
+  g.f.storage.set('sro-lean-reload', JSON.stringify({ reloads: { count: 6, first: Date.now() - 3 * 3600000, last: Date.now() } }));
+  for (let i = 0; i < 100; i++) { g.f.advance(10000); g.f.Controller.tick(); }
+  assert.equal(g.reloads(), 0, 'the seventh reload in a row waits the longest: 30 minutes'); assert.equal(g.f.Reconnect.gaveUp, false);
   for (let i = 0; i < 200 && g.reloads() === 0; i++) { g.f.advance(10000); g.f.Controller.tick(); }
-  assert.equal(g.reloads(), 1, 'once the limit window has passed the bot tries again');
+  assert.equal(g.reloads(), 1, 'a server down for hours is still retried, every 30 minutes');
+});
+test('reloads in a row wait twice as long each time, up to 30 minutes plus a small random delay, and start over once back in the game', () => {
+  const r = reloadFixture(), f = r.f, streak = n => f.storage.set('sro-lean-reload', JSON.stringify(n ? { reloads: { count: n, first: Date.now(), last: Date.now() } } : {}));
+  const waits = [];
+  for (let n = 0; n < 9; n++) { streak(n); waits.push(f.Reconnect.reloadWait(15000)); }
+  assert.deepEqual(waits, [15000, 30000, 60000, 120000, 240000, 480000, 960000, 1800000, 1800000]);
+  f.Reconnect.jitter = () => 0.2; assert.equal(f.Reconnect.reloadWait(15000), 2160000, 'the random delay is at most a fifth more'); f.Reconnect.jitter = () => 0;
+  streak(0); r.fail('Renderer failed: x'); f.World.phase = 'failed'; f.World.gp = null;
+  f.Controller.tick(); f.advance(16000); f.Controller.tick(); assert.equal(r.reloads(), 1); assert.equal(stored(f).reloads.count, 1);
+  f.Reconnect.failedAt = 0; f.Controller.tick(); f.advance(20000); f.Controller.tick();
+  assert.equal(r.reloads(), 1, 'the second reload in a row waits 30 s'); assert.match(f.Reconnect.message, /reloading the page in 10 s/);
+  f.advance(11000); f.Controller.tick(); assert.equal(r.reloads(), 2); assert.equal(stored(f).reloads.count, 2);
+  r.fail(''); f.World.phase = 'world'; f.World.gp = { ...fixture().World.gp }; f.advance(6000); f.Controller.tick();
+  assert.equal(stored(f).reloads, null, 'back in the game: the count starts over');
+  assert.equal(f.Reconnect.waitText(45000), '45 s'); assert.equal(f.Reconnect.waitText(240000), '4 min');
+});
+test('buff swaps with a full bag still run when no shield has to come off, and say why when one does', () => {
+  // Full bag, Bard set: a one-handed weapon swap without any shield change needs no free slot.
+  let f = buffGearFixture(), gp = f.World.gp, home = JSON.stringify(f.BuffGear.setup());
+  f.Settings.profile.macro.buffs = f.Settings.profile.macro.buffs.filter(b => b.group === 30);
+  gp.inventory = gp.inventory.filter(i => i.slot !== 7 && i.slot !== 14); gp.inventorySlotCount = 13 + 2;
+  home = JSON.stringify(f.BuffGear.setup()); assert.equal(f.World.freeBagSlots(), 0);
+  assert.equal(f.BuffGear.tick(), true, f.BuffGear.waiting); f.drive();
+  assert.equal(JSON.stringify(f.BuffGear.setup()), home); assert.equal(f.BuffGear.recovery, null);
+  // Full bag with a shield on: it cannot come off, so the swap waits and says so.
+  f = buffGearFixture(); f.World.gp.inventorySlotCount = 13 + 3;
+  assert.equal(f.BuffGear.tick(), false); assert.match(f.BuffGear.waiting, /free bag slot to take off your shield/);
 });
 
+test('town buys the largest potion the merchant sells when X-Large is not offered', () => {
+  const f = townFixture(), gp = f.World.gp;
+  f.Town.tier = {}; f.Restock.cfg().hp.on = true;
+  f.Town.begin(); f.Town.enter('buy'); gp.target = 61;
+  gp.shop = { npc: 61, offers: [[101, '5', 2284], [102, '9', 2284], [103, '6', 4332], [104, '7', 4332]].map(([refObjId, price, typeFlags], slot) => ({ refObjId, slot, tab: 0, maxStack: 50, price, previews: [{ refObjId, typeFlags }] })) };
+  f.Town.buy(); assert.equal(f.Town.trip?.supplies[0].refObjId, 102, f.Town.message); assert.equal(f.Town.supplies()[0].refObjId, 102);
+  f.advance(1000); f.Town.buy(); assert.equal(f.commands.at(-1).kind, 'shop-buy'); assert.equal(f.commands.at(-1).slot, 1);
+  f.Town.tier = {};
+});
+// ---- Auto stall ----
+// Drives the stall session the way the game would: each command the bot sends changes World.gp.stall
+// like the worker's own reducer does (stall-name → naming, stall-create → owner, stall-add → an offer,
+// stall-open → open, stall-close → the state disappears again).
+function stallFixture() {
+  const f = fixture();
+  const town = f.Town.towns[0], spot = town.services.storage;
+  f.World.gp.pose = { regionId: spot.regionId, x: spot.x, y: 0, z: spot.z };
+  f.Items.data.set(62, { name: 'Lucky Powder', code: 'ITEM_ETC_ARCHEMY_LUCKY_POWDER_08' });
+  f.Items.data.set(63, { name: 'Element', code: 'ITEM_ETC_ARCHEMY_ELEMENT_08' });
+  f.Stall.init();
+  return f;
+}
+function stallBag(f) {
+  f.World.gp.inventory.push({ slot: 13, refObjId: 62, quantity: 20, typeFlags: 0x156c, name: 'Lucky Powder', tooltip: { fields: { canSell: 1 } } });
+  f.World.gp.inventory.push({ slot: 14, refObjId: 63, quantity: 4, typeFlags: 0x56c, name: 'Element', tooltip: { fields: { canSell: 1 } } });
+}
+// Applies the game's answer to the last command; refuse one add bagSlot by simply not answering it.
+function stallRespond(f, { ignoreAdd = -1 } = {}) {
+  const c = f.commands.at(-1), stall = f.World.gp.stall;
+  if (!c || c.__done) return;
+  c.__done = true;
+  if (c.kind === 'stall-name') f.World.gp.stall = { phase: 'naming', namingSequence: 1, owner: 0, title: '', greeting: '', savedGreeting: '', open: false, mode: 0, networkRegistered: false, offers: [], visitors: [], network: { open: false, rows: [], pages: 0, page: 0, category: 0, buying: null } };
+  else if (c.kind === 'stall-create') { stall.phase = 'owner'; stall.owner = f.World.gp.localGid; stall.title = c.title; }
+  else if (c.kind === 'stall-add') { if (c.bagSlot !== ignoreAdd) stall.offers.push({ slot: c.slot, bagSlot: c.bagSlot, quantity: c.quantity, price: c.price, item: { refObjId: c.bagSlot === 13 ? 62 : 63, name: c.bagSlot === 13 ? 'Lucky Powder' : 'Element', quantity: c.quantity } }); }
+  else if (c.kind === 'stall-open') stall.open = true;
+  else if (c.kind === 'stall-close') f.World.gp.stall = undefined;
+}
+function stallDrive(f, ticks, options) {
+  for (let i = 0; i < ticks && f.Stall.run; i++) { f.advance(400); f.Controller.tick(); stallRespond(f, options); }
+}
+test('the stall refuses to start outside town, while hunting, with nothing priced or with a stall already open', () => {
+  const f = stallFixture(); stallBag(f);
+  f.World.gp.pose = { regionId: 1, x: 100, y: 0, z: 100 };
+  f.Stall.start(); assert.equal(f.Stall.run, null); assert.ok(f.notices.at(-1).includes('town'));
+  const spot = f.Town.towns[0].services.storage;
+  f.World.gp.pose = { regionId: spot.regionId, x: spot.x, y: 0, z: spot.z };
+  f.Stall.start(); assert.equal(f.Stall.run, null); assert.ok(f.notices.at(-1).includes('priced'));
+  f.Settings.profile.stall.prices = { 62: 150 };
+  f.Hunt.running = true; f.Stall.start(); assert.equal(f.Stall.run, null); assert.ok(f.notices.at(-1).includes('hunting'));
+  f.Hunt.running = false;
+  f.World.gp.stall = { phase: 'owner', owner: 99, offers: [], visitors: [] };
+  f.Stall.start(); assert.equal(f.Stall.run, null); assert.ok(f.notices.at(-1).includes('stall'));
+  f.World.gp.stall = undefined;
+  f.Stall.start(); assert.ok(f.Stall.run, 'clean state starts the session');
+});
+test('the stall names, creates, registers each priced stack at its price and opens for business', () => {
+  const f = stallFixture(); stallBag(f);
+  f.Settings.profile.stall.title = 'Powders';
+  f.Settings.profile.stall.prices = { 62: 150, 63: 4000 };
+  f.Stall.start();
+  stallDrive(f, 40);
+  assert.equal(f.Stall.run?.phase, 'selling', 'the session is selling; status: ' + f.Stall.message);
+  assert.equal(f.World.gp.stall.open, true);
+  assert.deepEqual(f.World.gp.stall.offers.map(o => [o.slot, o.bagSlot, o.quantity, o.price]), [[1, 13, 20, 150], [2, 14, 4, 4000]]);
+  assert.deepEqual(f.commands.map(c => c.kind), ['stall-name', 'stall-create', 'stall-add', 'stall-add', 'stall-open']);
+  assert.equal(f.Stall.message.includes('2 offers'), true, f.Stall.message);
+});
+test('a sale counts only when the offer disappears and gold rises; the stall then closes when empty', () => {
+  const f = stallFixture(); stallBag(f);
+  f.Settings.profile.stall.prices = { 62: 150 };
+  f.World.gp.progression.gold = '100000';
+  f.Stall.start(); stallDrive(f, 30);
+  assert.equal(f.Stall.run.phase, 'selling');
+  // The offer vanishes but no gold arrives: not a confirmed sale.
+  f.World.gp.stall.offers = [];
+  f.advance(400); f.Controller.tick();
+  assert.equal(f.Stall.run.sold, 0, 'no gold gain, no sale claim');
+  assert.equal(f.Stall.run.phase, 'close', 'everything gone closes the stall');
+  stallDrive(f, 10);
+  assert.equal(f.World.gp.stall, undefined);
+  assert.equal(f.Stall.run, null);
+  assert.ok(f.Stall.message.includes('Sold 0'), f.Stall.message);
+});
+test('a confirmed sale is reported with its gold value', () => {
+  const f = stallFixture(); stallBag(f);
+  f.Settings.profile.stall.prices = { 62: 150 };
+  f.World.gp.progression.gold = '100000';
+  f.Stall.start(); stallDrive(f, 30);
+  f.World.gp.stall.offers = [];
+  f.World.gp.progression.gold = '103000'; // 20 × 150
+  f.advance(400); f.Controller.tick(); stallRespond(f);
+  assert.equal(f.Stall.run.sold, 20);
+  assert.equal(f.Stall.run.earned, 3000n);
+  assert.ok(f.Stall.message.includes('Sold 20 × Lucky Powder'), f.Stall.message);
+  stallDrive(f, 20);
+  assert.equal(f.Stall.run, null);
+  assert.ok(f.Stall.message.includes('Sold 20 items for 3,000 gold.'), f.Stall.message);
+});
+test('a sale whose gold arrives after the offer disappears still counts; an offer with no gold within 30 s does not', () => {
+  const f = stallFixture(); stallBag(f);
+  f.Settings.profile.stall.prices = { 62: 150, 63: 4000 };
+  f.World.gp.progression.gold = '100000';
+  f.Stall.start(); stallDrive(f, 40);
+  assert.equal(f.Stall.run.phase, 'selling');
+  // The game reports the sold slot first and the gold on a later update.
+  f.World.gp.stall.offers = f.World.gp.stall.offers.filter(o => o.bagSlot !== 13);
+  f.advance(400); f.Controller.tick();
+  assert.equal(f.Stall.run.sold, 0, 'no gold yet');
+  f.World.gp.progression.gold = '103000';
+  f.advance(400); f.Controller.tick();
+  assert.equal(f.Stall.run.sold, 20, 'the gold a tick later confirms the sale');
+  assert.equal(f.Stall.run.earned, 3000n);
+  // An offer that vanishes and never brings gold is dropped after 30 s, not claimed by later gold.
+  f.World.gp.stall.offers = [];
+  f.Settings.profile.stall.closeWhenEmpty = false;
+  for (let i = 0; i < 80; i++) { f.advance(400); f.Controller.tick(); }
+  f.World.gp.progression.gold = '200000';
+  f.advance(400); f.Controller.tick();
+  assert.equal(f.Stall.run, null, 'a settings change still ends the session');
+});
+test('a potion or inventory refusal leaves the stall open; a refused offer skips only that item', () => {
+  const f = stallFixture(); stallBag(f);
+  f.Settings.profile.stall.prices = { 62: 150, 63: 4000 };
+  f.Stall.start();
+  // The game refuses the first offer outright.
+  for (let i = 0; i < 40 && f.Stall.run; i++) {
+    f.advance(400); f.Controller.tick();
+    const c = f.commands.at(-1);
+    if (c?.kind === 'stall-add' && c.bagSlot === 13 && !c.__done) { c.__done = true; f.bus.emit('game-error', 'Item cannot be sold'); }
+    else stallRespond(f);
+  }
+  assert.equal(f.Stall.run?.phase, 'selling', 'status: ' + f.Stall.message);
+  assert.deepEqual(f.World.gp.stall.offers.map(o => o.bagSlot), [14], 'the other item is still offered');
+  f.bus.emit('game-error', 'Inventory full: cannot use the potion');
+  f.advance(400); f.Controller.tick();
+  assert.equal(f.Stall.run?.phase, 'selling', 'a potion refusal is not the stall refusal');
+  f.bus.emit('game-error', 'Stall operation refused');
+  assert.equal(f.Stall.run, null, 'a stall refusal still stops it');
+});
+test('an unconfirmed stall-add is skipped and never resent; the rest of the stall still opens', () => {
+  const f = stallFixture(); stallBag(f);
+  f.Settings.profile.stall.prices = { 62: 150, 63: 4000 };
+  f.Stall.start();
+  stallDrive(f, 100, { ignoreAdd: 13 });
+  assert.equal(f.Stall.run?.phase, 'selling', 'status: ' + f.Stall.message);
+  assert.equal(f.commands.filter(c => c.kind === 'stall-add' && c.bagSlot === 13).length, 1, 'the unanswered add is never resent');
+  assert.deepEqual(f.World.gp.stall.offers.map(o => o.bagSlot), [14], 'only the answered item is offered');
+});
+test('stop all closes a stall this page opened', () => {
+  const f = stallFixture(); stallBag(f);
+  f.Settings.profile.stall.prices = { 62: 150 };
+  f.Stall.start(); stallDrive(f, 30);
+  assert.equal(f.Stall.run.phase, 'selling');
+  f.stopAll();
+  assert.equal(f.Stall.run, null);
+  assert.equal(f.commands.at(-1).kind, 'stall-close');
+});
+test('a world reset drops the stall session without sending anything', () => {
+  const f = stallFixture(); stallBag(f);
+  f.Settings.profile.stall.prices = { 62: 150 };
+  f.Stall.start(); stallDrive(f, 30);
+  const sent = f.commands.length;
+  f.bus.emit('reset');
+  assert.equal(f.Stall.run, null);
+  assert.equal(f.commands.length, sent, 'no close command after the world is gone');
+});
+test('a price change mid-session stops the stall instead of mixing old offers', () => {
+  const f = stallFixture(); stallBag(f);
+  f.Settings.profile.stall.prices = { 62: 150 };
+  f.Stall.start(); stallDrive(f, 30);
+  assert.equal(f.Stall.run.phase, 'selling');
+  f.Settings.profile.stall.prices = { 62: 200 };
+  f.advance(400); f.Controller.tick(); stallRespond(f);
+  assert.equal(f.Stall.run, null);
+  assert.equal(f.commands.at(-1).kind, 'stall-close');
+});
 // ---- Team relay (phase 1: presence) ----
 function teamFixture(url = 'wss://relay.example', token = 'room-key') {
   const f = fixture(), sockets = [];
@@ -4764,131 +6354,4 @@ test('a peer\'s store write does not cancel the sync this client still owes the 
   const put = f.socket.sent.filter(m => m.type === 'kv-put' && m.scope === 'room').at(-1);
   assert.ok(put.value.players.Latecomer, 'the pending sighting is in the put');
   assert.ok(put.value.players.Earlier, 'the hydrated record is in the put too');
-});
-
-// ---- Auto stall ----
-// Drives the stall session the way the game would: each command the bot sends changes World.gp.stall
-// like the worker's own reducer does (stall-name → naming, stall-create → owner, stall-add → an offer,
-// stall-open → open, stall-close → the state disappears again).
-function stallFixture() {
-  const f = fixture();
-  const town = f.Town.towns[0], spot = town.services.storage;
-  f.World.gp.pose = { regionId: spot.regionId, x: spot.x, y: 0, z: spot.z };
-  f.Items.data.set(62, { name: 'Lucky Powder', code: 'ITEM_ETC_ARCHEMY_LUCKY_POWDER_08' });
-  f.Items.data.set(63, { name: 'Element', code: 'ITEM_ETC_ARCHEMY_ELEMENT_08' });
-  f.Stall.init();
-  return f;
-}
-function stallBag(f) {
-  f.World.gp.inventory.push({ slot: 13, refObjId: 62, quantity: 20, typeFlags: 0x156c, name: 'Lucky Powder', tooltip: { fields: { canSell: 1 } } });
-  f.World.gp.inventory.push({ slot: 14, refObjId: 63, quantity: 4, typeFlags: 0x56c, name: 'Element', tooltip: { fields: { canSell: 1 } } });
-}
-// Applies the game's answer to the last command; refuse one add bagSlot by simply not answering it.
-function stallRespond(f, { ignoreAdd = -1 } = {}) {
-  const c = f.commands.at(-1), stall = f.World.gp.stall;
-  if (!c || c.__done) return;
-  c.__done = true;
-  if (c.kind === 'stall-name') f.World.gp.stall = { phase: 'naming', namingSequence: 1, owner: 0, title: '', greeting: '', savedGreeting: '', open: false, mode: 0, networkRegistered: false, offers: [], visitors: [], network: { open: false, rows: [], pages: 0, page: 0, category: 0, buying: null } };
-  else if (c.kind === 'stall-create') { stall.phase = 'owner'; stall.owner = f.World.gp.localGid; stall.title = c.title; }
-  else if (c.kind === 'stall-add') { if (c.bagSlot !== ignoreAdd) stall.offers.push({ slot: c.slot, bagSlot: c.bagSlot, quantity: c.quantity, price: c.price, item: { refObjId: c.bagSlot === 13 ? 62 : 63, name: c.bagSlot === 13 ? 'Lucky Powder' : 'Element', quantity: c.quantity } }); }
-  else if (c.kind === 'stall-open') stall.open = true;
-  else if (c.kind === 'stall-close') f.World.gp.stall = undefined;
-}
-function stallDrive(f, ticks, options) {
-  for (let i = 0; i < ticks && f.Stall.run; i++) { f.advance(400); f.Controller.tick(); stallRespond(f, options); }
-}
-test('the stall refuses to start outside town, while hunting, with nothing priced or with a stall already open', () => {
-  const f = stallFixture(); stallBag(f);
-  f.World.gp.pose = { regionId: 1, x: 100, y: 0, z: 100 };
-  f.Stall.start(); assert.equal(f.Stall.run, null); assert.ok(f.notices.at(-1).includes('town'));
-  const spot = f.Town.towns[0].services.storage;
-  f.World.gp.pose = { regionId: spot.regionId, x: spot.x, y: 0, z: spot.z };
-  f.Stall.start(); assert.equal(f.Stall.run, null); assert.ok(f.notices.at(-1).includes('priced'));
-  f.Settings.profile.stall.prices = { 62: 150 };
-  f.Hunt.running = true; f.Stall.start(); assert.equal(f.Stall.run, null); assert.ok(f.notices.at(-1).includes('hunting'));
-  f.Hunt.running = false;
-  f.World.gp.stall = { phase: 'owner', owner: 99, offers: [], visitors: [] };
-  f.Stall.start(); assert.equal(f.Stall.run, null); assert.ok(f.notices.at(-1).includes('stall'));
-  f.World.gp.stall = undefined;
-  f.Stall.start(); assert.ok(f.Stall.run, 'clean state starts the session');
-});
-test('the stall names, creates, registers each priced stack at its price and opens for business', () => {
-  const f = stallFixture(); stallBag(f);
-  f.Settings.profile.stall.title = 'Powders';
-  f.Settings.profile.stall.prices = { 62: 150, 63: 4000 };
-  f.Stall.start();
-  stallDrive(f, 40);
-  assert.equal(f.Stall.run?.phase, 'selling', 'the session is selling; status: ' + f.Stall.message);
-  assert.equal(f.World.gp.stall.open, true);
-  assert.deepEqual(f.World.gp.stall.offers.map(o => [o.slot, o.bagSlot, o.quantity, o.price]), [[1, 13, 20, 150], [2, 14, 4, 4000]]);
-  assert.deepEqual(f.commands.map(c => c.kind), ['stall-name', 'stall-create', 'stall-add', 'stall-add', 'stall-open']);
-  assert.equal(f.Stall.message.includes('2 offers'), true, f.Stall.message);
-});
-test('a sale counts only when the offer disappears and gold rises; the stall then closes when empty', () => {
-  const f = stallFixture(); stallBag(f);
-  f.Settings.profile.stall.prices = { 62: 150 };
-  f.World.gp.progression.gold = '100000';
-  f.Stall.start(); stallDrive(f, 30);
-  assert.equal(f.Stall.run.phase, 'selling');
-  // The offer vanishes but no gold arrives: not a confirmed sale.
-  f.World.gp.stall.offers = [];
-  f.advance(400); f.Controller.tick();
-  assert.equal(f.Stall.run.sold, 0, 'no gold gain, no sale claim');
-  assert.equal(f.Stall.run.phase, 'close', 'everything gone closes the stall');
-  stallDrive(f, 10);
-  assert.equal(f.World.gp.stall, undefined);
-  assert.equal(f.Stall.run, null);
-  assert.ok(f.Stall.message.includes('Sold 0'), f.Stall.message);
-});
-test('a confirmed sale is reported with its gold value', () => {
-  const f = stallFixture(); stallBag(f);
-  f.Settings.profile.stall.prices = { 62: 150 };
-  f.World.gp.progression.gold = '100000';
-  f.Stall.start(); stallDrive(f, 30);
-  f.World.gp.stall.offers = [];
-  f.World.gp.progression.gold = '103000'; // 20 × 150
-  f.advance(400); f.Controller.tick(); stallRespond(f);
-  assert.equal(f.Stall.run.sold, 20);
-  assert.equal(f.Stall.run.earned, 3000n);
-  assert.ok(f.Stall.message.includes('Sold 20 × Lucky Powder'), f.Stall.message);
-  stallDrive(f, 20);
-  assert.equal(f.Stall.run, null);
-  assert.ok(f.Stall.message.includes('Sold 20 items for 3,000 gold.'), f.Stall.message);
-});
-test('an unconfirmed stall-add is skipped and never resent; the rest of the stall still opens', () => {
-  const f = stallFixture(); stallBag(f);
-  f.Settings.profile.stall.prices = { 62: 150, 63: 4000 };
-  f.Stall.start();
-  stallDrive(f, 100, { ignoreAdd: 13 });
-  assert.equal(f.Stall.run?.phase, 'selling', 'status: ' + f.Stall.message);
-  assert.equal(f.commands.filter(c => c.kind === 'stall-add' && c.bagSlot === 13).length, 1, 'the unanswered add is never resent');
-  assert.deepEqual(f.World.gp.stall.offers.map(o => o.bagSlot), [14], 'only the answered item is offered');
-});
-test('stop all closes a stall this page opened', () => {
-  const f = stallFixture(); stallBag(f);
-  f.Settings.profile.stall.prices = { 62: 150 };
-  f.Stall.start(); stallDrive(f, 30);
-  assert.equal(f.Stall.run.phase, 'selling');
-  f.stopAll();
-  assert.equal(f.Stall.run, null);
-  assert.equal(f.commands.at(-1).kind, 'stall-close');
-});
-test('a world reset drops the stall session without sending anything', () => {
-  const f = stallFixture(); stallBag(f);
-  f.Settings.profile.stall.prices = { 62: 150 };
-  f.Stall.start(); stallDrive(f, 30);
-  const sent = f.commands.length;
-  f.bus.emit('reset');
-  assert.equal(f.Stall.run, null);
-  assert.equal(f.commands.length, sent, 'no close command after the world is gone');
-});
-test('a price change mid-session stops the stall instead of mixing old offers', () => {
-  const f = stallFixture(); stallBag(f);
-  f.Settings.profile.stall.prices = { 62: 150 };
-  f.Stall.start(); stallDrive(f, 30);
-  assert.equal(f.Stall.run.phase, 'selling');
-  f.Settings.profile.stall.prices = { 62: 200 };
-  f.advance(400); f.Controller.tick(); stallRespond(f);
-  assert.equal(f.Stall.run, null);
-  assert.equal(f.commands.at(-1).kind, 'stall-close');
 });

@@ -37,11 +37,11 @@ Routine **Cast rejected: 5** events appear as one informational **Skill not read
 
 Under **Supplies → Automatic potion use**, enter **Potion delay (ms)** as a whole number from 0 to 60000. The default is 350 ms. This minimum interval is saved per character; item cooldowns and inventory admission still apply.
 
-Under **Town → Scroll town cycle**, enable the cycle, set up your recall town and services, and enable **Revive in town and use reverse return**. Choose **Last return-scroll location (hunting area)**, the default, or **Death location** for revival trips. The death location is used only when you died inside the hunting area; a death further away reverses to the last return-scroll point, because hunting starts again only from inside the hunting area. Ordinary repair/sell/refill trips reverse to their departure point. Carry reverse scrolls; missing or refused destinations stop the trip without silently switching destinations. Existing protections for your character's inventory remain unchanged.
+Under **Town → Scroll town cycle**, enable the cycle, set up your recall town and services, and enable **Revive in town and go back to the hunting spot**. Choose **Last return-scroll location (hunting area)**, the default, or **Death location** for revival trips. The death location is used only when you died inside the hunting area; a death further away reverses to the last return-scroll point, because hunting starts again only from inside the hunting area. Ordinary repair/sell/refill trips reverse to their departure point. Missing or refused reverse destinations stop the trip without silently switching destinations. Without a reverse scroll, or with **Back to the hunting spot** set to **Walk**, the trip walks back to the saved hunting spot instead (see below). Existing protections for your character's inventory remain unchanged.
 
 ## Item rules
 
-The **Items** page lists every item in the game with sBot-style filters (group, race, gender, type, degree, search, only items with a rule). Per item choose **Pick** always/never and one action: **Store** (warehouse on town trips), **Sell** (pet loot at the repair merchant), **Keep**, or **Drop** (thrown away from your bag or the pet while hunting, never picked up again). Click a cell, right-click a row, or use the bulk buttons for everything shown (second click confirms). Rules come first; other items follow the Loot switches. Your own bag is never sold, and supplies the town trip needs are never stored from it.
+The **Items** page lists every item in the game with sBot-style filters (group, race, gender, type, SoX (Star / Moon / Sun), degree, search, only items with a rule). Per item choose **Pick** always/never and one action: **Store** (warehouse on town trips), **Sell** (pet loot at the repair merchant), **Keep**, or **Drop** (thrown away from your bag or the pet while hunting, never picked up again). Click a cell, right-click a row, or use the bulk buttons for everything shown (second click confirms). Rules come first; other items follow the Loot switches. Your own bag is never sold, and supplies the town trip needs are never stored from it.
 
 ## Vigor and pet potions
 
@@ -61,22 +61,24 @@ Set this up once on the **Town** page, under **Scroll town cycle**:
 1. Bind your recall to **Hotan, Jangan, Donwhang, Constantinople or Samarkand** in the game. Stop the bot, pick your town in the **Town** list and click **Set up this town**; you do not have to be in town. It saves the town's known arrival point (where its return scroll always lands) and fills the **Warehouse**, **Potion merchant**, **Repair merchant** and **World statue / teleport** from the server's NPC data, each as a spot a few metres from the NPC. It only fills what is empty; **Redo all automatically** replaces every saved point, and an arrival point from another town is replaced automatically. **Auto-set town services** does the same for the town you are standing in. If the saved arrival point is not where the scroll actually lands, the bot corrects it itself: after a recall it confirmed, once the character has stood still for three seconds in a known town, it saves that spot as the arrival point and carries on. This is only done in the town the saved services belong to.
 2. To do it by hand instead, stand near and select each service, then save its point: **Warehouse**, **Potion merchant**, **Repair merchant** and **World statue / teleport**. Open the potion shop before saving its merchant. Manual saves override the automatic ones.
 3. Enable **Buy HP** and/or **Buy MP**, and set the low-stock thresholds. Set **HP refill to** and **MP refill to** in potion counts (defaults: **100 HP / 300 MP**). These targets apply to walking restock and every town trip, including full bags and revival. Town buys X-Large potions.
-4. Enable **Use return scroll → town services → reverse return**. Enable the pickup-pet capacity option if wanted.
-5. Carry gold, spare return/reverse scrolls and at least **two free character bag slots**. Save your hunting spot and start the bot.
+4. Enable **Use return scroll → town services → back to the hunting spot**. Enable the pickup-pet capacity option if wanted.
+5. Choose **Back to the hunting spot**: **Reverse return scroll** (the default) or **Walk**.
+6. Carry gold, spare return scrolls (and reverse scrolls for the reverse choice) and at least **two free character bag slots**. Save your hunting spot and start the bot.
 
-When supplies run low or a bag reaches its capacity trigger, the bot recalls to town, handles pet loot, refills pots, repairs gear and reverses to the **last return-scroll point**.
+When supplies run low or a bag reaches its capacity trigger, the bot recalls to town, handles pet loot, refills pots, repairs gear and reverses to the **last return-scroll point**. With **Walk**, or when no reverse scroll is carried and none could be bought in town, it skips the world statue and walks back to the saved hunting spot, then hunts again. A walk that cannot reach the spot stops the bot with a message, as **Return & hunt** does.
 
 - **Pet elixirs, magic stones and attribute stones:** stored in the warehouse. Stones are also deposited from your own bag; elixirs stay in your bag so alchemy can use them. Magic stones include the Astral, Luck, Steady and Immortal stones. Attribute tablets are not stones and count as other alchemy items.
 - **SoX gear:** Star, Moon and Sun equipment is deposited in the warehouse from your own bag and from the pet, on the next trip that visits the warehouse. Nothing is stored right after pickup. SoX gear that is part of a saved buff set, the weapon chosen for alchemy, or matches the **Keep in pet (names)** list is never deposited. Switch it off with **Deposit SoX gear in the warehouse**.
+- **Sell Star gear instead:** switch on **Sell Star gear too (instead of depositing it)** and Star gear (not Moon or Sun) is sold like ordinary gear (pet loot, and the character bag when bag selling is on) rather than deposited. Keep names, buff-set gear, the alchemy weapon and the level list still protect it. Off by default.
 - **Gear by required level:** list levels in **Also deposit gear requiring level** (for example `85`, or `80-90, 100`) and equipment of any kind that requires one of those character levels is deposited the same way, from your bag and from the pet. Listed gear is never sold, even if the warehouse cannot be used. The same protections apply as for SoX. Empty by default.
 - **Other unprotected pet loot:** sold at the repair merchant. Ordinary equipment can be sold even with + or blue options.
-- **Other seal/rare gear, supplies and matching Keep names:** protected. Character bag items are sold only when you switch on **Sell items from the character bag too** (off by default); they follow the same rules as pet loot, and potions, scrolls, supplies, Keep names, buff-set gear and the alchemy weapon are never sold. With the switch on, the trip visits the repair merchant (sell, ammunition, repair) before the potion merchant, so a full bag is emptied before potions are bought and the trip does not stop at arrival for lack of a free slot. Items the game does not let merchants buy (quest and event items) are never offered, even with a Sell rule; if the merchant still refuses an item, it is kept and the rest is sold.
+- **Other seal/rare gear, supplies and matching Keep names:** protected. Character bag items are sold only when you switch on **Sell ordinary gear from the character bag too** (off by default). From the bag it sells only ordinary Chinese and European weapons, armour, shields and accessories that pet-loot rules would sell; any other bag item is sold only with a Sell rule. Pet summon scrolls and flutes, avatars, devil spirits, job suits, fortress weapons, item mall and event items, tablets, powders, potions, scrolls, supplies, Keep names, buff-set gear and the alchemy weapon are never sold from the bag. With the switch on, the trip visits the repair merchant (sell, ammunition, repair) before the potion merchant, so a full bag is emptied before potions are bought and the trip does not stop at arrival for lack of a free slot; with a full bag it also goes there before the warehouse, because pet loot reaches the warehouse through a free bag slot. Items the game does not let merchants buy (quest and event items) and pet summon scrolls and flutes, in the pet or the bag, are never offered, even with a Sell rule; if the merchant still refuses an item, it is kept and the rest is sold.
 
 If protected items fill a bag, the bot stays in town and asks you to free space.
 
 ### What starts a town trip
 
-The **Town** page shows the trip as a row of pictures (return scroll, warehouse, potions, repair, reverse) with what each step still needs, and lists what starts a trip under **Go to town when…**:
+The **Town** page shows the trip as a row of pictures (return scroll, warehouse, potions, repair, way back) with what each step still needs, and lists what starts a trip under **Go to town when…**:
 
 - Always: the character bag has one free slot or less. Potions, vigor potions and pills at their low-stock numbers (Supplies), and arrows and bolts at theirs (Town).
 - **Return when pickup pet is nearly full**, with **Pet free slots ≤**.
@@ -89,9 +91,13 @@ The XP and timer clocks run only while hunting and restart with every trip, so a
 
 ## Buff weapon swapping
 
+With **Swap weapons for buffs** and **Wear the weapon each buff needs** on, a buff your current weapon cannot cast is cast with a matching weapon from your bag (taken from the skill's own weapon requirement), then your combat weapon and shield are restored. No saved set is needed. Keep one bag slot free. Imbues and attack skills are not swapped.
+
+Saved sets, described below, are for buffs you assign to one.
+
 In **Combat → Buffs & imbue**, equip your buff weapon and optional shield, name the set and click **Save equipped buff set**. Repeat for other sets (such as cleric and bard), then put your combat gear back on.
 
-Assign each selected buff to its set and enable **Swap weapons for assigned buffs**. While hunting, the bot equips each needed set, casts its buffs and restores your original combat weapon and off-hand. Keep one bag slot free. Assigned buffs are skipped while swapping is off.
+Assign each selected buff to its set and enable **Swap weapons for buffs**. While hunting, the bot equips each needed set, casts its buffs and restores your original combat weapon and off-hand. Keep one bag slot free. Assigned buffs are skipped while swapping is off.
 
 The Buffs & imbue page shows, for each buff assigned to a set, how long it has left and what the swap is waiting for, and says why when a buff is due but the swap cannot start (for example a saved weapon that cannot be found in the bag). The swap happens when a buff is about to end, not when you start hunting. A buff whose cast was only unconfirmed is tried again after two minutes.
 
@@ -108,6 +114,12 @@ Stops at the target, attempt limit or missing materials. Failures can reduce +, 
 ### Item attributes
 
 Under **Item attributes (stat percentages)** pick, for the item selected above, the lowest percentage you want for each stat (for a weapon: Phy. reinforce, Mag. reinforce, attack rating, Phy. and Mag. attack power, critical; armour, shields and accessories have their own list). Press **Fuse attribute stones**: the bot fuses attribute stones of the item's degree, working down the list, until every picked stat reaches its target. A successful fusion rolls the stat again, so it can come out lower, and it can re-roll another stat of the item, so the bot keeps checking all picked stats. The stone chance is 50% before bonuses and the high steps (80%, 100%) are rare, so set **Stop after this many attribute stones** (100 by default). It stops if a stone of the right kind is missing from the bag.
+
+## Auto stall
+
+Sell bag items from your own street stall, like sBot's stall tab. On the **Stall** page, give the items a price: **Add a bag item to sell** lists what is in your bag (a new entry starts at 100 gold), and each row keeps its price. Prices are per exact item and saved per character, so the same drop sells at the same price on the next stall. Set a **Stall name** (defaults to your character name), a **Greeting** for visitors, whether to **List the stall on the stall network**, and whether to **Close when everything is sold**.
+
+**Open stall** requires town, standing still, and hunting, travel and alchemy stopped. The bot names and creates the stall, registers one offer per priced stack (the whole stack at your price, up to the stall's slot limit), then opens it for business and watches it: sales are confirmed only when the offer disappears and gold arrives, and the status line shows offers left, visitors and gold earned. A step the game does not confirm within 15 seconds is skipped (an unconfirmed item is not re-offered and the rest of the stall still opens); **Stop stall**, **Stop all** or **F8** closes a stall this page opened. Items already in a stall you opened yourself in the game are left alone; hunting refuses to start while any stall is open. Only the game's own stall state is used — the wire contract was read from the live client, but the flow has only been exercised in simulation, not against the live server.
 
 ## Healing and buffing the party
 
@@ -129,6 +141,17 @@ If hunting was running when the character died, it resumes after a resurrection 
 
 For your other accounts. On the **Party** page tick **Join the main account's party** and type the main character's name. While the character is not in a party, the bot accepts a party invitation from that character, or pages the party-matching board for their listing and applies to it (every 20 seconds at most). It does nothing while the character is in another party, and stops when the party is full or the character's level is outside the listing's range; the status line says which. The main account needs **Auto-recruit** and **Auto-accept party-matching joins** ticked and must not use this option itself. After a disconnect the party is rejoined as soon as automatic reconnect has the character back in the game.
 
+## Starting the bot when you enter the game
+
+Tick **Start the bot when this character enters the game** under **Settings → Behaviour** (off by default, saved per character). Each time the character enters the game (after logging in or after going back to character select), the bot waits about 5 seconds for the game to settle: the character loaded, the inventory known, no manual-control pause, and collision data for up to 20 more seconds. Then it continues from where the character stands, the same way as after a reconnect:
+
+- **At the hunting spot:** it starts hunting.
+- **In the town of your saved town services, far from the spot:** with the scroll town cycle on, it does the town services from where it stands, without a return scroll, then reverses or walks back to the hunting spot.
+- **Anywhere else:** it walks back to the hunting spot, as **Return & hunt** does.
+- **Dead:** it starts hunting so your death handling revives it and returns. With **On death: Stop** and the town revive off, it stays stopped and says so.
+
+It acts once per entry. A teleport or a town scroll is not a new entry. Pressing **Stop all**, **F8** or **Start / stop** before it fires cancels it for that entry, and after a reconnect the reconnect decides, so a bot you had stopped stays stopped. Without a saved hunting spot it does nothing and tells you. The status line shows what it is waiting for.
+
 ## Automatic reconnect
 
 This is always on; there is no switch. When the connection to the game is lost (a server restart, a network drop), the bot waits for the game's own retries, then asks the game to resume, and if that fails re-enters the world with the login the page already holds, exactly like pressing Enter at character select. It keeps trying every few seconds, then every 30 seconds, for up to 12 hours. It never types or stores your password: if the login itself is gone after a restart, the status line says so and the bot waits for you.
@@ -137,21 +160,21 @@ Once the character is back, hunting that was running resumes: at the hunting spo
 
 ### When the game fails to load
 
-If the game's loading screen shows **Unable to finish loading** (for example "Renderer failed: Invalid particle graph time"), the bot waits 15 seconds and reloads the page. It remembers the character and whether hunting was running; after the reload the game restores your login from its own session cookie, the bot enters the character again and hunting resumes as described above. It reloads at most 3 times in 30 minutes, then stops and says so. If the login cannot be restored, the status line says so and the bot waits for you. Logging out or entering a character yourself cancels it.
+If the game's loading screen shows **Unable to finish loading** (for example "Renderer failed: Invalid particle graph time"), the bot waits 15 seconds and reloads the page. It remembers the character and whether hunting was running; after the reload the game restores your login from its own session cookie, the bot enters the character again and hunting resumes as described above. If it still cannot get back in, every further reload in a row waits twice as long as the one before: 15 seconds, 30 seconds, 1 minute, 2, 4, 8, 16, then every 30 minutes, each with a small random extra delay so many bots do not reload at the same moment after a server restart. Once the character is back in the game the count starts over. After 12 hours of reloads without getting back in it stops and says so. If the login cannot be restored, the status line says so and the bot waits for you. Logging out or entering a character yourself cancels it.
 
-If the game shows **Your session ended while the connection was gone. Please log in again.**, the server dropped the session (it only holds a lost connection for about 30 seconds), so resuming is pointless. The bot enters the character afresh instead; if that has not worked after 30 seconds it reloads the page the same way, with the same limit of 3 reloads per 30 minutes. It never presses that window's Confirm button, which would log you out.
+If the game shows **Your session ended while the connection was gone. Please log in again.**, the server dropped the session (it only holds a lost connection for about 30 seconds), so resuming is pointless. The bot enters the character afresh instead; if that has not worked after 30 seconds it reloads the page the same way, and further reloads in a row wait twice as long each time (1 minute, 2, 4 and so on, up to 30 minutes). It never presses that window's Confirm button, which would log you out.
 
 If the character was killed while the connection was gone, the bot starts hunting again once it is back, so the usual death handling revives it and walks it back to the hunting spot (subject to your **On death** setting).
 
 An application to the main's party that has not been answered after 30 seconds is sent again, so several alt accounts can join one main.
 
-If the character is back in a known town, far from the hunting spot, and the town cycle's revive option is on, the bot does the town services and reverses with the scroll (the same trip as after a death) instead of walking.
+If the character is back in a known town, far from the hunting spot, and the town cycle's revive option is on, the bot does the town services first (the same trip as after a death), then reverses with the scroll or walks back.
 
-If the plain **Disconnected from the server.** box stays up and the resume and three fresh entries have not brought the character back, the bot reloads the page the same way. The limit of 3 reloads in 30 minutes is a pause, not the end: once the oldest reload is 30 minutes old the bot tries again, for up to 12 hours.
+If the plain **Disconnected from the server.** box stays up and the resume and three fresh entries have not brought the character back, the bot reloads the page the same way, with the same growing wait between reloads in a row. A server that is down for hours is still retried every 30 minutes, for up to 12 hours.
 
 ## Returning after death
 
-Leave **Revive in town and reverse to last scroll point** enabled under **Town → Go to town when…**. With the town cycle enabled, the bot revives, completes town services and reverses back to hunt. Hunting resumes within 30 metres of the last scroll point, or within your saved hunting area after death. Carry reverse scrolls.
+Leave **Revive in town and go back to the hunting spot** enabled under **Town → Go to town when…**. With the town cycle enabled, the bot revives, completes town services and reverses back to hunt. Hunting resumes within 30 metres of the last scroll point, or within your saved hunting area after death. Without a reverse scroll, or with **Back to the hunting spot** set to **Walk**, it walks back to the saved hunting spot instead.
 
 Updates, suggestions and bug reports are on Discord (https://discord.gg/Y5H5ZyfQ7u); the **Discord** button at the top of the panel opens the invite. After an update, a window beside the panel shows the patch notes of every version since the one you used before; the bot keeps running while it is open. Click the version number at the top of the panel to read them again. When a newer version is out, the top of the panel names it and its headline ("Update 1.2.77 available: …") next to the **Update** button.
 
@@ -168,6 +191,12 @@ Under **Settings → Auto mastery and skills** the bot can spend skill points fo
 - **Order:** **Spend skill points on** chooses masteries first, skills first, or alternating after each confirmed level.
 
 It works while hunting is stopped and does nothing while you are dead or during a town trip. If the server refuses a level (for example its mastery total limit) the bot waits a minute before trying that one again.
+
+## Luring monsters to the party
+
+For a tank whose party does the killing. Under **Combat → Hunt area → Lure** (the Training page in the classic window), save a hunting spot, then walk to each place you want monsters pulled from and click **Add pull point here** (points A, B, C…, up to 26). Choose a **Single-target taunt** and an **Area taunt**, and tick **Lure instead of hunting**. Start / stop (F8) and **Stop all** work as for hunting.
+
+Each round the character walks to the next point, taunts the monster nearest to it (within **Search radius at a point**), walks back to the spot and holds there for **Hold at the spot (s)** (10 s by default) so the damage dealers take the monsters over, then goes to the next point. On the way back with monsters it stops for **Pause length (s)** after every **On the way back, pause every (m)** (4 s every 10 m by default; 0 m turns the pauses off) so they keep up. The area taunt is cast whenever it is ready and a monster is near, except while holding. The lure never attacks. Below **Back to the party below HP (%)** it gives up the pull and walks straight back without pauses. A point with no monster sends it back with no hold. Potions, town trips, manual pause and death handling work as for hunting; each start begins at the spot. If a point cannot be reached, hunting stops with the reason. Pull points are kept per character and in shared settings' personal part.
 
 ## Following a party member
 
@@ -233,7 +262,7 @@ Open **Settings → Session stats** for hunting time, XP/hour, net gold, confirm
 
 ## Map
 
-The **Map** page draws the game's minimap around you with your hunt radius (yellow circle) and chase distance (dashed ring), and shows you, monsters, party members (also ones out of sight, at the edge), other players, NPCs and pets. Click the map to mark a point and press **Make this the hunting spot** to hunt there; the point uses your current height, as the game's own map does. Drag to look around, use **+** and **−** or the mouse wheel to zoom, and **Follow me** to centre on yourself again. Hunt radius and chase distance can be changed under the map. Dungeons have no map yet.
+The **Map** page draws the game's minimap around you with your hunt radius (yellow circle) and chase distance (dashed ring), and shows you, monsters, party members (also ones out of sight, at the edge), other players, NPCs and pets. Click the map to mark a point and press **Make this the hunting spot** to hunt there; the point uses your current height, as the game's own map does. Under the map, **Hunting area** also takes outdoor **X** / **Y** coordinates in whole metres: **Set spot** saves them as the hunting spot, **Set actual position** saves where you stand, and **Get position** and **Copy** show and copy your current coordinates without changing the spot. Drag to look around, use **+** and **−** or the mouse wheel to zoom, and **Follow me** to centre on yourself again. Hunt radius and chase distance can be changed under the map. Dungeons have no map yet.
 
 ## Wide window
 
@@ -241,11 +270,11 @@ Click **Wide** at the top of the panel for a wider window: a status strip with H
 
 ## Classic window
 
-Click **Classic** at the top of the panel (screens at least 900 px wide) for a fixed-size window laid out like SBot: a menu bar (Settings, Lists, Help), HP, MP and EXP bars with the bot status beside them, three wide buttons (Start / stop, Return & hunt, Stop all), the tabs down the left, and your session numbers, supplies and **Start training / Stop training** always on the right. The tabs are Settings, Skills, Items/Storage, Training place, Party/Autores, Player buffing, Auto alchemy and Extra, then Map, Wardrobe and Setup. They hold the same settings as the compact and wide pages, regrouped under SBot's headings, so a change made in one window shows in the others. SBot tabs for things the bot cannot do yet (Chat, Union Party, Auto quest, Auto Stall, Other players, Alarms) are not shown. **Compact** brings the small window back; a narrow screen always shows the compact window.
+Click **Classic** at the top of the panel (screens at least 900 px wide) for a fixed-size window laid out like SBot: a menu bar (Settings, Lists, Help), HP, MP and EXP bars with the bot status beside them, three wide buttons (Start / stop, Return & hunt, Stop all), the tabs down the left, and your session numbers, supplies and **Start training / Stop training** always on the right. The tabs are Settings, Skills, Items/Storage, Stall, Training place, Party/Autores, Player buffing, Auto alchemy and Extra, then Map, Wardrobe and Setup. They hold the same settings as the compact and wide pages, regrouped under SBot's headings, so a change made in one window shows in the others. SBot tabs for things the bot cannot do yet (Chat, Union Party, Auto quest, Other players, Alarms) are not shown. **Compact** brings the small window back; a narrow screen always shows the compact window.
 
 ## Minimised panel
 
-The **×** at the top right of the panel minimises it to a small icon, so it stays out of the way while the bot keeps running. Its dot shows the state: green while hunting, yellow during a town trip, walk back, alchemy or reconnect, and red when stopped, dead or in error. Hover the icon for the current status, HP and MP. It glows when something needs you (a warning, a SoX pickup or a death) until you hover it or open the panel. Drag it anywhere; it keeps its spot and stays minimised after a reload. The panel itself also reopens where you last dragged it. Click it or press **F7** to bring the panel back.
+The **×** at the top right of the panel, or **F6**, minimises it to a small icon, so it stays out of the way while the bot keeps running. Its dot shows the state: green while hunting, yellow during a town trip, walk back, alchemy or reconnect, and red when stopped, dead or in error. Hover the icon for the current status, HP and MP. It glows when something needs you (a warning, a SoX pickup or a death) until you hover it or open the panel. Drag it anywhere; it keeps its spot and stays minimised after a reload. The panel itself also reopens where you last dragged it. Click it or press **F6** or **F7** to bring the panel back.
 
 ## Controls
 
@@ -253,14 +282,27 @@ The **×** at the top right of the panel minimises it to a small icon, so it sta
 | --- | --- |
 | **F8** | Start or stop the bot |
 | **×** (top right) | Minimise the panel to a small icon; the bot keeps running |
+| **F6** | Minimise the panel to a small icon, or bring it back; also shows a panel hidden with Shift+F7 |
 | **F7** | Fold or unfold the panel; brings a minimised panel back |
 | **Shift+F7** | Hide or show the panel; the bot keeps running |
 | **Return & hunt** | Walk to the saved hunting spot, then start hunting |
 | **Stop all** | Cancel hunting and automated trips; potion use has its own switch |
 
+## Long walks are checked against the game map (beta)
+
+A long walk back follows a corridor from the converted route data, which was made from another map and is wrong in places (a slope it climbs can be a cliff here). Before walking it, the bot asks the game for the collision of each region on the way, the same data the game loads when you get there, and walks every step of the corridor with the game's own movement rules. A step that does not walk is left out and the corridor is planned again around it, so the walk takes a way that exists, for example round the rim from Hotan to the Karakoram aircraft dock instead of through the crater. While it checks, the status says so and the character waits; a long corridor takes a few seconds to a minute. On the way, a corridor point the character cannot stand on (a rock edge) is passed close by or skipped. If the game's asset loader was not seen (the bot attached after the game started), the corridor is walked unchecked, as before.
+
+## Teleports and ferries on the way back (beta)
+
+When the hunting spot cannot be reached on foot from where the character stands (across a river, or between parts of the map with no walking connection), walking back uses the game's teleporters and ferries, the same ones you would click. Hotan to the western bank, for example, walks to the ferry on the Hotan side, pays its fee, crosses, and walks on to the spot. The bot picks the cheapest mix of walking and hops it can afford, selects the teleporter, waits for its menu and asks for the destination, exactly as the menu does. A teleporter that refuses (not enough gold, level too low, a trade cart) is left out and another way is tried; with no other way the walk stops and says why. A world change other than the hop itself, manual control, Stop or F8 ends the trip. Switch it off with **Walking back may use teleports and ferries (beta)** under **Combat → Hunting area**; then such a walk stops as before. The bot stops about 15 m from the teleporter, within talking range, because many stand on a dock or a ship.
+
+Both are beta: they were tested on the Hotan to Karakoram aircraft dock route. If a walk takes an odd way, send the log; the **Route check** and **Travel** lines show what was checked and used.
+
 ## If a town trip stalls on the way to a merchant
 
 The main panel's status line and Send bug report now name what the walk is waiting for, for example "Town movement to the potion merchant: waiting; retrying collision route. No walkable route found through the loaded collision map." The bot never walks blindly through obstacles, so it keeps retrying until the route works or you press F8.
+
+Before it retries, two things happen on their own. If the character stands where the collision map has no way out (on a blocked tile or right against a wall, which can happen after logging in), it first takes a short step to the nearest open ground that is not behind a wall. And if a walk to a service finds no route or cannot get around an obstacle, it walks to the town start (the saved arrival point, where the return scroll lands) once and tries the service again from there.
 
 - **"Waiting for game collision data" / "Waiting for collision coverage":** the game has not given the bot a collision map for the town you arrived in. Reload the game and try again.
 - **"No walkable route found":** save that service point again from open ground a few steps in front of the NPC (stop hunting, stand there, select the NPC and click its Save button).

@@ -1,4 +1,5 @@
 // Town service owns the whole recall -> warehouse -> shop -> smith -> reverse trip.
+// Without a reverse scroll (or with Back to the hunting spot: Walk) the trip ends after the services and WalkBack walks back.
 // Native travel-gate type 5 spends the reverse scroll: choice 2 recalls, choice 3 returns to death.
 // See OpenSRO action/reversereturn.go, 6FEF10 and 5DA1B0's choice rows.
 const TOWN_REVERSE = { recall: 2, death: 3 };
@@ -77,7 +78,10 @@ const Town = {
     return [['arrow', 62], ['bolt', 10376]].filter(([kind]) => a?.[kind]?.on).map(([kind, refObjId]) => ({ kind, refObjId, low: a[kind].low, target: a[kind].target }));
   },
   ammoCount(ref) { return (World.gp?.inventory || []).filter(i => i.refObjId === ref).reduce((n, i) => n + (i.quantity ?? 1), 0); },
-  supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: s.kind === 'hp' ? 8 : s.kind === 'mp' ? 15 : s.refObjId })); },
+  // Low-level towns do not sell X-Large potions: the tier found there is remembered per kind, so the low-stock
+  // check and the refill count the same potion.
+  tier: {},
+  supplies() { return Restock.supplies().map(s => ({ ...s, refObjId: this.tier[s.kind] || (s.kind === 'hp' ? 8 : s.kind === 'mp' ? 15 : s.refObjId) })); },
   status() {
     if (this.trip) return this.message + (this.trip.why ? ` (reason: ${this.trip.why})` : '');
     if (this.message.startsWith('Town cycle stopped:')) return this.message;
@@ -185,7 +189,7 @@ const Town = {
         splitList(c.keep).some(s => name.includes(s))) return false;
     // Native rarity 2 covers seal tiers. Plus and blue options do not protect
     // ordinary gear; unknown rarity still means keep it rather than guess.
-    if (ItemType.isEquipment(tf) && (![0, 1].includes(item.tooltip?.fields?.rarity) ||
+    if (ItemType.isEquipment(tf) && !(c.sellStar && Items.soxOf(item) === 1) && (![0, 1].includes(item.tooltip?.fields?.rarity) ||
         /_(RARE|MAGIC|LEGEND|MYTH)(?:_HONOR)?$/i.test(item.codename || ''))) return false;
     return true;
   },
@@ -213,6 +217,7 @@ const Town = {
   // alchemy (checked by bag slot, so only for items from the character bag).
   depositItem(item, fromBag = false) {
     const c = this.cfg(), act = ItemRules.get(item.refObjId)?.act;
+    if (ItemRules.guarded(item)) return false; // the chosen primary / secondary gear stays put
     // An item rule decides first. Store: any kind of item, except from the bag what the trip itself needs
     // (potions, pills, return/reverse/speed scrolls, the supplies it buys). Sell, keep or drop: never deposited.
     if (act && act !== 'store') return false;
@@ -224,7 +229,7 @@ const Town = {
     }
     if (!Number.isInteger(item.typeFlags) || !ItemType.isEquipment(item.typeFlags)) return false;
     const level = this.requiredLevel(item);
-    if (!(c.storeSox && Items.soxOf(item) > 0) && !(level !== null && this.levelRanges().some(([a, b]) => level >= a && level <= b))) return false;
+    if (!(c.storeSox && !(c.sellStar && Items.soxOf(item) === 1) && Items.soxOf(item) > 0) && !(level !== null && this.levelRanges().some(([a, b]) => level >= a && level <= b))) return false;
     if (splitList(c.keep).some(s => (item.name || '').toLowerCase().includes(s))) return false;
     const key = BuffGear.key(item);
     if (BuffGear.cfg().buffSets.some(s => s.weapon === key || s.shield === key)) return false;
@@ -245,23 +250,42 @@ const Town = {
   // Pet loot, and the character bag when "Sell items from the character bag" is on. A Sell rule sells it; keep, store and drop rules never do.
   sellable(item) {
     // itemdata CanSell 0 (quest and event items): the merchant refuses the sale with inventory code 2.
-    if (item.tooltip?.fields?.canSell === 0) return false;
+    if (item.tooltip?.fields?.canSell === 0 || ItemRules.guarded(item)) return false;
+    // Pet summon scrolls and flutes (TID1 3, TID2 2): the pet itself. The merchant buys every one of them, and players
+    // keep other pets' scrolls in the pickup pet, so they are never sold, not even with a Sell rule.
+    if (!Number.isInteger(item.typeFlags) || (item.typeFlags & 124) === 76) return false;
     const act = ItemRules.get(item.refObjId)?.act;
     if (act) return act === 'sell';
     return this.disposable(item) && !this.kept.includes(Loot.category(item.typeFlags));
   },
   // From the bag, never what the trip itself needs, the weapon chosen for alchemy or a saved buff set's gear.
+  // The bag holds the player's own things, not just drops: without a Sell rule only ordinary Chinese / European
+  // weapons, armour, shields and accessories are sold. Pet summon scrolls, avatars, devil spirits, job suits,
+  // fortress weapons, item mall and event items, tablets, powders and anything with an unknown codename stay.
   sellableBag(item) {
     if (this.needed(item) || Alchemy.selected && Alchemy.selected.slot === item.slot) return false;
     const key = BuffGear.key(item);
     if (BuffGear.cfg().buffSets.some(s => s.weapon === key || s.shield === key)) return false;
-    return this.sellable(item);
+    if (!this.sellable(item)) return false;
+    return ItemRules.get(item.refObjId)?.act === 'sell' || this.plainGear(item);
   },
+  // Ordinary race gear: equipment of TID3 1-6 or 9-12 (garments to accessories; 7 is job suits, 13 avatars and
+  // devil spirits) with an ITEM_CH_ / ITEM_EU_ codename.
+  // The codename comes from the item catalogue; until it has loaded nothing is sold from the bag.
+  plainGear(item) {
+    Loot.ensureCatalogue();
+    const tf = item.typeFlags, code = item.codename || Items.data?.get(item.refObjId)?.code || '';
+    return Number.isInteger(tf) && ItemType.isEquipment(tf) && [1, 2, 3, 4, 5, 6, 9, 10, 11, 12].includes((tf >>> 7) & 15) &&
+      /^ITEM_(CH|EU)_/.test(code);
+  },
+  // Whether a trip could empty any of the pet's slots (sell or store something). A pet full of protected items would
+  // otherwise send the bot to town again and again for nothing.
+  petClearable(pet) { return pet.rec.inventory.some(i => this.sellable(i) || this.eligible(i)); },
   autoRevive() { return this.cfg().enabled && this.cfg().revive; },
   reason() {
     const c = this.cfg(), pet = Loot.pet();
     if (World.freeBagSlots() <= 1) return 'character bag nearly full';
-    if (c.petFull && pet && pet.rec.status - pet.rec.inventory.length <= c.petFree) return 'pickup pet nearly full';
+    if (c.petFull && pet && pet.rec.status - pet.rec.inventory.length <= c.petFree && this.petClearable(pet)) return 'pickup pet nearly full';
     if (this.supplies().some(s => Restock.count(s.refObjId) <= s.low)) return 'potions running low';
     if (this.ammoSupplies().some(s => this.ammoCount(s.refObjId) <= s.low)) return 'ammunition running low';
     if (c.broken && this.weaponBroken()) return 'weapon broken';
@@ -297,12 +321,17 @@ const Town = {
     if (key !== this.xpKey) { this.xpKey = key; this.lastXpAt = now(); }
   },
   restartClocks() { this.lastXpAt = this.cycleFrom = now(); },
+  // Already standing in a known town (all four services in range): no return scroll is needed or wanted.
+  inTown(revival = false) { return !revival && !!World.pose() && !!this.detect(World.pose()); },
+  // The way back after the services: the reverse scroll when that is the choice and one is carried, otherwise a walk.
+  walks() { return this.cfg().returnBy === 'walk'; },
+  reverses() { return !this.walks() && !!this.scroll(0x19ec); },
   validate(revival = false) {
     const c = this.cfg(), supplies = this.supplies();
-    const missing = [['arrival', 'arrival point'], ['vendor', 'potion merchant'], ['smith', 'repair merchant'], ['gate', 'world statue / teleport'], ...(c.petFull ? [['storage', 'warehouse']] : [])].filter(([key]) => !c[key]).map(([, label]) => label);
+    const missing = [['arrival', 'arrival point'], ['vendor', 'potion merchant'], ['smith', 'repair merchant'], ...(this.walks() ? [] : [['gate', 'world statue / teleport']]), ...(c.petFull ? [['storage', 'warehouse']] : [])].filter(([key]) => !c[key]).map(([, label]) => label);
     if (missing.length) return 'Save missing town services: ' + missing.join(', ') + '.';
     if (!supplies.length || supplies.some(s => !s.refObjId || !Number.isInteger(s.low) || !Number.isInteger(s.target) || s.low < 0 || s.target <= s.low || s.target > 10000)) return 'Choose potions and valid low-stock/refill quantities.';
-    if ((!revival && !this.scroll(0x09ec)) || !this.scroll(0x19ec)) return revival ? 'Carry a reverse return scroll for revival return.' : 'Carry a return scroll and a reverse return scroll before hunting.';
+    if (!revival && !this.inTown() && !this.scroll(0x09ec)) return 'Carry a return scroll before hunting.';
     if (toBigInt(World.gp.progression?.gold ?? 0) <= 0n) return 'Carry gold for potions, storage and repairs.';
     return '';
   },
@@ -331,8 +360,11 @@ const Town = {
     const H = Hunt.cfg(), deathInArea = !!(this.deathPoint && H.center && dist2D(this.deathPoint, H.center) <= H.radius);
     const reverseChoice = revival && this.cfg().deathReturn === 'death' && deathInArea ? TOWN_REVERSE.death : TOWN_REVERSE.recall;
     if (revival && this.cfg().deathReturn === 'death' && !deathInArea) Log.info('Died outside the hunting area: reversing to the last return-scroll point so hunting can start again.');
-    const origin = revival ? (reverseChoice === TOWN_REVERSE.death ? this.deathPoint || Hunt.cfg().center : this.lastScrollPoint || Hunt.cfg().center) : World.pose();
-    if (!origin) return this.fail('No saved hunting point for revival return.');
+    // Started in town: the pose is the town, not the hunt. The reverse scroll goes back to the last scroll point.
+    const inTown = this.inTown(revival);
+    const origin = revival || inTown ? (reverseChoice === TOWN_REVERSE.death ? this.deathPoint || Hunt.cfg().center : this.lastScrollPoint || Hunt.cfg().center) : World.pose();
+    if (!origin) return this.fail(inTown ? 'No saved hunting point to return to; set the hunting area first.' : 'No saved hunting point for revival return.');
+    if (!this.walks() && !this.scroll(0x19ec)) Log.info('No reverse return scroll: unless one is bought in town, the trip walks back to the hunting spot after the services.');
     if (revival) Hunt.running = true;
     Restock.trip = null;
     Resurrect.cancelTrip('', true); Resurrect.holdUntil = 0; Loot.suspend();
@@ -340,40 +372,88 @@ const Town = {
     // Say why, once: the trigger is only visible before departure, and people ask why the bot went to town.
     const why = revival ? 'returning after a death' : this.reason() || 'started by you';
     this.lastTrip = { why, at: now() };
-    this.trip = { phase: 'recall', at: now(), started: now(), origin: { ...origin }, revival, reverseChoice, why,
-      huntArea: revival && !(reverseChoice === TOWN_REVERSE.death && this.deathPoint) && Hunt.cfg().center ? { center: { ...Hunt.cfg().center }, radius: Hunt.cfg().radius } : null,
+    this.trip = { phase: 'recall', at: now(), started: now(), origin: { ...origin }, revival, inTown, reverseChoice, why,
+      huntArea: (revival || inTown) && !(reverseChoice === TOWN_REVERSE.death && this.deathPoint) && Hunt.cfg().center ? { center: { ...Hunt.cfg().center }, radius: Hunt.cfg().radius } : null,
       manualAt: Manual.lastAt, character: World.charName, petRef: Loot.pet()?.rec.refObjId,
       config: JSON.stringify(this.cfg()), supplies: this.supplies(), sellFirst: !!this.cfg().sellBag };
     Hunt.targetGid = Hunt.lootGid = 0;
+    // Bag selling reads codenames from the item catalogue: start loading it now, well before the merchant.
+    if (this.trip.sellFirst) Loot.ensureCatalogue();
     // Stop the worker's repeating attack/movement as well as the bot's next tick.
     // Pending inventory work still settles before item-use is admitted below.
     this.trip.haltSent = Cmd.move(World.pose());
     this.trip.haltAt = now();
     this.trip.haltAttempts = this.trip.haltSent ? 1 : 0;
+    // Started in town: skip the return scroll and go straight to the services.
+    if (inTown) { this.arrived(); return; }
     if (revival) this.enter('revive-arrival');
     else this.message = 'Using return scroll; recall must be bound to your town.';
   },
   arrived() {
-    this.trip.scrollAttempts = 0; this.trip.scrollRequest = null;
+    const t = this.trip, full = World.freeBagSlots() < 1;
+    t.scrollAttempts = 0; t.scrollRequest = null;
     // With bag selling on, the trip sells first, so a full bag can still make room for refills.
-    if (World.freeBagSlots() < 1 && !this.trip.sellFirst) return this.fail('Returned to town; free a character bag slot for storage and refills.');
-    if (this.cfg().petFull && this.reason() === 'pickup pet nearly full' && !Loot.pet()?.rec.inventory.some(i => this.disposable(i) || this.eligible(i))) return this.fail('Returned to town; pet is full of protected items. Empty it manually.');
-    this.enter(this.cfg().storage ? 'walk-storage' : this.trip.sellFirst ? 'walk-smith' : 'walk-vendor');
+    if (full && !t.sellFirst) return this.fail('Returned to town; free a character bag slot for storage and refills.');
+    t.order = this.order(full);
+    this.enter('walk-' + t.order[0]);
   },
-  // The merchant to walk to after closing a window: potions come before repair and selling, unless bag selling is on,
-  // which sells and repairs first so a full bag has room to buy.
-  closeNext(phase) {
+  // The services in visiting order. Potions come before repair and selling, unless bag selling is on, which sells and
+  // repairs first so a full bag has room to buy. A full bag also sells before the warehouse: pet loot reaches the
+  // warehouse through a free bag slot.
+  order(full) {
     const sellFirst = this.trip?.sellFirst;
-    return { 'close-storage': sellFirst ? 'walk-smith' : 'walk-vendor', 'close-smith': sellFirst ? 'walk-vendor' : 'walk-gate', 'close-vendor': sellFirst ? 'walk-gate' : 'walk-smith' }[phase];
+    const order = !sellFirst ? ['storage', 'vendor', 'smith', 'gate'] : full ? ['smith', 'storage', 'vendor', 'gate'] : ['storage', 'smith', 'vendor', 'gate'];
+    return order.filter(role => (role !== 'storage' || this.cfg().storage) && (role !== 'gate' || !this.walks()));
+  },
+  // The service to walk to after closing a window. After the last one: the world statue to reverse, or the walk back
+  // when no reverse scroll is carried (none was bought in town either).
+  closeNext(phase) {
+    const order = this.trip?.order || this.order(false), role = phase.replace(/^close-/, ''), next = order[order.indexOf(role) + 1] || 'gate';
+    return next === 'gate' && !this.reverses() ? 'leave' : 'walk-' + next;
+  },
+  // Walk back instead of reversing: the trip ends here and WalkBack, which resumes hunting on arrival, takes over.
+  // A trapped-character recovery trip stops in town instead, as it does before a reverse (lean-trap.js).
+  leave() {
+    const t = this.trip, gp = World.gp;
+    if (t.recovery) {
+      this.trip = null;
+      Hunt.stop('Recovery town services completed. Check the hunting spot before returning.');
+      return;
+    }
+    if (gp.inventoryPending || World.isCasting()) return;
+    if (t.supplies.some(s => Restock.count(s.refObjId) < s.target) || this.damaged().length || !t.revival && !this.scroll(0x09ec)) return this.fail('Final supply, repair or travel-scroll check failed.');
+    if (World.freeBagSlots() <= 1) return this.fail('Returned to town; free at least two character bag slots before hunting again.');
+    if (!Hunt.cfg().center) return this.fail('No saved hunting spot to walk back to.');
+    this.trip = null; Hunt.targetGid = Hunt.lootGid = 0; this.restartClocks();
+    WalkBack.start(true);
+    if (!WalkBack.active && !Travel.active) { this.message = 'Town cycle stopped: the walk back to the hunting spot did not start.'; Hunt.stop(this.message); return; }
+    this.message = 'Town service complete; walking back to the hunting spot.';
+    Log.info(this.message); UI.toast(this.message);
   },
   enter(phase) {
     const t = this.trip;
     t.phase = phase; t.at = now(); t.sent = false; t.pending = null; t.transition = false;
-    t.travel = null; t.lastPose = null; t.progressAt = now(); t.movedAt = -Infinity; t.retryAt = 0;
+    t.travel = null; t.lastPose = null; t.progressAt = now(); t.movedAt = -Infinity; t.retryAt = 0; t.stall = null; t.avoid = [];
     this.message = 'Town cycle: ' + phase;
   },
   // Plain wording for the service being approached (never an NPC name), for messages and bug reports.
-  role(phase) { return { storage: 'warehouse', vendor: 'potion merchant', smith: 'repair merchant', gate: 'world statue' }[String(phase).replace(/^(walk|open|close)-/, '')] || 'service point'; },
+  role(phase) { return { storage: 'warehouse', vendor: 'potion merchant', smith: 'repair merchant', gate: 'world statue', arrival: 'town start' }[String(phase).replace(/^(walk|open|close)-/, '')] || 'service point'; },
+  viaArrival() {
+    const t = this.trip, c = this.cfg();
+    if (t.phase === 'walk-arrival') {
+      this.enter(t.resume);
+      this.message = 'Town cycle: the town start is out of reach too; trying the ' + this.role(t.phase) + ' again.';
+      Log.info(this.message);
+      return true;
+    }
+    if (!c.arrival || t.viaArrival === t.phase || !(dist2D(World.pose(), c.arrival) > 60)) return false;
+    const resume = t.phase;
+    this.enter('walk-arrival');
+    t.resume = t.viaArrival = resume;
+    this.message = 'Town cycle: no way to the ' + this.role(resume) + ' from here; going to the town start first.';
+    Log.info(this.message);
+    return true;
+  },
   walk(dest) {
     const t = this.trip, pose = World.pose();
     // Permit a reachable nearby approach, but always stay in service range.
@@ -387,7 +467,20 @@ const Town = {
       this.message = 'Town movement to the ' + this.role(t.phase) + ': blocked route (no progress for 20 s); retrying.';
       return false;
     }
+    if (!World.isSitting() && Navigation.watch(t, pose, t.movedAt, t.travel?.route[t.travel.index] || dest) === 'giveup') {
+      if (this.viaArrival()) return false;
+      // The warehouse is optional: a blocked walk to it skips the deposit so the potions, repairs and the way back still happen.
+      if (t.phase === 'walk-storage') {
+        this.enter(this.closeNext('close-storage'));
+        this.message = 'Warehouse skipped: blocked on the way, I could not walk around the obstacle.';
+        UI.toast(this.message, 'warn', 6000);
+        return false;
+      }
+      this.fail('Blocked on the way to the ' + this.role(t.phase) + '; I could not walk around the obstacle.');
+      return false;
+    }
     const step = Navigation.next(t, dest, false, radius);
+    if (step.error && !step.waiting && this.viaArrival()) return false;
     if (step.waiting || step.error) {
       t.travel = null; t.retryAt = now() + 5000; t.progressAt = now();
       this.message = 'Town movement to the ' + this.role(t.phase) + ': waiting; retrying collision route. ' + (step.error || 'Waiting for collision coverage.');
@@ -501,7 +594,7 @@ const Town = {
     const bagItem = !petItem && t.sellFirst ? World.items().find(i => this.sellableBag(i) && !unsold('bag:', i)) : null;
     const item = petItem || bagItem;
     if (!item) {
-      if (this.cfg().petFull && pet && pet.rec.status - pet.rec.inventory.length <= this.cfg().petFree) return this.fail('Protected pet items still fill the bag.');
+      // Protected items may still fill the pet; the trip carries on and goes back to hunting rather than stopping in town.
       this.enter(this.ammoSupplies().length ? 'ammo' : 'repair'); return;
     }
     const quantity = item.quantity ?? 1;
@@ -538,26 +631,41 @@ const Town = {
     const t = this.trip, gp = World.gp, shop = Restock.activeShop();
     if (!shop || shop.npc !== this.npc('vendor')?.gid || shop.error) return this.fail(shop?.error || 'Potion merchant selection changed.');
     if (!this.pendingDone(p => Restock.count(p.ref) >= p.before + p.quantity) || !this.trip || gp.inventoryPending) return;
-    let s = t.supplies.find(s => Restock.count(s.refObjId) < s.target);
+    t.buySkipped ||= [];
+    let s = t.supplies.find(s => !t.buySkipped.includes(s.refObjId) && Restock.count(s.refObjId) < s.target);
     if (!s) {
-      // Refill held travel scrolls from gold offers only. Never buy from Item Mall.
-      for (const type of [0x09ec, 0x19ec]) {
+      // Refill held travel scrolls from gold offers only. Never buy from Item Mall. A missing reverse scroll is not an
+      // error: the trip walks back instead.
+      for (const type of this.walks() ? [0x09ec] : [0x09ec, 0x19ec]) {
         const count = World.items().filter(i => (i.typeFlags & 0xfffc) === type).reduce((n, i) => n + (i.quantity ?? 1), 0);
         if (count >= 2) continue;
         const offer = shop.offers.find(o => (o.currency === undefined || o.currency === 1) &&
           (o.items || o.previews || []).some(i => i.refObjId === o.refObjId && (i.typeFlags & 0xfffc) === type) &&
           (!o.contents?.length || o.contents.length === 1 && o.contents[0].refObjId === o.refObjId && o.contents[0].quantity === 1));
         if (offer) { s = { kind: 'scroll', refObjId: offer.refObjId, target: Restock.count(offer.refObjId) + 2 - count }; break; }
-        if (!count) return this.fail('Travel scrolls unavailable at this merchant. Carry spares.');
+        if (!count && type === 0x09ec) return this.fail('Travel scrolls unavailable at this merchant. Carry spares.');
       }
     }
     if (!s) { this.enter('close-vendor'); return; }
     const offer = shop.offers.find(o => o.refObjId === s.refObjId && (s.kind === 'scroll' || Restock.offerKind(o) === s.kind));
+    if (!offer && (s.kind === 'hp' || s.kind === 'mp')) {
+      // No X-Large here: buy the largest potion of this kind the merchant sells instead of stopping the town cycle.
+      const price = o => toBigInt(o.price);
+      const best = shop.offers.filter(o => Restock.offerKind(o) === s.kind && o.maxStack > 0).sort((x, y) => price(y) > price(x) ? 1 : price(y) < price(x) ? -1 : 0)[0];
+      if (best) { this.tier[s.kind] = s.refObjId = best.refObjId; return; }
+    }
     if (!offer || !(offer.maxStack > 0)) return this.fail(s.kind === 'scroll' ? 'Selected scroll is unavailable here.' : s.kind === 'cure' ? 'Special Universal Pill (small) is unavailable here.' : s.kind === 'vigor' ? 'The selected vigor potion size is unavailable here; choose another size in Supplies.' : 'X-Large ' + s.kind.toUpperCase() + ' potion is unavailable here.');
     const before = Restock.count(s.refObjId), room = World.items().filter(i => i.refObjId === s.refObjId).reduce((n, i) => n + Math.max(0, offer.maxStack - (i.quantity ?? 1)), 0);
-    const quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, room + Math.max(0, World.freeBagSlots() - 1) * offer.maxStack);
+    let quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, room + Math.max(0, World.freeBagSlots() - 1) * offer.maxStack);
     if (quantity < 1) return this.fail('Not enough bag space for refill and a spare transfer slot.');
-    if (gp.progression?.gold === undefined || toBigInt(offer.price) * BigInt(quantity) > toBigInt(gp.progression.gold)) return this.fail('Not enough gold for potion refill.');
+    if (gp.progression?.gold === undefined) return this.fail('Not enough gold for potion refill.');
+    // Short on gold: buy what the gold covers and carry on, instead of ending the trip in the shop.
+    const price = toBigInt(offer.price), gold = toBigInt(gp.progression.gold);
+    if (price > 0n && price * BigInt(quantity) > gold) quantity = Number(gold / price);
+    if (quantity < 1) {
+      if (before > 0) { t.buySkipped.push(s.refObjId); this.message = 'Not enough gold to top up ' + s.kind + '; buying what is left.'; UI.toast(this.message, 'warn', 6000); return; }
+      return this.fail('Not enough gold for potion refill.');
+    }
     if (Cmd.raw({ kind: 'shop-buy', tab: offer.tab, slot: offer.slot, quantity }, 'Town: refill ' + s.kind)) t.pending = { ref: s.refObjId, before, quantity, at: now() };
   },
   maximum(item) {
@@ -661,7 +769,7 @@ const Town = {
       // After death the game's last scroll point need not equal the saved
       // hunt center (or an older remembered scroll point). Accept the saved
       // hunting area too, but only after confirmed, settled world travel.
-      const inHuntArea = t.phase === 'reverse-wait' && t.revival && t.huntArea &&
+      const inHuntArea = t.phase === 'reverse-wait' && (t.revival || t.inTown) && t.huntArea &&
         dist2D(World.pose(), t.huntArea.center) <= t.huntArea.radius;
       if (t.transition && (distance <= radius || inHuntArea) && !gp.inventoryPending && !gp.returnScroll) {
         if (t.phase === 'recall-wait') { this.lastScrollPoint = { ...t.origin }; this.arrived(); }
@@ -677,7 +785,8 @@ const Town = {
       }
     } else if (t.phase.startsWith('walk-')) {
       const role = t.phase.slice(5);
-      if (this.walk(c[role]) && this.trip) this.enter('open-' + role);
+      if (role === 'arrival') { if (this.walk(c.arrival) && this.trip) this.enter(t.resume); }
+      else if (this.walk(c[role]) && this.trip) this.enter('open-' + role);
     } else if (t.phase.startsWith('open-')) {
       const role = t.phase.slice(5), kind = role === 'storage' ? 'storage-open' : role === 'gate' ? 'npc-talk' : 'shop-open';
       if (this.open(role, kind) && this.trip) this.enter({ storage: 'store', vendor: 'buy', smith: 'sell', gate: 'reverse' }[role]);
@@ -686,6 +795,7 @@ const Town = {
     else if (t.phase === 'sell') this.sell();
     else if (t.phase === 'ammo') this.ammo();
     else if (t.phase === 'repair') this.repair();
+    else if (t.phase === 'leave') this.leave();
     else if (t.phase.startsWith('close-')) {
       if (now() - t.at > 15000) this.fail('NPC window did not close.');
       else this.close(this.closeNext(t.phase));
