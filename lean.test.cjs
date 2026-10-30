@@ -2772,7 +2772,6 @@ test('town trip stores level-listed gear from the bag and the pet, and protects 
 const PET_KIT = 8428; // consumable 3/3/1/4: the companion HP recovery kit
 function petPotionFixture(change = {}) {
   const f = fixture(); f.Settings.profile.potion.petHp.on = true;
-  f.PetPotion.maxHp = new Map([[500, 1000]]);
   f.PetPotion.seenMax.set(50, 1000); // the pet was seen at full HP when summoned: that pins its real maximum
   const kit = (slot, ref, heal, quantity = 5) => ({ slot, refObjId: ref, typeFlags: PET_KIT, quantity, name: 'Recovery kit', tooltip: { fields: { itemParam1_29c: heal } } });
   f.World.applyGameplay({ ...f.World.gp, inventory: [kit(20, 2143, 360), kit(21, 2144, 800), kit(22, 9237, 3000)],
@@ -2809,31 +2808,52 @@ test('pet auto potion never touches the wrong pets, the player potions or an unc
   f.World.applyGameplay({ ...f.World.gp, inventory: f.World.gp.inventory.map(i => i.slot === 21 ? { ...i, quantity: 4 } : i), cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 300, status: 5, dead: false }] });
   f.advance(2000); f.Controller.tick();
   f.advance(2000); f.Controller.tick(); assert.equal(petUses(f).length, 2, 'consumption confirms the first and the next kit may follow');
-  f = petPotionFixture(); f.PetPotion.maxHp = null; f.PetPotion.seenMax.clear(); f.Controller.tick(); assert.equal(petUses(f).length, 0, 'without any maximum source the pet measures against itself and stays untouched while full');
+  f = petPotionFixture(); f.PetPotion.seenMax.clear(); f.Controller.tick(); assert.equal(petUses(f).length, 0, 'a first-seen pet measures against itself and stays untouched while full');
   f = petPotionFixture(); assert.equal(f.Cmd.itemUseOnPet(20, 999), false, 'unknown pet'); assert.equal(f.Cmd.itemUseOnPet(99, 50), false, 'unknown item');
   assert.equal(f.Cmd.itemUseOnPet(20, 50), true);
 });
-test('pet auto potion takes the maximum from the catalogue, never a vitals row', () => {
+test('pet auto potion measures against the learned maximum, never a vitals row', () => {
   let f = petPotionFixture({ vitals: [{ gid: 50, hp: 1000, maxHp: 999999 }] });
   f.World.applyGameplay({ ...f.World.gp, cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 1000, status: 5, dead: false }] });
   f.Controller.tick(); assert.equal(petUses(f).length, 0, 'a full pet stays full even when a vitals row claims a huge maximum');
   assert.match(f.PetPotion.message, /heals at/);
   f = petPotionFixture({ vitals: [{ gid: 50, hp: 100, maxHp: 999999 }] });
-  f.Controller.tick(); assert.equal(petUses(f).length, 1, 'the live vitals HP still drives the percentage over the catalogue maximum');
+  f.Controller.tick(); assert.equal(petUses(f).length, 1, 'the live vitals HP still drives the percentage of the learned maximum');
+});
+test('a pet first seen wounded and the learned memory across resets and switches', () => {
+  // The bot meets the pet mid-fight at 600 of a real 11000: measured against the highest HP seen, and the
+  // memory survives an option toggle or reset — it is observation, not a setting.
+  const f = petPotionFixture(); f.PetPotion.seenMax.clear();
+  f.World.applyGameplay({ ...f.World.gp, cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 600, status: 5, dead: false }] });
+  f.Controller.tick(); assert.equal(petUses(f).length, 0, 'its first-seen HP is its scale, so it reads full and waits');
+  f.World.applyGameplay({ ...f.World.gp, cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 250, status: 5, dead: false }] });
+  f.Controller.tick(); assert.equal(petUses(f).length, 1, 'dropping below the threshold of the seen scale heals');
+  f.PetPotion.reset(); f.advance(2000);
+  f.World.applyGameplay({ ...f.World.gp, cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 250, status: 5, dead: false }] });
+  f.Controller.tick(); assert.equal(f.PetPotion.pets()[0].max, 600, 'a reset keeps the learned maximum');
+  assert.equal(petUses(f).length, 2, 'and healing continues at the same scale');
+  // Watching runs even with the feature off: summoning a pet while off, then switching on, is correct at once.
+  const g = petPotionFixture(); g.PetPotion.seenMax.clear(); g.Settings.profile.potion.petHp.on = false; g.Settings.profile.potion.petHgp.on = false;
+  g.World.applyGameplay({ ...g.World.gp, cosRecords: [{ gid: 53, refObjId: 500, band: 3, hp: 2000, status: 5, dead: false }] });
+  g.Controller.tick();
+  assert.equal(g.PetPotion.seenMax.get(53), 2000, 'the high-water mark collects with every switch off');
+  g.Settings.profile.potion.petHp.on = true;
+  g.World.applyGameplay({ ...g.World.gp, cosRecords: [{ gid: 53, refObjId: 500, band: 3, hp: 700, status: 5, dead: false }] });
+  g.Controller.tick(); assert.equal(petUses(g).length, 1, 'so switching on later heals against the right maximum');
 });
 test('the maximum is learned from the observed HP, not the catalogue (live regression)', () => {
   // Live report: the catalogue asset is gone from the server (404) and the game's own asset cache serves a
   // stale copy claiming max 39434 while the pet is really full at 11000. The first read of a summoned pet
   // pins the true maximum instead.
-  const f = petPotionFixture(); f.PetPotion.maxHp = new Map([[500, 39434]]); f.PetPotion.seenMax.set(50, 11000);
+  const f = petPotionFixture(); f.PetPotion.seenMax.set(50, 11000);
   f.World.applyGameplay({ ...f.World.gp, cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 11000, status: 5, dead: false }] });
-  f.Controller.tick(); assert.equal(petUses(f).length, 0, 'a full pet is full against its observed maximum, whatever the stale catalogue says');
+  f.Controller.tick(); assert.equal(petUses(f).length, 0, 'a full pet is full against its observed maximum, whatever any stale catalogue said');
   f.World.applyGameplay({ ...f.World.gp, cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 5000, status: 5, dead: false }] });
   f.Controller.tick(); assert.equal(petUses(f).length, 1, 'wounded against the observed maximum, the kit goes out');
   f.advance(2000); f.World.applyGameplay({ ...f.World.gp, inventory: f.World.gp.inventory.map(i => i.slot === 22 ? { ...i, quantity: 4 } : i), cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 11000, status: 5, dead: false }] });
   f.Controller.tick(); f.advance(2000); f.Controller.tick();
   assert.equal(petUses(f).length, 1, 'healed back to the observed maximum, the kits stop');
-  let g = petPotionFixture(); g.PetPotion.seenMax.clear(); g.PetPotion.maxHp = null;
+  let g = petPotionFixture(); g.PetPotion.seenMax.clear();
   g.World.applyGameplay({ ...g.World.gp, cosRecords: [{ gid: 52, refObjId: 500, band: 3, hp: 300, status: 5, dead: false }] });
   g.Controller.tick();
   assert.equal(g.PetPotion.pets()[0].max, 300, 'a first-seen pet measures against its own current HP until a higher value shows');
@@ -2926,7 +2946,7 @@ test('pet HGP feeding confirms consumption, rests when unconfirmed, and yields t
   f = petFoodFixture(); f.Controller.tick(); assert.equal(petUses(f).length, 1);
   f.World.applyGameplay({ ...f.World.gp, inventory: f.World.gp.inventory.map(i => i.slot === 32 ? { ...i, quantity: 4 } : i), cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 900, satiety: 9500, status: 5, dead: false }] });
   f.advance(2000); f.Controller.tick(); assert.equal(petUses(f).length, 1, 'a fed pet above the threshold gets no second potion');
-  f = petFoodFixture(); f.Settings.profile.potion.petHp.on = true; f.PetPotion.maxHp = new Map([[500, 1000]]); f.PetPotion.seenMax.set(50, 1000);
+  f = petFoodFixture(); f.Settings.profile.potion.petHp.on = true; f.PetPotion.seenMax.set(50, 1000);
   f.World.applyGameplay({ ...f.World.gp, inventory: [...f.World.gp.inventory, { slot: 20, refObjId: 2143, typeFlags: 8428, quantity: 5, tooltip: { fields: { itemParam1_29c: 360 } } }], cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 300, satiety: 2000, status: 5, dead: false }] });
   f.Controller.tick(); assert.equal(petUses(f)[0].slot, 20, 'the recovery kit goes first');
   f.World.applyGameplay({ ...f.World.gp, inventory: f.World.gp.inventory.map(i => i.slot === 20 ? { ...i, quantity: 4 } : i), cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 1000, satiety: 2000, status: 5, dead: false }] });

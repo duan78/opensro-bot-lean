@@ -11509,15 +11509,16 @@ const Setup = {
 // item-use command, so this sends it explicitly. Player potions always go first, nothing is resent until the
 // previous one is seen to be consumed, and a pet is left alone — 30 s when an item is not seen consumed, 5 min
 // when confirmed kits never raise its HP — instead of burning supplies on a bad HP reading. A pet's
-// maximum HP is learned from its own live HP (the highest value seen), never trusted from a catalogue alone,
-// and a rested pet is unblocked the moment its HP moves again.
+// maximum HP is learned from its own live HP, and a rested pet is unblocked the moment its HP moves again.
 const PetPotion = {
-  maxHp: null, loading: null, retryAt: 0, pending: null, settled: null, blocked: new Map(), blockedHp: new Map(), stale: new Map(), seenMax: new Map(), lastAt: -Infinity,
+  pending: null, settled: null, blocked: new Map(), blockedHp: new Map(), stale: new Map(), seenMax: new Map(), lastAt: -Infinity,
   feedPending: null, feedBlocked: new Map(), feedLastAt: -Infinity, message: 'Pet potions off.',
   cfg() { return Settings.profile.potion.petHp; },
   hgpCfg() { return Settings.profile.potion.petHgp; },
+  // The learned maxima are observation, not settings: they survive resets (option toggles, profile switches)
+  // and only leave when the pet itself leaves the records. Purging happens in observe().
   reset() {
-    this.pending = null; this.settled = null; this.blocked.clear(); this.blockedHp.clear(); this.stale.clear(); this.seenMax.clear(); this.lastAt = -Infinity;
+    this.pending = null; this.settled = null; this.blocked.clear(); this.blockedHp.clear(); this.stale.clear(); this.lastAt = -Infinity;
     this.feedPending = null; this.feedBlocked.clear(); this.feedLastAt = -Infinity;
     this.message = this.cfg().on || this.hgpCfg().on ? 'Waiting for a pet.' : 'Pet potions off.';
   },
@@ -11534,36 +11535,33 @@ const PetPotion = {
   foods() { return World.items().filter(i => Number.isInteger(i.typeFlags) && ItemType.potionCategory(i.typeFlags) === 9 && (i.quantity ?? 1) > 0); },
   foodTotal(ref) { return this.foods().filter(i => i.refObjId === ref).reduce((n, i) => n + (i.quantity ?? 1), 0); },
   foodPct(item) { return Number(item.tooltip?.fields?.itemParam1_29c) || 0; },
-  // The catalogue only bootstraps a never-seen pet's maximum; the observed HP high-water mark takes over
-  // from the first read (see pets()).
-  async load() {
-    if (this.maxHp || this.loading || now() < this.retryAt || !W.location?.origin) return;
-    this.retryAt = now() + 30000;
-    this.loading = Icons.request('/assets/data/cosPresentation.json', 'json').then(data => {
-      const rows = data?.rows;
-      if (!rows || typeof rows !== 'object') throw Error('Invalid pet catalogue');
-      this.maxHp = new Map(Object.entries(rows).filter(([, row]) => Array.isArray(row) && Number.isInteger(row[1]) && row[1] > 0).map(([id, row]) => [Number(id), row[1]]));
-    }).catch(() => {}).finally(() => { this.loading = null; });
-    return this.loading;
-  },
-  // Living attack (band 3) and pickup (band 4) pets with their HP as a percentage. The maximum is learned
-  // from the pet itself: the highest HP ever seen for its gid, because the catalogue can lie — the live
-  // server removed the asset and a stale copy in the game's own asset cache still serves wrong values. A
-  // freshly summoned pet starts at full HP, so the first read pins the true maximum; a later higher HP
-  // raises it. The catalogue only bootstraps a pet that has never been seen yet.
-  pets() {
-    const out = [], living = new Set();
+  // Watch every living companion record — every tick, even with the healing switches off — and keep the
+  // highest HP ever seen per gid. A freshly summoned pet starts at full HP, so the first read after a summon
+  // pins the true maximum; any later higher HP raises it. This runs before the switches so the learned
+  // maximum is already correct the moment the feature is turned on, and a pet first met wounded (bot started
+  // mid-fight) is measured against the highest HP seen since the bot started watching.
+  observe() {
+    const living = new Set();
     for (const rec of World.gp?.cosRecords || []) {
       if (!rec || rec.dead || !(rec.hp > 0) || (rec.band !== 3 && rec.band !== 4) || !Number.isInteger(rec.gid) || rec.gid <= 0) continue;
       living.add(rec.gid);
       const vital = World.vitalsOf(rec.gid), hp = Number.isFinite(vital?.hp) ? vital.hp : rec.hp;
       if (hp > (this.seenMax.get(rec.gid) ?? 0)) this.seenMax.set(rec.gid, hp);
-      const seen = this.seenMax.get(rec.gid) ?? 0;
-      const max = seen > 0 ? seen : (vital?.maxHp > 0 ? vital.maxHp : this.maxHp?.get(rec.refObjId)) ?? 0;
-      if (!(max > 0)) continue;
-      out.push({ gid: rec.gid, hp, max, pct: hp / max * 100 });
     }
     for (const gid of this.seenMax.keys()) if (!living.has(gid)) { this.seenMax.delete(gid); this.blockedHp.delete(gid); }
+  },
+  // Living attack (band 3) and pickup (band 4) pets with their HP as a percentage of the learned maximum.
+  // No catalogue is consulted: the live server removed the asset and the game's own asset cache still
+  // serves a stale copy with wrong values (seen live: max 39434 claimed for a pet really capped at 11000).
+  pets() {
+    const out = [];
+    for (const rec of World.gp?.cosRecords || []) {
+      if (!rec || rec.dead || !(rec.hp > 0) || (rec.band !== 3 && rec.band !== 4) || !Number.isInteger(rec.gid) || rec.gid <= 0) continue;
+      const max = this.seenMax.get(rec.gid) ?? 0;
+      if (!(max > 0)) continue;
+      const vital = World.vitalsOf(rec.gid), hp = Number.isFinite(vital?.hp) ? vital.hp : rec.hp;
+      out.push({ gid: rec.gid, hp, max, pct: hp / max * 100 });
+    }
     return out;
   },
   petHp(gid) {
@@ -11593,10 +11591,10 @@ const PetPotion = {
     return foods.find(f => this.foodPct(f) * 100 >= missing) || foods[foods.length - 1] || null;
   },
   tick() {
+    if (!World.inWorld() || World.isDead()) return false;
+    this.observe();
     const P = Settings.profile.potion;
     if ((!this.cfg().on && !this.hgpCfg().on) || !P.enabled) { this.pending = null; this.settled = null; this.feedPending = null; this.message = 'Pet potions off.'; return false; }
-    if (!World.inWorld() || World.isDead()) return false;
-    this.load();
     const healed = this.healTick();
     if (healed || this.pending) return healed;
     return this.feedTick();
