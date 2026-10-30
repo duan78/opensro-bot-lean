@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.5.1
+// @version      1.5.2
 // @updateURL    https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking, walk-back and an optional team relay in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.5.1';
+const VERSION = '1.5.2';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -212,17 +212,19 @@ const DEFAULT_PROFILE = {
   },
   potion: {
     enabled: true, speedScroll: false, repairHammer: { on: false, pct: 50 }, hp: { on: true, pct: 60 }, mp: { on: true, pct: 40 },
-    vigor: { on: true, hpPct: 30, mpPct: 15 }, cure: { on: true }, petHp: { on: false, pct: 50 },
+    vigor: { on: true, hpPct: 30, mpPct: 15 }, cure: { on: true }, petHp: { on: false, pct: 50 }, petHgp: { on: false, pct: 30 },
     prefer: { hp: 0, mp: 0, vigor: 0, cure: 0 }, delayMs: 350,
     restock: {
       enabled: false, vendor: null, route: [], offers: [],
-      town: { enabled: false, revive: true, deathReturn: 'recall', returnBy: 'reverse', storeSox: true, sellStar: false, sellBag: false, storeLevels: '', petFull: true, petFree: 1, arrivalRadius: 500,
+      town: { enabled: false, revive: true, revivePet: false, deathReturn: 'recall', returnBy: 'reverse', storeSox: true, sellStar: false, sellBag: false, storeLevels: '', petFull: true, petFree: 1, arrivalRadius: 500,
         broken: true, wear: { on: false, pct: 15 }, noXp: { on: false, minutes: 10 }, every: { on: false, minutes: 60 }, arrival: null, storage: null, vendor: null, smith: null, gate: null,
         keep: '', store: { equipment: true, elixirs: true, powders: true, alchemy: true, others: false } },
       hp: { on: true, refObjId: 0, low: 20, target: 100 },
       mp: { on: true, refObjId: 0, low: 20, target: 300 },
       cure: { on: false, refObjId: 58, low: 10, target: 50 },
       vigor: { on: false, refObjId: 22, low: 10, target: 50 },
+      hgp: { on: false, refObjId: 0, low: 5, target: 50 },
+      kit: { on: false, refObjId: 0, low: 5, target: 50 },
       ammo: { arrow: { on: false, low: 200, target: 2000 }, bolt: { on: false, low: 200, target: 2000 } },
     },
   },
@@ -1441,7 +1443,7 @@ const Restock = {
     // Only single-item gold offers; package quantities have different purchase semantics.
     if (o.currency !== undefined && o.currency !== 1) return '';
     if (o.contents?.length && (o.contents.length !== 1 || o.contents[0].refObjId !== o.refObjId || o.contents[0].quantity !== 1)) return '';
-    return cat === 1 ? 'hp' : cat === 2 ? 'mp' : cat === 3 ? 'vigor' : o.refObjId === 58 && ItemType.isCure(item?.typeFlags ?? 0) ? 'cure' : '';
+    return cat === 1 ? 'hp' : cat === 2 ? 'mp' : cat === 3 ? 'vigor' : cat === 9 ? 'hgp' : cat === 4 ? 'kit' : o.refObjId === 58 && ItemType.isCure(item?.typeFlags ?? 0) ? 'cure' : '';
   },
   activeShop() {
     const gp = World.gp;
@@ -1486,11 +1488,20 @@ const Restock = {
     }
     Hunt.setCenter();
     this.cancelRecording();
+    this.unbuyable.clear();
     Settings.saveProfile();
     this.tell('Route and hunt centre saved. Choose potions and quantities, then enable auto buying.');
   },
   // Fixed retail Special Universal Pill (small): strongest universal cure, ref 58.
-  supplies() { return ['hp', 'mp', 'vigor', 'cure'].filter(k => this.cfg()[k].on).map(k => ({ kind: k, ...this.cfg()[k], ...(k === 'cure' ? { refObjId: 58 } : {}) })); },
+  // Pet supplies need a chosen item, and one the recorded merchant turned out not to sell must not re-trigger
+  // trips for the rest of the session (re-record the merchant to retry); a profile switch clears that memory.
+  unbuyable: new Set(),
+  supplies() {
+    const c = this.cfg();
+    return ['hp', 'mp', 'vigor', 'cure', 'hgp', 'kit']
+      .filter(k => c[k].on && !this.unbuyable.has(c[k].refObjId) && ((k === 'hgp' || k === 'kit') ? c[k].refObjId > 0 : true))
+      .map(k => ({ kind: k, ...c[k], ...(k === 'cure' ? { refObjId: 58 } : {}) }));
+  },
   validate() {
     const c = this.cfg(), s = this.supplies();
     if (!c.vendor || c.route.length < 2) return 'Record a merchant-to-hunt route first.';
@@ -1598,6 +1609,8 @@ const Restock = {
         return true;
       }
       const offer = shop.offers.find(o => o.refObjId === s.refObjId && this.offerKind(o) === s.kind);
+      // Pet supplies are a convenience here: a merchant without them must not stop the potion refill.
+      if (!offer && (s.kind === 'hgp' || s.kind === 'kit')) { t.skipped.push(s.refObjId); this.unbuyable.add(s.refObjId); this.tell('This merchant does not sell ' + (s.kind === 'hgp' ? 'HGP recovery potions' : 'pet recovery kits') + '; skipped them for this session.'); return true; }
       if (!offer) { this.fail(s.kind === 'cure' ? 'Special Universal Pill (small) is unavailable at this merchant.' : 'Selected potion is unavailable at this merchant.'); return true; }
       const before = this.count(s.refObjId);
       const stackRoom = World.items().filter(i => i.refObjId === s.refObjId).reduce((n, i) => n + Math.max(0, offer.maxStack - (i.quantity ?? 1)), 0);
@@ -7281,10 +7294,15 @@ const Town = {
   // otherwise send the bot to town again and again for nothing.
   petClearable(pet) { return pet.rec.inventory.some(i => this.sellable(i) || this.eligible(i)); },
   autoRevive() { return this.cfg().enabled && this.cfg().revive; },
+  // A dead companion waits in the bag as its summoner item with summon state 4; a Grass of life
+  // (revival item) brings it back. Both are needed before the town trip is worth starting for this.
+  deadCollar() { return World.items().find(i => i.slot >= 13 && i.summon?.state === 4) || null; },
+  grass() { return World.items().find(i => ItemType.useTarget((i.typeFlags ?? 0) >>> 0) === 'revival' && (i.quantity ?? 1) > 0) || null; },
   reason() {
     const c = this.cfg(), pet = Loot.pet();
     if (World.freeBagSlots() <= 1) return 'character bag nearly full';
     if (c.petFull && pet && pet.rec.status - pet.rec.inventory.length <= c.petFree && this.petClearable(pet)) return 'pickup pet nearly full';
+    if (c.revivePet && (!this.petReviveFailedAt || now() - this.petReviveFailedAt > 600000) && this.deadCollar() && this.grass()) return 'a pet is down';
     if (this.supplies().some(s => Restock.count(s.refObjId) <= s.low)) return 'potions running low';
     if (this.ammoSupplies().some(s => this.ammoCount(s.refObjId) <= s.low)) return 'ammunition running low';
     if (c.broken && this.weaponBroken()) return 'weapon broken';
@@ -7394,6 +7412,8 @@ const Town = {
     // With bag selling on, the trip sells first, so a full bag can still make room for refills.
     if (full && !t.sellFirst) return this.fail('Returned to town; free a character bag slot for storage and refills.');
     t.order = this.order(full);
+    // A dead pet is brought back first, before the services, so it carries loot again for the rest of the trip.
+    if (this.cfg().revivePet && this.deadCollar() && this.grass()) { this.enter('pet-revive'); return; }
     this.enter('walk-' + t.order[0]);
   },
   // The services in visiting order. Potions come before repair and selling, unless bag selling is on, which sells and
@@ -7626,6 +7646,48 @@ const Town = {
     if (gp.progression?.gold === undefined || toBigInt(offer.price) * BigInt(quantity) > toBigInt(gp.progression.gold)) return skip(s, 'not enough gold');
     if (Cmd.raw({ kind: 'shop-buy', tab: offer.tab, slot: offer.slot, quantity }, 'Town: refill ' + s.kind + 's')) t.pending = { ref: s.refObjId, before, quantity, at: now() };
   },
+  // Grass of life works only in town, so the trip does this first. The revival restores the pet but
+  // leaves it unsummoned (collar state 3), so the collar is used again to summon it (state 2). A pet
+  // that cannot be brought back is never fatal to the trip: the town services continue without it.
+  revivePet() {
+    const t = this.trip, gp = World.gp;
+    const finish = () => { t.petStep = null; this.enter('walk-' + t.order[0]); };
+    const giveUp = (text, stepName) => {
+      t.petStep = null; this.petReviveFailedAt = now();
+      this.enter('walk-' + t.order[0]);
+      this.message = text; Log.warn(text); UI.toast(text, 'warn', 6000);
+      Activity.emit({ category: 'town', code: 'pet-revive-failed', text, outcome: 'refused', details: { step: stepName } });
+    };
+    if (gp.inventoryPending || World.isCasting()) return;
+    const step = t.petStep;
+    if (step && now() - step.at > 12000) return giveUp(step.step === 'grass' ? 'The Grass of life was not accepted; the pet stays dead.' : 'The pet was revived but could not be summoned again.', step.step);
+    if (step?.step === 'grass') {
+      // A vanished collar is not a success (a bag re-sort or stale slot would fake one): the collar must be
+      // there with its state off dead, or the grass stack must have shrunk under it.
+      const collar = (gp.inventory || []).find(i => i.slot === step.slot), grass = (gp.inventory || []).find(i => i.slot === step.grassSlot);
+      if (collar && (collar.summon?.state !== 4 || (grass?.quantity ?? 0) < step.grassQty)) {
+        Activity.emit({ category: 'town', code: 'pet-revived', text: 'A dead pet was revived with a Grass of life.', outcome: 'confirmed', details: { slot: step.slot } });
+        t.petStep = { step: 'summon', slot: step.slot, petRef: step.petRef, at: now() };
+      }
+      return;
+    }
+    if (step?.step === 'summon') {
+      const collar = (gp.inventory || []).find(i => i.slot === step.slot);
+      const alive = collar?.summon?.state === 2 || (gp.cosRecords || []).some(r => r && !r.dead && r.hp > 0 && r.refObjId === step.petRef);
+      if (alive) {
+        this.message = 'The pet is back.';
+        Log.info(this.message);
+        Activity.emit({ category: 'town', code: 'pet-summoned', text: 'The revived pet was summoned again.', outcome: 'confirmed', details: { slot: step.slot } });
+        return finish();
+      }
+      if (!step.sent && Cmd.itemUse(step.slot)) { step.sent = true; step.at = now(); }
+      return;
+    }
+    const collar = this.deadCollar(), grass = this.grass();
+    if (!collar) return finish();
+    if (!grass) return giveUp('No Grass of life in the bag; the pet stays dead.', 'grass');
+    if (Cmd.itemUseOnDeadPet(grass.slot, collar.slot)) t.petStep = { step: 'grass', slot: collar.slot, grassSlot: grass.slot, grassQty: grass.quantity ?? 1, petRef: collar.summon?.refObjId, at: now() };
+  },
   buy() {
     const t = this.trip, gp = World.gp, shop = Restock.activeShop();
     if (!shop || shop.npc !== this.npc('vendor')?.gid || shop.error) return this.fail(shop?.error || 'Potion merchant selection changed.');
@@ -7653,7 +7715,12 @@ const Town = {
       const best = shop.offers.filter(o => Restock.offerKind(o) === s.kind && o.maxStack > 0).sort((x, y) => price(y) > price(x) ? 1 : price(y) < price(x) ? -1 : 0)[0];
       if (best) { this.tier[s.kind] = s.refObjId = best.refObjId; return; }
     }
-    if (!offer || !(offer.maxStack > 0)) return this.fail(s.kind === 'scroll' ? 'Selected scroll is unavailable here.' : s.kind === 'cure' ? 'Special Universal Pill (small) is unavailable here.' : s.kind === 'vigor' ? 'The selected vigor potion size is unavailable here; choose another size in Supplies.' : 'X-Large ' + s.kind.toUpperCase() + ' potion is unavailable here.');
+    if (!offer || !(offer.maxStack > 0)) {
+      // Pet supplies are a convenience here: a merchant without them must not stop the town trip, and must
+      // not re-trigger one either: the supply is remembered as unbuyable until the merchant is re-recorded.
+      if (s.kind === 'hgp' || s.kind === 'kit') { t.buySkipped.push(s.refObjId); Restock.unbuyable.add(s.refObjId); this.message = 'This merchant does not sell ' + (s.kind === 'hgp' ? 'HGP recovery potions' : 'pet recovery kits') + '; skipped them for this session.'; UI.toast(this.message, 'warn', 6000); return; }
+      return this.fail(s.kind === 'scroll' ? 'Selected scroll is unavailable here.' : s.kind === 'cure' ? 'Special Universal Pill (small) is unavailable here.' : s.kind === 'vigor' ? 'The selected vigor potion size is unavailable here; choose another size in Supplies.' : 'X-Large ' + s.kind.toUpperCase() + ' potion is unavailable here.');
+    }
     const before = Restock.count(s.refObjId), room = World.items().filter(i => i.refObjId === s.refObjId).reduce((n, i) => n + Math.max(0, offer.maxStack - (i.quantity ?? 1)), 0);
     let quantity = Math.min(s.target - before, offer.purchaseLimit ?? offer.maxStack, 65535, room + Math.max(0, World.freeBagSlots() - 1) * offer.maxStack);
     if (quantity < 1) return this.fail('Not enough bag space for refill and a spare transfer slot.');
@@ -7662,7 +7729,7 @@ const Town = {
     const price = toBigInt(offer.price), gold = toBigInt(gp.progression.gold);
     if (price > 0n && price * BigInt(quantity) > gold) quantity = Number(gold / price);
     if (quantity < 1) {
-      if (before > 0) { t.buySkipped.push(s.refObjId); this.message = 'Not enough gold to top up ' + s.kind + '; buying what is left.'; UI.toast(this.message, 'warn', 6000); return; }
+      if (before > 0) { t.buySkipped.push(s.refObjId); if (s.kind === 'hgp') Restock.unbuyable.add(s.refObjId); this.message = 'Not enough gold to top up ' + s.kind + '; buying what is left.'; UI.toast(this.message, 'warn', 6000); return; }
       return this.fail('Not enough gold for potion refill.');
     }
     if (Cmd.raw({ kind: 'shop-buy', tab: offer.tab, slot: offer.slot, quantity }, 'Town: refill ' + s.kind)) t.pending = { ref: s.refObjId, before, quantity, at: now() };
@@ -7789,7 +7856,8 @@ const Town = {
     } else if (t.phase.startsWith('open-')) {
       const role = t.phase.slice(5), kind = role === 'storage' ? 'storage-open' : role === 'gate' ? 'npc-talk' : 'shop-open';
       if (this.open(role, kind) && this.trip) this.enter({ storage: 'store', vendor: 'buy', smith: 'sell', gate: 'reverse' }[role]);
-    } else if (t.phase === 'store') this.store();
+    } else if (t.phase === 'pet-revive') this.revivePet();
+    else if (t.phase === 'store') this.store();
     else if (t.phase === 'buy') this.buy();
     else if (t.phase === 'sell') this.sell();
     else if (t.phase === 'ammo') this.ammo();
@@ -12033,18 +12101,36 @@ const Setup = {
 };
 
 
-// Automatic HP recovery kits for your attack and pickup pets. Kits are companion items (type 3/3/1/4): the game
-// needs the pet named in the item-use command, so this sends it explicitly. Player potions always go first, kits
-// are never resent until the previous one is seen to be consumed, and a pet that cannot be healed is left alone
-// for 30 seconds instead of burning kits.
+// Automatic HP recovery kits for your attack and pickup pets, and HGP recovery potions (pet food) for the attack
+// pet's satiety. Both are companion items (types 3/3/1/4 and 3/3/1/9): the game needs the pet named in the
+// item-use command, so this sends it explicitly. Player potions always go first, nothing is resent until the
+// previous one is seen to be consumed, and a pet is left alone — 30 s when an item is not seen consumed, 5 min
+// when confirmed kits never raise its HP — instead of burning supplies on a bad HP reading.
 const PetPotion = {
-  maxHp: null, loading: null, retryAt: 0, pending: null, blocked: new Map(), lastAt: -Infinity, message: 'Pet potions off.',
+  maxHp: null, loading: null, retryAt: 0, pending: null, settled: null, blocked: new Map(), stale: new Map(), lastAt: -Infinity,
+  feedPending: null, feedBlocked: new Map(), feedLastAt: -Infinity, message: 'Pet potions off.',
   cfg() { return Settings.profile.potion.petHp; },
-  reset() { this.pending = null; this.blocked.clear(); this.lastAt = -Infinity; this.message = this.cfg().on ? 'Waiting for a pet.' : 'Pet potions off.'; },
+  hgpCfg() { return Settings.profile.potion.petHgp; },
+  reset() {
+    this.pending = null; this.settled = null; this.blocked.clear(); this.stale.clear(); this.lastAt = -Infinity;
+    this.feedPending = null; this.feedBlocked.clear(); this.feedLastAt = -Infinity;
+    this.message = this.cfg().on || this.hgpCfg().on ? 'Waiting for a pet.' : 'Pet potions off.';
+  },
   kits() { return World.items().filter(i => Number.isInteger(i.typeFlags) && ItemType.potionCategory(i.typeFlags) === 4 && (i.quantity ?? 1) > 0); },
   total(ref) { return this.kits().filter(i => i.refObjId === ref).reduce((n, i) => n + (i.quantity ?? 1), 0); },
   heal(item) { return Number(item.tooltip?.fields?.itemParam1_29c) || 0; },
-  // The catalogue gives each pet's maximum HP; the live vitals row is preferred when the game publishes one.
+  // The server scales a kit's flat heal by the owner's strength and level — (strength/416 + 1) * 1.02^(level-1) * base —
+  // so a small kit covers far more than its tooltip value. Without the estimate the picker takes the biggest kit.
+  healEstimate(item) {
+    const base = this.heal(item), s = World.gp?.progression?.stats, level = World.gp?.progression?.level;
+    if (!base || !Number.isFinite(s?.strength) || !Number.isInteger(level) || level < 1) return base;
+    return Math.max(base, Math.floor((s.strength / 416 + 1) * Math.pow(1.02, level - 1) * base));
+  },
+  foods() { return World.items().filter(i => Number.isInteger(i.typeFlags) && ItemType.potionCategory(i.typeFlags) === 9 && (i.quantity ?? 1) > 0); },
+  foodTotal(ref) { return this.foods().filter(i => i.refObjId === ref).reduce((n, i) => n + (i.quantity ?? 1), 0); },
+  foodPct(item) { return Number(item.tooltip?.fields?.itemParam1_29c) || 0; },
+  // The catalogue is the only maximum source, exactly like the game's own pet window; vitals rows for a COS
+  // never carry a maintained maximum.
   async load() {
     if (this.maxHp || this.loading || now() < this.retryAt || !W.location?.origin) return;
     this.retryAt = now() + 30000;
@@ -12060,34 +12146,84 @@ const PetPotion = {
     const out = [];
     for (const rec of World.gp?.cosRecords || []) {
       if (!rec || rec.dead || !(rec.hp > 0) || (rec.band !== 3 && rec.band !== 4) || !Number.isInteger(rec.gid) || rec.gid <= 0) continue;
-      const vital = World.vitalsOf(rec.gid), max = vital?.maxHp > 0 ? vital.maxHp : this.maxHp?.get(rec.refObjId);
+      const max = this.maxHp?.get(rec.refObjId);
       if (!(max > 0)) continue;
-      const hp = vital?.maxHp > 0 && Number.isFinite(vital.hp) ? vital.hp : rec.hp;
+      const vital = World.vitalsOf(rec.gid), hp = Number.isFinite(vital?.hp) ? vital.hp : rec.hp;
       out.push({ gid: rec.gid, hp, max, pct: hp / max * 100 });
     }
     return out;
   },
-  // Smallest kit that covers the missing HP, otherwise the biggest one.
+  petHp(gid) {
+    const vital = World.vitalsOf(gid);
+    if (Number.isFinite(vital?.hp)) return vital.hp;
+    const rec = World.gp?.cosRecords?.find(r => r && r.gid === gid);
+    return Number.isFinite(rec?.hp) ? rec.hp : undefined;
+  },
+  // Satiety runs 0..10000 and only attack pets (band 3) carry it; the record is the live source, so no
+  // catalogue is needed here.
+  hungerPets() {
+    const out = [];
+    for (const rec of World.gp?.cosRecords || []) {
+      if (!rec || rec.dead || !(rec.hp > 0) || rec.band !== 3 || !Number.isInteger(rec.gid) || rec.gid <= 0 || !Number.isFinite(rec.satiety)) continue;
+      out.push({ gid: rec.gid, satiety: rec.satiety, pct: rec.satiety / 100 });
+    }
+    return out;
+  },
+  // Smallest kit whose estimated heal covers the missing HP, otherwise the biggest one.
   pick(missing) {
     const kits = this.kits().sort((a, b) => this.heal(a) - this.heal(b));
-    return kits.find(k => this.heal(k) >= missing) || kits[kits.length - 1] || null;
+    return kits.find(k => this.healEstimate(k) >= missing) || kits[kits.length - 1] || null;
+  },
+  // Smallest food whose percentage covers the missing satiety, otherwise the biggest one.
+  pickFood(missing) {
+    const foods = this.foods().sort((a, b) => this.foodPct(a) - this.foodPct(b));
+    return foods.find(f => this.foodPct(f) * 100 >= missing) || foods[foods.length - 1] || null;
   },
   tick() {
-    const c = this.cfg(), P = Settings.profile.potion;
-    if (!c.on || !P.enabled) { this.pending = null; this.message = 'Pet potions off.'; return false; }
+    const P = Settings.profile.potion;
+    if ((!this.cfg().on && !this.hgpCfg().on) || !P.enabled) { this.pending = null; this.settled = null; this.feedPending = null; this.message = 'Pet potions off.'; return false; }
     if (!World.inWorld() || World.isDead()) return false;
     this.load();
+    const healed = this.healTick();
+    if (healed || this.pending) return healed;
+    return this.feedTick();
+  },
+  healTick() {
+    const c = this.cfg();
+    if (!c.on) return false;
     const p = this.pending;
     if (p) {
       if (this.total(p.ref) < p.before) {
         Activity.emit({ category: 'potion', code: 'pet-kit-consumed', text: 'Pet recovery kit consumption observed in inventory.', outcome: 'confirmed', details: { quantity: 1 } });
         this.pending = null;
+        // The stack shrinking and the HP update (0x33A6) are separate messages, so the heal can land a
+        // snapshot later: hold the flat judgement for a short grace before counting it.
+        this.settled = { gid: p.gid, hp: p.hp, at: now() };
       }
       else if (now() - p.at > 5000) { this.pending = null; this.blocked.set(p.gid, now() + 30000); this.message = 'Pet recovery kit consumption unconfirmed; waiting 30 s.'; }
       else return false;
     }
-    if (World.gp.inventoryPending || now() - this.lastAt < 1500 || now() - Potion.lastUse < P.delayMs) return false;
+    if (this.settled) {
+      const s = this.settled, flat = this.petHp(s.gid);
+      if (!Number.isFinite(flat) || flat !== s.hp) { this.stale.delete(s.gid); this.settled = null; }
+      else if (now() - s.at > 1500) {
+        this.settled = null;
+        // The server consumes a kit even on a full pet, so a confirmed kit whose HP never moved means the
+        // reading is wrong; three in a row rest the pet instead of draining the stack.
+        const count = (this.stale.get(s.gid)?.count ?? 0) + 1;
+        if (count >= 3) {
+          this.blocked.set(s.gid, now() + 300000); this.stale.delete(s.gid);
+          this.message = 'Confirmed kits never raise this pet HP; waiting 5 min.';
+          Activity.emit({ category: 'potion', code: 'pet-kit-flat', text: 'Three confirmed kits left the pet HP untouched; the HP reading looks wrong, resting the pet 5 min.', outcome: 'refused', details: { gid: s.gid, hp: flat } });
+          return false;
+        }
+        this.stale.set(s.gid, { count });
+      }
+      else return false;
+    }
+    if (World.gp.inventoryPending || now() - this.lastAt < 1500 || now() - Potion.lastUse < Settings.profile.potion.delayMs) return false;
     const known = this.pets(), pets = known.filter(x => (this.blocked.get(x.gid) ?? 0) <= now()).sort((a, b) => a.pct - b.pct);
+    for (const x of known) if (x.pct > c.pct) this.stale.delete(x.gid);
     if (known.length && !pets.length) return false;
     if (!pets.length) { this.message = World.gp?.cosRecords?.some(r => r && !r.dead && r.hp > 0 && (r.band === 3 || r.band === 4)) ? 'Waiting for pet HP data.' : 'No attack or pickup pet to heal.'; return false; }
     const pet = pets[0];
@@ -12095,8 +12231,38 @@ const PetPotion = {
     const kit = this.pick(pet.max - pet.hp);
     if (!kit) { this.message = 'Pet HP low but no pet recovery kits in the bag.'; return false; }
     if (!Cmd.itemUseOnPet(kit.slot, pet.gid)) return false;
-    this.pending = { ref: kit.refObjId, before: this.total(kit.refObjId), gid: pet.gid, at: now() }; this.lastAt = now();
+    this.pending = { ref: kit.refObjId, before: this.total(kit.refObjId), gid: pet.gid, hp: pet.hp, at: now() }; this.lastAt = now();
     this.message = 'Recovery kit requested for the pet at ' + Math.round(pet.pct) + '% HP; waiting for consumption confirmation.';
+    return true;
+  },
+  // HGP recovery potions (pet food) restore a percentage of the 10000 satiety gauge; the server refuses — without
+  // consuming — above 99%, so the setting stays at or below 95. The gauge is exact, so no flat-reading guard is
+  // needed: an unseen consumption already rests the pet for 30 s.
+  feedTick() {
+    const c = this.hgpCfg();
+    if (!c.on) return false;
+    const p = this.feedPending;
+    if (p) {
+      if (this.foodTotal(p.ref) < p.before) {
+        Activity.emit({ category: 'potion', code: 'pet-food-consumed', text: 'Pet HGP potion consumption observed in inventory.', outcome: 'confirmed', details: { quantity: 1 } });
+        this.feedPending = null;
+      }
+      else if (now() - p.at > 5000) { this.feedPending = null; this.feedBlocked.set(p.gid, now() + 30000); this.message = 'Pet HGP potion consumption unconfirmed; waiting 30 s.'; }
+      else return false;
+    }
+    if (World.gp.inventoryPending || now() - this.feedLastAt < 1500 || now() - Potion.lastUse < Settings.profile.potion.delayMs) return false;
+    const pets = this.hungerPets().filter(x => (this.feedBlocked.get(x.gid) ?? 0) <= now()).sort((a, b) => a.pct - b.pct);
+    if (!pets.length) {
+      if (World.gp?.cosRecords?.some(r => r && !r.dead && r.hp > 0 && r.band === 3 && !Number.isFinite(r.satiety))) this.message = 'Waiting for pet HGP data.';
+      return false;
+    }
+    const pet = pets[0];
+    if (pet.pct > c.pct) return false;
+    const food = this.pickFood(10000 - pet.satiety);
+    if (!food) { this.message = 'Pet is hungry but no HGP recovery potions in the bag.'; return false; }
+    if (!Cmd.itemUseOnPet(food.slot, pet.gid)) return false;
+    this.feedPending = { ref: food.refObjId, before: this.foodTotal(food.refObjId), gid: pet.gid, at: now() }; this.feedLastAt = now();
+    this.message = 'HGP recovery potion requested for the pet at ' + Math.round(pet.pct) + '% satiety; waiting for consumption confirmation.';
     return true;
   },
 };
@@ -12106,6 +12272,14 @@ Cmd.itemUseOnPet = function (slot, gid) {
   if (!item || gp.inventoryPending || World.isDead() || !this.spaced('item-use') || ItemType.useTarget((item.typeFlags ?? 0) >>> 0) !== 'companion') return false;
   if (!gp.cosRecords?.some(r => r && r.gid === gid && !r.dead && r.hp > 0)) return false;
   return this.raw({ kind: 'item-use', slot, companionGid: gid }, 'Use on pet: ' + (item.name || item.refObjId));
+};
+// A Grass of life names the dead companion's summoner item instead of a gid (worker ll(): exactly one
+// candidate; here the collar is pinned and must still be in the dead state).
+Cmd.itemUseOnDeadPet = function (slot, collarSlot) {
+  const gp = World.gp, item = gp?.inventory?.find(i => i.slot === slot), collar = gp?.inventory?.find(i => i.slot === collarSlot);
+  if (!item || !collar || gp.inventoryPending || World.isDead() || !this.spaced('item-use') || ItemType.useTarget((item.typeFlags ?? 0) >>> 0) !== 'revival') return false;
+  if (collar.slot < 13 || collar.summon?.state !== 4) return false;
+  return this.raw({ kind: 'item-use', slot, revivalSlot: collarSlot }, 'Revive pet: ' + (item.name || item.refObjId));
 };
 // Player potions keep their priority: the pet kit is only considered when none was used this tick.
 const playerPotionTick = Potion.tick;
@@ -14179,7 +14353,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.5.1", "title": "Upstream sync: combat gear, party-buff weapon swaps, ammo wear", "items": ["Merges upstream 1.2.170-1.2.173: the chosen weapons and shield stay listed once worn and move to Combat; the primary weapon is worn as combat gear and party buffs can swap weapons and return to the primary; bows and crossbows wear arrows or bolts from the bag.", "The team edition is unchanged and re-verified on the new base (579 tests)."], "note": "Re-verified in simulation only; nothing has run with real characters."}, {"version": "1.5.0", "title": "Upstream sync: travel, trade, lure, auto-start, and the released auto stall", "items": ["This fork merges upstream 1.2.128 → 1.2.169: teleport and ferry travel, the auto trade routes, the lure areas, auto-start, item balance, repair hammer, walk-back over teleports, and many fixes.", "The auto stall is now the upstream released version (1.2.169), which keeps this fork's original flow plus the maintainer's review fixes: a sale counts even when its gold arrives a tick later, potion and inventory refusals no longer close the stall, and a refused offer skips just that item.", "The team edition is unchanged and re-verified on the new base (545 tests): presence, live shared intel with the map layer, the unique tracker and shared knowledge, assist, town sync, resurrection claims, unique converge, the public pool, the relay console, and the three hosting options (Node, Cloudflare Workers, fly.io/VPS).", "Diagnostics now use the name-free team status line, matching the upstream review's finding."], "note": "Everything is re-verified in simulation on the merged base; nothing has run with real characters yet."}, {"version": "1.4.3", "title": "Relay hosting: the administrator's choice; auto stall", "items": ["The relay can now run in three places with the same protocol: Cloudflare Workers (new edition under relay/cloudflare: Durable Objects, WebSocket hibernation, storage that survives restarts, zero administration), fly.io (the Node relay as-is with a Dockerfile), or your own VPS (systemd unit included).", "The bot now sends the room key in the WebSocket URL (?key=…) for hosts that route by it; the Node relay ignores it, so all three hosts work with one address format.", "relay/smoke-test.cjs can verify a live deployment: WS_URL=wss://your-relay/ws node smoke-test.cjs.", "Auto stall: price items on a new page, stand in town, and the character opens its own street stall, offers them, and runs it; a sale is confirmed by the offer disappearing and gold rising, never by a dispatch. Hunting refuses to start while a stall session runs."], "note": "Both parts are tested in simulation (464 tests). The Workers edition follows the documented Durable Objects patterns but has only been syntax-checked and reviewed, not deployed — run its smoke test after wrangler deploy. Neither has run with real characters."}, {"version": "1.4.2", "title": "Coherence fixes for the team layer", "items": ["A unique's death reported by a teammate is recorded quietly; it used to be re-announced, which echoed between clients forever.", "A teammate's store write no longer cancels the sync this client still owes the room (a pending local sighting could be lost until the next change).", "Moving the hunting spot from the tracker cancels any automatic unique converge, so its later restore cannot overwrite the manual spot.", "Shared live intel is cleared when the character changes; the \"Hunt here\" button still works the same."], "note": "Found by re-reading the code with two clients in mind; tested in simulation, not yet with real characters."}, {"version": "1.4.1", "title": "Team edition rounded out", "items": ["Optional unique converge: when a unique appears and its position is known, a hunting character moves its hunting spot there (toasts say so); the saved spot comes back when the unique dies or after 20 minutes. Off by default.", "The public pool grows a memory: with public sharing on, the unique tracker also reads and writes the relay's public store, so every room keeps the spawn history.", "Bug reports now include a team summary line (shared entities, combat edges, tracked uniques, known players).", "The repository README describes this fork's team edition."], "note": "Still simulation-tested only; no live run with real characters yet."}, {"version": "1.4.0", "title": "Team edition complete (phases 2-6)", "items": ["Live shared world: each character publishes the interesting monsters it sees (champion and up, party mobs, uniques with an HP estimate), the other players in view, and who attacks what (observed from every cast around); the map draws it all as a dimmed team layer, own view always winning.", "Unique tracker: the game's own server-wide announcements plus shared sightings build a history per unique with respawn windows (the timer restarts at death; 3-6 h per unique), toasts, a sound, map pins, and a Hunt here button that moves your hunting spot to the last known position.", "Player knowledge: every player the team sees is remembered with position and level; a player attacking a teammate outside a party is marked hostile (red on the map, flagged in the panel).", "Team drops: the room shares pickup counters.", "Team decisions: assist (fight what a teammate or party member fights), spot claims (a warning when two characters start hunting on top of each other), synchronized town trips (optional; a teammate's town trip starts yours), and resurrection claims (the dead member waits up to 60 s for the peer walking over instead of reviving itself).", "The room key holders always see everything; an optional public pool (per-relay, per-category checkboxes) shares monsters, players and unique events with every room on your relay — never your own position or inventory.", "The reference relay grows a room key-value store (the team's shared memory, persisted across restarts) and a console page (/?key=room key) showing the fleet with Stop everyone and Town trip buttons."], "note": "All of it is tested in simulation and against a local relay only; a live check with real characters is still to do."}, {"version": "1.3.0", "title": "Team relay (phase 1: presence)", "items": ["New Team page: connect several characters through your own WebSocket relay; while it runs, each character sees the others' presence (name, hunting, alive, level) in the panel.", "A reference relay server (rooms by room key, presence forwarding, no game logic) is included under relay/ in the repository.", "Presence is private to one room key; nothing is shared beyond it. The bot never depends on the relay: off or unreachable, everything else works exactly as before.", "Update checks now come from this fork's repository (duan78/opensro-bot-lean) instead of the original."], "note": "Presence, heartbeats and reconnection are tested in simulation only; a live relay check is still to do."}, {"version": "1.2.173", "title": "Bows and crossbows wear ammo from the bag", "items": ["A bow primary weapon now puts on arrows and a crossbow puts on bolts, taken from your bag. The worn stack is kept if it fits, otherwise the biggest matching stack is used, and the next one when a stack runs out.", "Ammunition of the wrong kind is taken off. If no matching ammunition is left, the weapon stays as it is and the bot does not keep retrying.", "A secondary bow or crossbow gets its ammunition the same way, and your primary weapon and its ammunition go back on after a buff swap.", "See **Combat → Buffs & imbue → Weapons and shield**."], "note": "Contributed by corevider (#55). Tested in simulation only, not in a live game; the arrow and bolt item types were not checked against live data."}];
+const RELEASE_NOTES = [{"version": "1.5.2", "title": "Upstream sync: pet care", "items": ["Merges upstream 1.2.174: pet HP recovery kits stop draining on a wrong HP reading (catalogue-only maximum plus a flat-HP guard with a grace window), HGP recovery potions feed the attack pet and are bought in town, pet recovery kits are bought on the same trips and picked by their real (owner-scaled) heal, and a dead pet is revived with a Grass of life during a town trip.", "Adds upstream fix: each pet's maximum HP is learned from its own live HP (the highest value seen) instead of the pet catalogue, whose asset the live server removed while a stale cached copy kept serving wrong values — that copy made the bot burn kits on a full pet and then rest it while it was dying. A rested pet is now unblocked the moment its HP moves again.", "The team edition is unchanged and re-verified on the new base (590 tests)."], "note": "The observed-maximum fix is confirmed against the live session readings; the rest was verified in simulation only."}, {"version": "1.5.1", "title": "Upstream sync: combat gear, party-buff weapon swaps, ammo wear", "items": ["Merges upstream 1.2.170-1.2.173: the chosen weapons and shield stay listed once worn and move to Combat; the primary weapon is worn as combat gear and party buffs can swap weapons and return to the primary; bows and crossbows wear arrows or bolts from the bag.", "The team edition is unchanged and re-verified on the new base (579 tests)."], "note": "Re-verified in simulation only; nothing has run with real characters."}, {"version": "1.5.0", "title": "Upstream sync: travel, trade, lure, auto-start, and the released auto stall", "items": ["This fork merges upstream 1.2.128 → 1.2.169: teleport and ferry travel, the auto trade routes, the lure areas, auto-start, item balance, repair hammer, walk-back over teleports, and many fixes.", "The auto stall is now the upstream released version (1.2.169), which keeps this fork's original flow plus the maintainer's review fixes: a sale counts even when its gold arrives a tick later, potion and inventory refusals no longer close the stall, and a refused offer skips just that item.", "The team edition is unchanged and re-verified on the new base (545 tests): presence, live shared intel with the map layer, the unique tracker and shared knowledge, assist, town sync, resurrection claims, unique converge, the public pool, the relay console, and the three hosting options (Node, Cloudflare Workers, fly.io/VPS).", "Diagnostics now use the name-free team status line, matching the upstream review's finding."], "note": "Everything is re-verified in simulation on the merged base; nothing has run with real characters yet."}, {"version": "1.4.3", "title": "Relay hosting: the administrator's choice; auto stall", "items": ["The relay can now run in three places with the same protocol: Cloudflare Workers (new edition under relay/cloudflare: Durable Objects, WebSocket hibernation, storage that survives restarts, zero administration), fly.io (the Node relay as-is with a Dockerfile), or your own VPS (systemd unit included).", "The bot now sends the room key in the WebSocket URL (?key=…) for hosts that route by it; the Node relay ignores it, so all three hosts work with one address format.", "relay/smoke-test.cjs can verify a live deployment: WS_URL=wss://your-relay/ws node smoke-test.cjs.", "Auto stall: price items on a new page, stand in town, and the character opens its own street stall, offers them, and runs it; a sale is confirmed by the offer disappearing and gold rising, never by a dispatch. Hunting refuses to start while a stall session runs."], "note": "Both parts are tested in simulation (464 tests). The Workers edition follows the documented Durable Objects patterns but has only been syntax-checked and reviewed, not deployed — run its smoke test after wrangler deploy. Neither has run with real characters."}, {"version": "1.4.2", "title": "Coherence fixes for the team layer", "items": ["A unique's death reported by a teammate is recorded quietly; it used to be re-announced, which echoed between clients forever.", "A teammate's store write no longer cancels the sync this client still owes the room (a pending local sighting could be lost until the next change).", "Moving the hunting spot from the tracker cancels any automatic unique converge, so its later restore cannot overwrite the manual spot.", "Shared live intel is cleared when the character changes; the \"Hunt here\" button still works the same."], "note": "Found by re-reading the code with two clients in mind; tested in simulation, not yet with real characters."}, {"version": "1.4.1", "title": "Team edition rounded out", "items": ["Optional unique converge: when a unique appears and its position is known, a hunting character moves its hunting spot there (toasts say so); the saved spot comes back when the unique dies or after 20 minutes. Off by default.", "The public pool grows a memory: with public sharing on, the unique tracker also reads and writes the relay's public store, so every room keeps the spawn history.", "Bug reports now include a team summary line (shared entities, combat edges, tracked uniques, known players).", "The repository README describes this fork's team edition."], "note": "Still simulation-tested only; no live run with real characters yet."}, {"version": "1.4.0", "title": "Team edition complete (phases 2-6)", "items": ["Live shared world: each character publishes the interesting monsters it sees (champion and up, party mobs, uniques with an HP estimate), the other players in view, and who attacks what (observed from every cast around); the map draws it all as a dimmed team layer, own view always winning.", "Unique tracker: the game's own server-wide announcements plus shared sightings build a history per unique with respawn windows (the timer restarts at death; 3-6 h per unique), toasts, a sound, map pins, and a Hunt here button that moves your hunting spot to the last known position.", "Player knowledge: every player the team sees is remembered with position and level; a player attacking a teammate outside a party is marked hostile (red on the map, flagged in the panel).", "Team drops: the room shares pickup counters.", "Team decisions: assist (fight what a teammate or party member fights), spot claims (a warning when two characters start hunting on top of each other), synchronized town trips (optional; a teammate's town trip starts yours), and resurrection claims (the dead member waits up to 60 s for the peer walking over instead of reviving itself).", "The room key holders always see everything; an optional public pool (per-relay, per-category checkboxes) shares monsters, players and unique events with every room on your relay — never your own position or inventory.", "The reference relay grows a room key-value store (the team's shared memory, persisted across restarts) and a console page (/?key=room key) showing the fleet with Stop everyone and Town trip buttons."], "note": "All of it is tested in simulation and against a local relay only; a live check with real characters is still to do."}, {"version": "1.3.0", "title": "Team relay (phase 1: presence)", "items": ["New Team page: connect several characters through your own WebSocket relay; while it runs, each character sees the others' presence (name, hunting, alive, level) in the panel.", "A reference relay server (rooms by room key, presence forwarding, no game logic) is included under relay/ in the repository.", "Presence is private to one room key; nothing is shared beyond it. The bot never depends on the relay: off or unreachable, everything else works exactly as before.", "Update checks now come from this fork's repository (duan78/opensro-bot-lean) instead of the original."], "note": "Presence, heartbeats and reconnection are tested in simulation only; a live relay check is still to do."}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -16072,7 +16246,9 @@ const UI = {
         this.check('Use cure pills', () => P().cure.on, v => P().cure.on = v),
         this.check('Use recovery kits on my pets', () => P().petHp.on, v => { P().petHp.on = v; PetPotion.reset(); }),
         this.number('Pet HP below (%)', () => P().petHp.pct, v => P().petHp.pct = v, 5, 95),
-        el('p', 'Pets: when an attack or pickup pet drops below this HP, one recovery kit (the smallest that covers the missing HP) is used on it. Your own potions always go first; each kit must be seen consumed before the next. Vigor potions need no setting beyond the two thresholds above; they are used only when the HP and MP potions are not enough.', 'muted'));
+        this.check('Use HGP recovery potions on my pet', () => P().petHgp.on, v => { P().petHgp.on = v; PetPotion.reset(); }),
+        this.number('Pet HGP below (%)', () => P().petHgp.pct, v => P().petHgp.pct = v, 5, 95),
+        el('p', 'Pets: when an attack or pickup pet drops below this HP, one recovery kit (the smallest that covers the missing HP) is used on it. When the attack pet\'s HGP (satiety) drops below the second number, one HGP recovery potion is fed to it. Your own potions always go first; each item must be seen consumed before the next. Vigor potions need no setting beyond the two thresholds above; they are used only when the HP and MP potions are not enough.', 'muted'));
       this.petPotionNote = el('p', PetPotion.message, 'muted pet-note'); this.petPotionNote.title = PetPotion.message; pots.append(this.petPotionNote);
       host.append(pots);
   },
@@ -16097,7 +16273,17 @@ const UI = {
         this.check('Buy abnormal pills (best)', () => C().cure.on, v => C().cure.on = v),
         this.number('Pills low stock ≤', () => C().cure.low, v => C().cure.low = v, 0, 9999),
         this.number('Pills refill to', () => C().cure.target, v => C().cure.target = v, 1, 10000),
-        el('p', 'Buys only Special Universal Pill (small), the strongest universal cure. No cheaper substitute. Uses the same refill trips as HP/MP. Use cure pills above controls automatic use.', 'muted'));
+        el('p', 'Buys only Special Universal Pill (small), the strongest universal cure. No cheaper substitute. Uses the same refill trips as HP/MP. Use cure pills above controls automatic use.', 'muted'),
+        this.check('Buy HGP recovery potions', () => C().hgp.on, v => C().hgp.on = v),
+        this.select('HGP potion', () => [[0, 'Choose the merchant\'s pet food'], ...C().offers.filter(o => o.kind === 'hgp').map(o => [o.refObjId, o.name])], () => C().hgp.refObjId, v => C().hgp.refObjId = Number(v)),
+        this.number('HGP low stock ≤', () => C().hgp.low, v => C().hgp.low = v, 0, 9999),
+        this.number('HGP refill to', () => C().hgp.target, v => C().hgp.target = v, 1, 10000),
+        el('p', 'Pet food for the attack pet\'s HGP. Pick the pet food the recorded merchant sells; on a refill trip it is bought like the potions, and a merchant without it skips it with a notice. Feeding is set under Automatic potion use.', 'muted'),
+        this.check('Buy pet recovery kits', () => C().kit.on, v => C().kit.on = v),
+        this.select('Recovery kit', () => [[0, 'Choose the merchant\'s pet kits'], ...C().offers.filter(o => o.kind === 'kit').map(o => [o.refObjId, o.name])], () => C().kit.refObjId, v => C().kit.refObjId = Number(v)),
+        this.number('Kits low stock ≤', () => C().kit.low, v => C().kit.low = v, 0, 9999),
+        this.number('Kits refill to', () => C().kit.target, v => C().kit.target = v, 1, 10000),
+        el('p', 'Pet recovery kits for the attack and pickup pets, bought on the same refill trips as the pet food; a merchant without them skips them with a notice. Using them is set under Automatic potion use.', 'muted'));
       shop.append(el('p', 'Refill targets are total potion counts, including what is already in your bag. Used for low-supply, full-bag and revival trips, and walking-route restock when the town cycle is off. Set MP refill to 1000 for 1,000 MP potions. Changes apply to the next trip.', 'muted'));
       host.append(shop);
   },
@@ -16134,9 +16320,11 @@ const UI = {
         this.check('On a timer', () => town().every.on, v => town().every.on = v),
         this.number('Every (minutes)', () => town().every.minutes, v => town().every.minutes = v, 5, 600),
         this.check('Revive in town and go back to the hunting spot', () => town().revive, v => town().revive = v),
+        this.check('Revive a dead pet with a Grass of life', () => town().revivePet, v => town().revivePet = v),
         this.select('After death, reverse to', [['recall', 'Last return-scroll location (hunting area)'], ['death', 'Death location']], () => town().deathReturn, v => { town().deathReturn = v; Activity.emit({category:'settings',code:'reverse-choice-changed',text:'Revival reverse destination changed to ' + v + '.',details:{choice:v === 'death' ? 3 : 2}}); }),
         el('p', 'Service trips reverse to their departure point. After death, use the selected destination. A missing game destination stops the trip; it never substitutes another point. Without a reverse scroll, or with Back to the hunting spot set to Walk, the trip walks back to the saved hunting spot instead.', 'muted'),
-        el('p', 'Worn gear means the most worn repairable item you are wearing, measured against its own maximum durability; the trip repairs it. A broken weapon (0 durability) has its own switch, on by default. The XP and timer clocks run only while hunting and restart with every trip.', 'muted')));
+        el('p', 'Worn gear means the most worn repairable item you are wearing, measured against its own maximum durability; the trip repairs it. A broken weapon (0 durability) has its own switch, on by default. The XP and timer clocks run only while hunting and restart with every trip.', 'muted'),
+        el('p', 'A dead pet waits in your bag as its summoner item. With this on, a town trip starts for it and, once in town, uses a Grass of life from your bag to revive it and summons it again before the services. Carry the grass: stable-keepers sell it, the bot does not buy it.', 'muted')));
   },
   section_townCycle(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
@@ -17434,7 +17622,7 @@ function boot() {
     const key = name ? 'profile:' + name : 'profile:default';
     if (key !== Settings.profileKey) { Town.lastScrollPoint = null; Town.deathPoint = null; stopAll(); Settings.useCharacter(name); }
   });
-  bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); Trace.reset(); BuffGear.reset(); Team.reset(); TeamIntel.reset(); Town.lastScrollPoint = null; Town.deathPoint = null; SpeedScroll.reset(); RepairHammer.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
+  bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); Trace.reset(); BuffGear.reset(); Team.reset(); TeamIntel.reset(); Town.lastScrollPoint = null; Town.deathPoint = null; SpeedScroll.reset(); RepairHammer.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Restock.unbuyable.clear(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
   bus.on('phase', phase => {
     if (phase !== 'world') {
       BuffGear.interrupt('World transition interrupted buff swaps.', true);

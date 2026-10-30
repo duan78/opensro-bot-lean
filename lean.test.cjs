@@ -2789,6 +2789,8 @@ test('pet auto potion heals a low attack or pickup pet with the smallest kit tha
   g.Controller.tick(); assert.equal(petUses(g)[0].slot, 22, 'very low HP takes the biggest kit when none covers it exactly');
   g = petPotionFixture(); g.World.applyGameplay({ ...g.World.gp, cosRecords: [{ gid: 51, refObjId: 500, band: 4, hp: 300, status: 5, dead: false }] });
   g.Controller.tick(); assert.equal(petUses(g)[0].companionGid, 51, 'pickup pets are healed too');
+  g = petPotionFixture({ progression: { gold: '100000', level: 100, stats: { maxHp: 100, maxMp: 100, strength: 300 } } });
+  g.Controller.tick(); assert.equal(petUses(g)[0].slot, 20, 'the small kit already covers the deficit once its heal is scaled by strength and level like the server does');
 });
 test('pet auto potion never touches the wrong pets, the player potions or an unconfirmed retry', () => {
   let f = petPotionFixture(); f.World.applyGameplay({ ...f.World.gp, cosRecords: [{ gid: 60, refObjId: 500, band: 2, hp: 100, status: 5, dead: false }, { gid: 61, refObjId: 500, band: 3, hp: 100, status: 5, dead: true }] });
@@ -2804,10 +2806,94 @@ test('pet auto potion never touches the wrong pets, the player potions or an unc
   f.advance(31000); f.Controller.tick(); assert.equal(petUses(f).length, 2, 'retried after the 30 s pause');
   f = petPotionFixture(); f.Controller.tick(); assert.equal(petUses(f).length, 1);
   f.World.applyGameplay({ ...f.World.gp, inventory: f.World.gp.inventory.map(i => i.slot === 21 ? { ...i, quantity: 4 } : i), cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 300, status: 5, dead: false }] });
+  f.advance(2000); f.Controller.tick();
   f.advance(2000); f.Controller.tick(); assert.equal(petUses(f).length, 2, 'consumption confirms the first and the next kit may follow');
   f = petPotionFixture(); f.PetPotion.maxHp = null; f.Controller.tick(); assert.equal(petUses(f).length, 0); assert.match(f.PetPotion.message, /Waiting for pet HP data/);
   f = petPotionFixture(); assert.equal(f.Cmd.itemUseOnPet(20, 999), false, 'unknown pet'); assert.equal(f.Cmd.itemUseOnPet(99, 50), false, 'unknown item');
   assert.equal(f.Cmd.itemUseOnPet(20, 50), true);
+});
+test('pet auto potion takes the maximum from the catalogue, never a vitals row', () => {
+  let f = petPotionFixture({ vitals: [{ gid: 50, hp: 1000, maxHp: 999999 }] });
+  f.World.applyGameplay({ ...f.World.gp, cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 1000, status: 5, dead: false }] });
+  f.Controller.tick(); assert.equal(petUses(f).length, 0, 'a full pet stays full even when a vitals row claims a huge maximum');
+  assert.match(f.PetPotion.message, /heals at/);
+  f = petPotionFixture({ vitals: [{ gid: 50, hp: 100, maxHp: 999999 }] });
+  f.Controller.tick(); assert.equal(petUses(f).length, 1, 'the live vitals HP still drives the percentage over the catalogue maximum');
+});
+test('a pet whose HP never rises on confirmed kits is rested, not drained', () => {
+  const f = petPotionFixture();
+  const events = []; f.Activity.emit = e => events.push(e);
+  const consume = quantity => f.World.applyGameplay({ ...f.World.gp,
+    inventory: f.World.gp.inventory.map(i => i.slot === 21 ? { ...i, quantity } : i),
+    cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 300, status: 5, dead: false }] });
+  for (let n = 0; n < 3; n++) {
+    f.Controller.tick(); assert.equal(petUses(f).length, n + 1, 'kit ' + (n + 1) + ' goes out');
+    consume(4 - n); f.advance(2000);
+    f.Controller.tick(); f.advance(2000);
+  }
+  f.Controller.tick(); assert.equal(petUses(f).length, 3, 'no fourth kit after three confirmed kits with no HP movement');
+  assert.match(f.PetPotion.message, /5 min/);
+  assert.ok(events.some(e => e.code === 'pet-kit-flat' && e.details.gid === 50), 'the rest is reported as an activity event');
+  f.advance(2000); f.Controller.tick(); assert.equal(petUses(f).length, 3, 'the five-minute rest holds');
+  f.advance(300000); f.Controller.tick(); assert.equal(petUses(f).length, 4, 'after the rest a wrong reading only burns one kit per round');
+});
+test('a heal that lands a snapshot after the consumption is never counted flat', () => {
+  const f = petPotionFixture();
+  f.Controller.tick(); assert.equal(petUses(f).length, 1);
+  f.advance(1000);
+  f.World.applyGameplay({ ...f.World.gp, inventory: f.World.gp.inventory.map(i => i.slot === 21 ? { ...i, quantity: 4 } : i), cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 300, status: 5, dead: false }] });
+  f.Controller.tick();
+  assert.equal(f.PetPotion.stale.size, 0, 'the grace window holds the judgement while the HP update is still on its way');
+  f.advance(1000);
+  f.World.applyGameplay({ ...f.World.gp, cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 1000, status: 5, dead: false }] });
+  f.Controller.tick();
+  assert.equal(f.PetPotion.stale.size, 0, 'the late heal clears the flat check');
+  assert.equal(petUses(f).length, 1, 'and no extra kit was burned');
+});
+test('kits that raise the pet HP keep flowing without the flat-HP rest', () => {
+  const f = petPotionFixture();
+  const healTo = (hp, quantity) => f.World.applyGameplay({ ...f.World.gp,
+    inventory: f.World.gp.inventory.map(i => i.slot === 21 ? { ...i, quantity } : i),
+    cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp, status: 5, dead: false }] });
+  f.Controller.tick(); assert.equal(petUses(f).length, 1);
+  healTo(500, 4); f.advance(2000);
+  f.Controller.tick(); assert.equal(petUses(f).length, 2, 'a partial heal clears the flat counter and the next kit goes out');
+  healTo(1000, 3); f.advance(2000);
+  f.Controller.tick(); assert.equal(petUses(f).length, 2, 'full HP stops the kits');
+});
+const PET_FOOD = (9 << 11) | 236; // consumable 3/3/1/9: the companion HGP recovery potion
+function petFoodFixture(change = {}) {
+  const f = fixture(); f.Settings.profile.potion.petHp.on = false; f.Settings.profile.potion.petHgp.on = true;
+  const food = (slot, ref, pct, quantity = 5) => ({ slot, refObjId: ref, typeFlags: PET_FOOD, quantity, name: 'HGP potion', tooltip: { fields: { itemParam1_29c: pct } } });
+  f.World.applyGameplay({ ...f.World.gp, inventory: [food(30, 3001, 25), food(31, 3002, 60), food(32, 3003, 90)],
+    cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 900, satiety: 2000, status: 5, dead: false }], ...change });
+  return f;
+}
+test('pet auto potion feeds a hungry attack pet with the smallest HGP potion that covers the deficit', () => {
+  assert.equal(fixture().Settings.profile.potion.petHgp.on, false);
+  const f = petFoodFixture(); f.Controller.tick();
+  assert.deepEqual(JSON.parse(JSON.stringify(petUses(f))), [{ kind: 'item-use', slot: 32, companionGid: 50 }], '20% satiety misses 8000: the 90% potion is the smallest that covers it');
+  let g = petFoodFixture(); g.World.applyGameplay({ ...g.World.gp, cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 900, satiety: 9500, status: 5, dead: false }] });
+  g.Controller.tick(); assert.equal(petUses(g).length, 0, 'above the threshold');
+  g = petFoodFixture(); g.World.applyGameplay({ ...g.World.gp, cosRecords: [{ gid: 51, refObjId: 500, band: 4, hp: 900, satiety: 1000, status: 5, dead: false }] });
+  g.Controller.tick(); assert.equal(petUses(g).length, 0, 'pickup pets have no HGP gauge and are never fed');
+  g = petFoodFixture(); g.World.applyGameplay({ ...g.World.gp, cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 900, status: 5, dead: false }] });
+  g.Controller.tick(); assert.equal(petUses(g).length, 0, 'a record without satiety data waits');
+});
+test('pet HGP feeding confirms consumption, rests when unconfirmed, and yields to recovery kits', () => {
+  let f = petFoodFixture(); f.Controller.tick(); assert.equal(petUses(f).length, 1);
+  f.advance(2000); f.Controller.tick(); assert.equal(petUses(f).length, 1, 'no second potion until the first is seen consumed');
+  f.advance(4000); f.Controller.tick(); assert.equal(petUses(f).length, 1); assert.match(f.PetPotion.message, /HGP potion consumption unconfirmed/);
+  f.advance(31000); f.Controller.tick(); assert.equal(petUses(f).length, 2, 'retried after the 30 s pause');
+  f = petFoodFixture(); f.Controller.tick(); assert.equal(petUses(f).length, 1);
+  f.World.applyGameplay({ ...f.World.gp, inventory: f.World.gp.inventory.map(i => i.slot === 32 ? { ...i, quantity: 4 } : i), cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 900, satiety: 9500, status: 5, dead: false }] });
+  f.advance(2000); f.Controller.tick(); assert.equal(petUses(f).length, 1, 'a fed pet above the threshold gets no second potion');
+  f = petFoodFixture(); f.Settings.profile.potion.petHp.on = true; f.PetPotion.maxHp = new Map([[500, 1000]]);
+  f.World.applyGameplay({ ...f.World.gp, inventory: [...f.World.gp.inventory, { slot: 20, refObjId: 2143, typeFlags: 8428, quantity: 5, tooltip: { fields: { itemParam1_29c: 360 } } }], cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 300, satiety: 2000, status: 5, dead: false }] });
+  f.Controller.tick(); assert.equal(petUses(f)[0].slot, 20, 'the recovery kit goes first');
+  f.World.applyGameplay({ ...f.World.gp, inventory: f.World.gp.inventory.map(i => i.slot === 20 ? { ...i, quantity: 4 } : i), cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 1000, satiety: 2000, status: 5, dead: false }] });
+  f.advance(2000); f.Controller.tick(); assert.equal(petUses(f).length, 2); assert.equal(petUses(f)[1].slot, 32, 'then the HGP potion follows');
+  f = petFoodFixture(); f.Settings.profile.potion.enabled = false; f.Controller.tick(); assert.equal(petUses(f).length, 0, 'the master potion switch stops feeding too');
 });
 test('vigor potions are a restock supply with a chosen size, bought on town trips and recognised in shops', () => {
   const f = townFixture(), r = f.Restock.cfg(), c = f.Town;
@@ -2827,6 +2913,98 @@ test('vigor potions are a restock supply with a chosen size, bought on town trip
   g.Town.begin(); g.Town.enter('buy'); g.World.gp.target = 61; g.World.gp.targetCapabilities = 1;
   g.World.gp.shop = { npc: 61, offers: [offer(15, 4332)] }; g.World.gp.inventory = g.World.gp.inventory.map(i => i.refObjId === 15 ? { ...i, quantity: 50 } : i);
   g.Town.tick(); assert.equal(g.Town.trip, null); assert.match(g.Town.message, /vigor potion size is unavailable/);
+});
+test('hgp potions are a restock supply bought at the merchant and skipped, not fatal, when not sold', () => {
+  const f = townFixture(), r = f.Restock.cfg(), c = f.Town;
+  assert.equal(fixture().Restock.cfg().hgp.on, false); assert.equal(fixture().Restock.cfg().hgp.refObjId, 0);
+  const offer = (ref, tf) => ({ refObjId: ref, name: 'Pet food', tab: 0, slot: 0, maxStack: 100, price: '10', previews: [{ refObjId: ref, typeFlags: tf }] });
+  const hgpTf = (9 << 11) | 236;
+  assert.equal(f.Restock.offerKind(offer(3001, hgpTf)), 'hgp', 'companion food is its own shop kind');
+  assert.equal(f.Restock.offerKind(offer(2145, (5 << 11) | 236)), '', 'pet MP potions are no shop supply');
+  r.hgp.on = true; r.hgp.refObjId = 3001; r.hgp.low = 5; r.hgp.target = 40;
+  assert.deepEqual(JSON.parse(JSON.stringify(c.supplies().map(s => [s.kind, s.refObjId]))), [['mp', 15], ['hgp', 3001]], 'the pet food rides the same refill trips');
+  c.begin(); c.enter('buy');
+  const gp = f.World.gp; gp.target = 61; gp.targetCapabilities = 1;
+  gp.shop = { npc: 61, offers: [offer(15, 4332), offer(3001, hgpTf)] }; gp.inventory = gp.inventory.map(i => i.refObjId === 15 ? { ...i, quantity: 50 } : i);
+  c.tick();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'shop-buy', tab: 0, slot: 0, quantity: 40 }, 'the pet food is bought like a potion');
+  const g = townFixture(); g.Restock.cfg().hgp.on = true; g.Restock.cfg().hgp.refObjId = 3001; g.Town.cfg().petFull = false;
+  g.Town.begin(); g.Town.enter('buy'); g.World.gp.target = 61; g.World.gp.targetCapabilities = 1;
+  g.World.gp.shop = { npc: 61, offers: [offer(15, 4332)] }; g.World.gp.inventory = g.World.gp.inventory.map(i => i.refObjId === 15 ? { ...i, quantity: 50 } : i);
+  g.Town.tick(); assert.match(g.Town.message, /does not sell HGP recovery potions/);
+  g.Town.tick(); assert.ok(g.Town.trip && g.Town.trip.phase !== 'buy', 'a merchant without pet food skips it and the trip goes on');
+  assert.ok(g.Restock.unbuyable.has(3001), 'the merchant is remembered as not selling the pet food');
+  assert.ok(!g.Town.supplies().some(s => s.kind === 'hgp'), 'an unsold pet food leaves the refill supplies');
+  assert.equal(g.Town.reason(), '', 'and no longer re-triggers town trips for it');
+  const h = townFixture(); h.Restock.cfg().hgp.on = true; h.Town.cfg().petFull = false; h.World.gp.inventory = h.World.gp.inventory.map(i => i.refObjId === 15 ? { ...i, quantity: 50 } : i);
+  assert.ok(!h.Town.supplies().some(s => s.kind === 'hgp'), 'an unchosen pet food never rides the trips');
+  assert.equal(h.Town.reason(), '', 'and never blocks or triggers restock on its own');
+});
+test('pet recovery kits are a restock supply bought at the merchant and skipped, not fatal, when not sold', () => {
+  const f = townFixture(), r = f.Restock.cfg(), c = f.Town;
+  assert.equal(fixture().Restock.cfg().kit.on, false); assert.equal(fixture().Restock.cfg().kit.refObjId, 0);
+  const offer = (ref, tf) => ({ refObjId: ref, name: 'Recovery kit', tab: 0, slot: 0, maxStack: 100, price: '10', previews: [{ refObjId: ref, typeFlags: tf }] });
+  const kitTf = (4 << 11) | 236;
+  assert.equal(f.Restock.offerKind(offer(2143, kitTf)), 'kit', 'companion kits are their own shop kind');
+  r.kit.on = true; r.kit.refObjId = 2143; r.kit.low = 5; r.kit.target = 40;
+  assert.deepEqual(JSON.parse(JSON.stringify(c.supplies().map(s => [s.kind, s.refObjId]))), [['mp', 15], ['kit', 2143]], 'the kits ride the same refill trips');
+  c.begin(); c.enter('buy');
+  const gp = f.World.gp; gp.target = 61; gp.targetCapabilities = 1;
+  gp.shop = { npc: 61, offers: [offer(15, 4332), offer(2143, kitTf)] }; gp.inventory = gp.inventory.map(i => i.refObjId === 15 ? { ...i, quantity: 50 } : i);
+  c.tick();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'shop-buy', tab: 0, slot: 0, quantity: 40 }, 'the kit is bought like a potion');
+  const g = townFixture(); g.Restock.cfg().kit.on = true; g.Restock.cfg().kit.refObjId = 2143;
+  g.Town.begin(); g.Town.enter('buy'); g.World.gp.target = 61; g.World.gp.targetCapabilities = 1;
+  g.World.gp.shop = { npc: 61, offers: [offer(15, 4332)] }; g.World.gp.inventory = g.World.gp.inventory.map(i => i.refObjId === 15 ? { ...i, quantity: 50 } : i);
+  g.Town.tick(); assert.match(g.Town.message, /does not sell pet recovery kits/);
+  g.Town.tick(); assert.ok(g.Town.trip && g.Town.trip.phase !== 'buy', 'a merchant without kits skips them and the trip goes on');
+});
+const GRASS = (6 << 11) | 236; // consumable 3/3/1/6: the companion revival item (Grass of life)
+function deadPetFixture() {
+  const f = townFixture(), c = f.Town;
+  c.cfg().petFull = false; c.cfg().revivePet = true;
+  c.detect = () => ({ key: 'KT' });
+  f.World.gp.inventory.push({ slot: 16, refObjId: 7001, typeFlags: 2284, quantity: 1, name: 'Wolf collar', summon: { state: 4, refObjId: 600, name: 'Wolf', rentals: [] } },
+    { slot: 17, refObjId: 7552, typeFlags: GRASS, quantity: 3, name: 'Grass of life' });
+  return f;
+}
+test('a dead pet starts a town trip and is revived with a Grass of life, then summoned again', () => {
+  assert.equal(fixture().Town.cfg().revivePet, false);
+  const f = deadPetFixture(), c = f.Town;
+  assert.equal(c.reason(), 'a pet is down');
+  let g = deadPetFixture(); g.World.gp.inventory = g.World.gp.inventory.filter(i => i.refObjId !== 7552);
+  assert.equal(g.Town.reason(), 'potions running low', 'a dead pet without a grass does not start a trip for it');
+  g = deadPetFixture(); g.Town.cfg().revivePet = false;
+  assert.equal(g.Town.reason(), 'potions running low', 'the pet revival is off by default');
+  c.begin(); assert.equal(c.trip.phase, 'pet-revive', 'the revival comes first, before the services');
+  c.tick();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'item-use', slot: 17, revivalSlot: 16 }, 'the grass names the dead pet collar');
+  f.World.applyGameplay({ ...f.World.gp, inventory: f.World.gp.inventory.map(i => i.slot === 16 ? { ...i, summon: { ...i.summon, state: 3 } } : i.slot === 17 ? { ...i, quantity: 2 } : i) });
+  f.advance(2000); c.tick(); f.advance(2000); c.tick();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.commands.at(-1))), { kind: 'item-use', slot: 16 }, 'the collar is used again to summon the pet');
+  f.World.applyGameplay({ ...f.World.gp, inventory: f.World.gp.inventory.map(i => i.slot === 16 ? { ...i, summon: { ...i.summon, state: 2 } } : i), cosRecords: [...f.World.gp.cosRecords, { gid: 71, refObjId: 600, band: 3, hp: 900, status: 5, dead: false }] });
+  f.advance(2000); c.tick();
+  assert.equal(c.trip.phase, 'walk-storage', 'the services continue once the pet is back');
+});
+test('an unaccepted Grass of life never stops the town trip and rests the retry', () => {
+  const f = deadPetFixture(), c = f.Town;
+  c.begin(); assert.equal(c.trip.phase, 'pet-revive');
+  c.tick(); assert.equal(f.commands.at(-1).kind, 'item-use');
+  f.advance(13000); c.tick();
+  assert.equal(c.trip.phase, 'walk-storage', 'the trip continues without the pet');
+  assert.match(c.message, /was not accepted/);
+  assert.equal(c.reason(), 'potions running low', 'the dead pet does not start another trip at once');
+  f.advance(610000); assert.equal(c.reason(), 'a pet is down', 'retried ten minutes later');
+});
+test('a collar that vanishes while the grass is in flight is not a revival', () => {
+  const f = deadPetFixture(), c = f.Town;
+  c.begin(); c.tick(); assert.equal(f.commands.at(-1).kind, 'item-use');
+  f.World.applyGameplay({ ...f.World.gp, inventory: f.World.gp.inventory.filter(i => i.slot !== 16) });
+  f.advance(2000); c.tick();
+  assert.equal(c.trip.phase, 'pet-revive', 'a missing collar confirms nothing');
+  assert.ok(!f.commands.some(x => x.kind === 'item-use' && x.slot === 16), 'no summon is sent for it');
+  f.advance(12000); c.tick();
+  assert.equal(c.trip.phase, 'walk-storage', 'the timeout ends the attempt and the trip goes on');
 });
 function reconnectFixture() {
   const f = fixture(), sent = []; f.World.charName = 'Tester'; f.Hunt.start();
@@ -5886,7 +6064,7 @@ async function updateTests() {
   }
   await check('updates compare numeric version components and ignore malformed versions', async () => {
     const f = fixture();
-    for (const v of ['9.9.9', '1.5.2', '2.0.0']) assert.equal(f.Updates.newer(v), true);
+    for (const v of ['9.9.9', '1.5.3', '2.0.0']) assert.equal(f.Updates.newer(v), true);
     for (const v of ['1.2.9', '1.2.36', '1.2.169', '1.2.173', '1.3.0', '1.4.3', '1.5.0', '1.5.1', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
   });
   await check('updates pin metadata and user-initiated installer to the same trusted commit', async () => {

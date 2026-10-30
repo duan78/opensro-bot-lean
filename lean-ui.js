@@ -822,7 +822,9 @@ const UI = {
         this.check('Use cure pills', () => P().cure.on, v => P().cure.on = v),
         this.check('Use recovery kits on my pets', () => P().petHp.on, v => { P().petHp.on = v; PetPotion.reset(); }),
         this.number('Pet HP below (%)', () => P().petHp.pct, v => P().petHp.pct = v, 5, 95),
-        el('p', 'Pets: when an attack or pickup pet drops below this HP, one recovery kit (the smallest that covers the missing HP) is used on it. Your own potions always go first; each kit must be seen consumed before the next. Vigor potions need no setting beyond the two thresholds above; they are used only when the HP and MP potions are not enough.', 'muted'));
+        this.check('Use HGP recovery potions on my pet', () => P().petHgp.on, v => { P().petHgp.on = v; PetPotion.reset(); }),
+        this.number('Pet HGP below (%)', () => P().petHgp.pct, v => P().petHgp.pct = v, 5, 95),
+        el('p', 'Pets: when an attack or pickup pet drops below this HP, one recovery kit (the smallest that covers the missing HP) is used on it. When the attack pet\'s HGP (satiety) drops below the second number, one HGP recovery potion is fed to it. Your own potions always go first; each item must be seen consumed before the next. Vigor potions need no setting beyond the two thresholds above; they are used only when the HP and MP potions are not enough.', 'muted'));
       this.petPotionNote = el('p', PetPotion.message, 'muted pet-note'); this.petPotionNote.title = PetPotion.message; pots.append(this.petPotionNote);
       host.append(pots);
   },
@@ -847,7 +849,17 @@ const UI = {
         this.check('Buy abnormal pills (best)', () => C().cure.on, v => C().cure.on = v),
         this.number('Pills low stock ≤', () => C().cure.low, v => C().cure.low = v, 0, 9999),
         this.number('Pills refill to', () => C().cure.target, v => C().cure.target = v, 1, 10000),
-        el('p', 'Buys only Special Universal Pill (small), the strongest universal cure. No cheaper substitute. Uses the same refill trips as HP/MP. Use cure pills above controls automatic use.', 'muted'));
+        el('p', 'Buys only Special Universal Pill (small), the strongest universal cure. No cheaper substitute. Uses the same refill trips as HP/MP. Use cure pills above controls automatic use.', 'muted'),
+        this.check('Buy HGP recovery potions', () => C().hgp.on, v => C().hgp.on = v),
+        this.select('HGP potion', () => [[0, 'Choose the merchant\'s pet food'], ...C().offers.filter(o => o.kind === 'hgp').map(o => [o.refObjId, o.name])], () => C().hgp.refObjId, v => C().hgp.refObjId = Number(v)),
+        this.number('HGP low stock ≤', () => C().hgp.low, v => C().hgp.low = v, 0, 9999),
+        this.number('HGP refill to', () => C().hgp.target, v => C().hgp.target = v, 1, 10000),
+        el('p', 'Pet food for the attack pet\'s HGP. Pick the pet food the recorded merchant sells; on a refill trip it is bought like the potions, and a merchant without it skips it with a notice. Feeding is set under Automatic potion use.', 'muted'),
+        this.check('Buy pet recovery kits', () => C().kit.on, v => C().kit.on = v),
+        this.select('Recovery kit', () => [[0, 'Choose the merchant\'s pet kits'], ...C().offers.filter(o => o.kind === 'kit').map(o => [o.refObjId, o.name])], () => C().kit.refObjId, v => C().kit.refObjId = Number(v)),
+        this.number('Kits low stock ≤', () => C().kit.low, v => C().kit.low = v, 0, 9999),
+        this.number('Kits refill to', () => C().kit.target, v => C().kit.target = v, 1, 10000),
+        el('p', 'Pet recovery kits for the attack and pickup pets, bought on the same refill trips as the pet food; a merchant without them skips them with a notice. Using them is set under Automatic potion use.', 'muted'));
       shop.append(el('p', 'Refill targets are total potion counts, including what is already in your bag. Used for low-supply, full-bag and revival trips, and walking-route restock when the town cycle is off. Set MP refill to 1000 for 1,000 MP potions. Changes apply to the next trip.', 'muted'));
       host.append(shop);
   },
@@ -884,9 +896,11 @@ const UI = {
         this.check('On a timer', () => town().every.on, v => town().every.on = v),
         this.number('Every (minutes)', () => town().every.minutes, v => town().every.minutes = v, 5, 600),
         this.check('Revive in town and go back to the hunting spot', () => town().revive, v => town().revive = v),
+        this.check('Revive a dead pet with a Grass of life', () => town().revivePet, v => town().revivePet = v),
         this.select('After death, reverse to', [['recall', 'Last return-scroll location (hunting area)'], ['death', 'Death location']], () => town().deathReturn, v => { town().deathReturn = v; Activity.emit({category:'settings',code:'reverse-choice-changed',text:'Revival reverse destination changed to ' + v + '.',details:{choice:v === 'death' ? 3 : 2}}); }),
         el('p', 'Service trips reverse to their departure point. After death, use the selected destination. A missing game destination stops the trip; it never substitutes another point. Without a reverse scroll, or with Back to the hunting spot set to Walk, the trip walks back to the saved hunting spot instead.', 'muted'),
-        el('p', 'Worn gear means the most worn repairable item you are wearing, measured against its own maximum durability; the trip repairs it. A broken weapon (0 durability) has its own switch, on by default. The XP and timer clocks run only while hunting and restart with every trip.', 'muted')));
+        el('p', 'Worn gear means the most worn repairable item you are wearing, measured against its own maximum durability; the trip repairs it. A broken weapon (0 durability) has its own switch, on by default. The XP and timer clocks run only while hunting and restart with every trip.', 'muted'),
+        el('p', 'A dead pet waits in your bag as its summoner item. With this on, a town trip starts for it and, once in town, uses a Grass of life from your bag to revive it and summons it again before the services. Carry the grass: stable-keepers sell it, the bot does not buy it.', 'muted')));
   },
   section_townCycle(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
