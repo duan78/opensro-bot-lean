@@ -2,14 +2,16 @@
 // pet's satiety. Both are companion items (types 3/3/1/4 and 3/3/1/9): the game needs the pet named in the
 // item-use command, so this sends it explicitly. Player potions always go first, nothing is resent until the
 // previous one is seen to be consumed, and a pet is left alone — 30 s when an item is not seen consumed, 5 min
-// when confirmed kits never raise its HP — instead of burning supplies on a bad HP reading.
+// when confirmed kits never raise its HP — instead of burning supplies on a bad HP reading. A pet's
+// maximum HP is learned from its own live HP (the highest value seen), never trusted from a catalogue alone,
+// and a rested pet is unblocked the moment its HP moves again.
 const PetPotion = {
-  maxHp: null, loading: null, retryAt: 0, pending: null, settled: null, blocked: new Map(), stale: new Map(), lastAt: -Infinity,
+  maxHp: null, loading: null, retryAt: 0, pending: null, settled: null, blocked: new Map(), blockedHp: new Map(), stale: new Map(), seenMax: new Map(), lastAt: -Infinity,
   feedPending: null, feedBlocked: new Map(), feedLastAt: -Infinity, message: 'Pet potions off.',
   cfg() { return Settings.profile.potion.petHp; },
   hgpCfg() { return Settings.profile.potion.petHgp; },
   reset() {
-    this.pending = null; this.settled = null; this.blocked.clear(); this.stale.clear(); this.lastAt = -Infinity;
+    this.pending = null; this.settled = null; this.blocked.clear(); this.blockedHp.clear(); this.stale.clear(); this.seenMax.clear(); this.lastAt = -Infinity;
     this.feedPending = null; this.feedBlocked.clear(); this.feedLastAt = -Infinity;
     this.message = this.cfg().on || this.hgpCfg().on ? 'Waiting for a pet.' : 'Pet potions off.';
   },
@@ -26,8 +28,8 @@ const PetPotion = {
   foods() { return World.items().filter(i => Number.isInteger(i.typeFlags) && ItemType.potionCategory(i.typeFlags) === 9 && (i.quantity ?? 1) > 0); },
   foodTotal(ref) { return this.foods().filter(i => i.refObjId === ref).reduce((n, i) => n + (i.quantity ?? 1), 0); },
   foodPct(item) { return Number(item.tooltip?.fields?.itemParam1_29c) || 0; },
-  // The catalogue is the only maximum source, exactly like the game's own pet window; vitals rows for a COS
-  // never carry a maintained maximum.
+  // The catalogue only bootstraps a never-seen pet's maximum; the observed HP high-water mark takes over
+  // from the first read (see pets()).
   async load() {
     if (this.maxHp || this.loading || now() < this.retryAt || !W.location?.origin) return;
     this.retryAt = now() + 30000;
@@ -38,16 +40,24 @@ const PetPotion = {
     }).catch(() => {}).finally(() => { this.loading = null; });
     return this.loading;
   },
-  // Living attack (band 3) and pickup (band 4) pets with their HP as a percentage; unknown maximums are skipped.
+  // Living attack (band 3) and pickup (band 4) pets with their HP as a percentage. The maximum is learned
+  // from the pet itself: the highest HP ever seen for its gid, because the catalogue can lie — the live
+  // server removed the asset and a stale copy in the game's own asset cache still serves wrong values. A
+  // freshly summoned pet starts at full HP, so the first read pins the true maximum; a later higher HP
+  // raises it. The catalogue only bootstraps a pet that has never been seen yet.
   pets() {
-    const out = [];
+    const out = [], living = new Set();
     for (const rec of World.gp?.cosRecords || []) {
       if (!rec || rec.dead || !(rec.hp > 0) || (rec.band !== 3 && rec.band !== 4) || !Number.isInteger(rec.gid) || rec.gid <= 0) continue;
-      const max = this.maxHp?.get(rec.refObjId);
-      if (!(max > 0)) continue;
+      living.add(rec.gid);
       const vital = World.vitalsOf(rec.gid), hp = Number.isFinite(vital?.hp) ? vital.hp : rec.hp;
+      if (hp > (this.seenMax.get(rec.gid) ?? 0)) this.seenMax.set(rec.gid, hp);
+      const seen = this.seenMax.get(rec.gid) ?? 0;
+      const max = seen > 0 ? seen : (vital?.maxHp > 0 ? vital.maxHp : this.maxHp?.get(rec.refObjId)) ?? 0;
+      if (!(max > 0)) continue;
       out.push({ gid: rec.gid, hp, max, pct: hp / max * 100 });
     }
+    for (const gid of this.seenMax.keys()) if (!living.has(gid)) { this.seenMax.delete(gid); this.blockedHp.delete(gid); }
     return out;
   },
   petHp(gid) {
@@ -97,7 +107,7 @@ const PetPotion = {
         // snapshot later: hold the flat judgement for a short grace before counting it.
         this.settled = { gid: p.gid, hp: p.hp, at: now() };
       }
-      else if (now() - p.at > 5000) { this.pending = null; this.blocked.set(p.gid, now() + 30000); this.message = 'Pet recovery kit consumption unconfirmed; waiting 30 s.'; }
+      else if (now() - p.at > 5000) { this.pending = null; this.blocked.set(p.gid, now() + 30000); this.blockedHp.set(p.gid, this.petHp(p.gid)); this.message = 'Pet recovery kit consumption unconfirmed; waiting 30 s.'; }
       else return false;
     }
     if (this.settled) {
@@ -109,7 +119,7 @@ const PetPotion = {
         // reading is wrong; three in a row rest the pet instead of draining the stack.
         const count = (this.stale.get(s.gid)?.count ?? 0) + 1;
         if (count >= 3) {
-          this.blocked.set(s.gid, now() + 300000); this.stale.delete(s.gid);
+          this.blocked.set(s.gid, now() + 300000); this.blockedHp.set(s.gid, flat); this.stale.delete(s.gid);
           this.message = 'Confirmed kits never raise this pet HP; waiting 5 min.';
           Activity.emit({ category: 'potion', code: 'pet-kit-flat', text: 'Three confirmed kits left the pet HP untouched; the HP reading looks wrong, resting the pet 5 min.', outcome: 'refused', details: { gid: s.gid, hp: flat } });
           return false;
@@ -119,10 +129,19 @@ const PetPotion = {
       else return false;
     }
     if (World.gp.inventoryPending || now() - this.lastAt < 1500 || now() - Potion.lastUse < Settings.profile.potion.delayMs) return false;
-    const known = this.pets(), pets = known.filter(x => (this.blocked.get(x.gid) ?? 0) <= now()).sort((a, b) => a.pct - b.pct);
+    const known = this.pets(), pets = known.filter(x => {
+      const until = this.blocked.get(x.gid) ?? 0;
+      if (until <= now()) { this.blocked.delete(x.gid); this.blockedHp.delete(x.gid); return true; }
+      if (this.blockedHp.get(x.gid) === undefined) { this.blockedHp.set(x.gid, x.hp); return false; }
+      if (x.hp !== this.blockedHp.get(x.gid)) {
+        this.blocked.delete(x.gid); this.blockedHp.delete(x.gid); this.stale.delete(x.gid);
+        return true;
+      }
+      return false;
+    }).sort((a, b) => a.pct - b.pct);
     for (const x of known) if (x.pct > c.pct) this.stale.delete(x.gid);
     if (known.length && !pets.length) return false;
-    if (!pets.length) { this.message = World.gp?.cosRecords?.some(r => r && !r.dead && r.hp > 0 && (r.band === 3 || r.band === 4)) ? 'Waiting for pet HP data.' : 'No attack or pickup pet to heal.'; return false; }
+    if (!pets.length) { this.message = 'No attack or pickup pet to heal.'; return false; }
     const pet = pets[0];
     if (pet.pct > c.pct) { this.message = 'Pet HP ' + Math.round(pet.pct) + '%; heals at ' + c.pct + '%.'; return false; }
     const kit = this.pick(pet.max - pet.hp);
