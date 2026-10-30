@@ -2773,6 +2773,7 @@ const PET_KIT = 8428; // consumable 3/3/1/4: the companion HP recovery kit
 function petPotionFixture(change = {}) {
   const f = fixture(); f.Settings.profile.potion.petHp.on = true;
   f.PetPotion.maxHp = new Map([[500, 1000]]);
+  f.PetPotion.seenMax.set(50, 1000); // the pet was seen at full HP when summoned: that pins its real maximum
   const kit = (slot, ref, heal, quantity = 5) => ({ slot, refObjId: ref, typeFlags: PET_KIT, quantity, name: 'Recovery kit', tooltip: { fields: { itemParam1_29c: heal } } });
   f.World.applyGameplay({ ...f.World.gp, inventory: [kit(20, 2143, 360), kit(21, 2144, 800), kit(22, 9237, 3000)],
     cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 300, mp: 0, status: 5, dead: false }], ...change });
@@ -2787,7 +2788,7 @@ test('pet auto potion heals a low attack or pickup pet with the smallest kit tha
   g.Controller.tick(); assert.equal(petUses(g).length, 0, 'above the threshold');
   g = petPotionFixture(); g.World.applyGameplay({ ...g.World.gp, cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 10, status: 5, dead: false }] });
   g.Controller.tick(); assert.equal(petUses(g)[0].slot, 22, 'very low HP takes the biggest kit when none covers it exactly');
-  g = petPotionFixture(); g.World.applyGameplay({ ...g.World.gp, cosRecords: [{ gid: 51, refObjId: 500, band: 4, hp: 300, status: 5, dead: false }] });
+  g = petPotionFixture(); g.PetPotion.seenMax.set(51, 1000); g.World.applyGameplay({ ...g.World.gp, cosRecords: [{ gid: 51, refObjId: 500, band: 4, hp: 300, status: 5, dead: false }] });
   g.Controller.tick(); assert.equal(petUses(g)[0].companionGid, 51, 'pickup pets are healed too');
   g = petPotionFixture({ progression: { gold: '100000', level: 100, stats: { maxHp: 100, maxMp: 100, strength: 300 } } });
   g.Controller.tick(); assert.equal(petUses(g)[0].slot, 20, 'the small kit already covers the deficit once its heal is scaled by strength and level like the server does');
@@ -2808,7 +2809,7 @@ test('pet auto potion never touches the wrong pets, the player potions or an unc
   f.World.applyGameplay({ ...f.World.gp, inventory: f.World.gp.inventory.map(i => i.slot === 21 ? { ...i, quantity: 4 } : i), cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 300, status: 5, dead: false }] });
   f.advance(2000); f.Controller.tick();
   f.advance(2000); f.Controller.tick(); assert.equal(petUses(f).length, 2, 'consumption confirms the first and the next kit may follow');
-  f = petPotionFixture(); f.PetPotion.maxHp = null; f.Controller.tick(); assert.equal(petUses(f).length, 0); assert.match(f.PetPotion.message, /Waiting for pet HP data/);
+  f = petPotionFixture(); f.PetPotion.maxHp = null; f.PetPotion.seenMax.clear(); f.Controller.tick(); assert.equal(petUses(f).length, 0, 'without any maximum source the pet measures against itself and stays untouched while full');
   f = petPotionFixture(); assert.equal(f.Cmd.itemUseOnPet(20, 999), false, 'unknown pet'); assert.equal(f.Cmd.itemUseOnPet(99, 50), false, 'unknown item');
   assert.equal(f.Cmd.itemUseOnPet(20, 50), true);
 });
@@ -2819,6 +2820,43 @@ test('pet auto potion takes the maximum from the catalogue, never a vitals row',
   assert.match(f.PetPotion.message, /heals at/);
   f = petPotionFixture({ vitals: [{ gid: 50, hp: 100, maxHp: 999999 }] });
   f.Controller.tick(); assert.equal(petUses(f).length, 1, 'the live vitals HP still drives the percentage over the catalogue maximum');
+});
+test('the maximum is learned from the observed HP, not the catalogue (live regression)', () => {
+  // Live report: the catalogue asset is gone from the server (404) and the game's own asset cache serves a
+  // stale copy claiming max 39434 while the pet is really full at 11000. The first read of a summoned pet
+  // pins the true maximum instead.
+  const f = petPotionFixture(); f.PetPotion.maxHp = new Map([[500, 39434]]); f.PetPotion.seenMax.set(50, 11000);
+  f.World.applyGameplay({ ...f.World.gp, cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 11000, status: 5, dead: false }] });
+  f.Controller.tick(); assert.equal(petUses(f).length, 0, 'a full pet is full against its observed maximum, whatever the stale catalogue says');
+  f.World.applyGameplay({ ...f.World.gp, cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 5000, status: 5, dead: false }] });
+  f.Controller.tick(); assert.equal(petUses(f).length, 1, 'wounded against the observed maximum, the kit goes out');
+  f.advance(2000); f.World.applyGameplay({ ...f.World.gp, inventory: f.World.gp.inventory.map(i => i.slot === 22 ? { ...i, quantity: 4 } : i), cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 11000, status: 5, dead: false }] });
+  f.Controller.tick(); f.advance(2000); f.Controller.tick();
+  assert.equal(petUses(f).length, 1, 'healed back to the observed maximum, the kits stop');
+  let g = petPotionFixture(); g.PetPotion.seenMax.clear(); g.PetPotion.maxHp = null;
+  g.World.applyGameplay({ ...g.World.gp, cosRecords: [{ gid: 52, refObjId: 500, band: 3, hp: 300, status: 5, dead: false }] });
+  g.Controller.tick();
+  assert.equal(g.PetPotion.pets()[0].max, 300, 'a first-seen pet measures against its own current HP until a higher value shows');
+  g.World.applyGameplay({ ...g.World.gp, cosRecords: [{ gid: 52, refObjId: 500, band: 3, hp: 500, status: 5, dead: false }] });
+  g.Controller.tick(); assert.equal(g.PetPotion.pets()[0].max, 500, 'a later higher HP raises the learned maximum');
+});
+test('a rested pet is unblocked the moment its HP moves again', () => {
+  const f = petPotionFixture();
+  const consume = quantity => f.World.applyGameplay({ ...f.World.gp,
+    inventory: f.World.gp.inventory.map(i => i.slot === 21 ? { ...i, quantity } : i),
+    cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 300, status: 5, dead: false }] });
+  for (let n = 0; n < 3; n++) {
+    f.Controller.tick(); consume(4 - n); f.advance(2000);
+    f.Controller.tick(); f.advance(2000);
+  }
+  f.Controller.tick();
+  assert.equal(petUses(f).length, 3, 'the flat guard rests the pet');
+  assert.ok((f.PetPotion.blocked.get(50) ?? 0) > 0, 'rested');
+  // The reading comes back to life (the pet takes damage): the rest lifts at once instead of letting it die.
+  f.World.applyGameplay({ ...f.World.gp, cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 240, status: 5, dead: false }] });
+  f.Controller.tick();
+  assert.equal(f.PetPotion.blocked.has(50), false, 'a moving HP lifts the rest immediately');
+  assert.equal(petUses(f).length, 4, 'and the kits flow again');
 });
 test('a pet whose HP never rises on confirmed kits is rested, not drained', () => {
   const f = petPotionFixture();
@@ -2888,7 +2926,7 @@ test('pet HGP feeding confirms consumption, rests when unconfirmed, and yields t
   f = petFoodFixture(); f.Controller.tick(); assert.equal(petUses(f).length, 1);
   f.World.applyGameplay({ ...f.World.gp, inventory: f.World.gp.inventory.map(i => i.slot === 32 ? { ...i, quantity: 4 } : i), cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 900, satiety: 9500, status: 5, dead: false }] });
   f.advance(2000); f.Controller.tick(); assert.equal(petUses(f).length, 1, 'a fed pet above the threshold gets no second potion');
-  f = petFoodFixture(); f.Settings.profile.potion.petHp.on = true; f.PetPotion.maxHp = new Map([[500, 1000]]);
+  f = petFoodFixture(); f.Settings.profile.potion.petHp.on = true; f.PetPotion.maxHp = new Map([[500, 1000]]); f.PetPotion.seenMax.set(50, 1000);
   f.World.applyGameplay({ ...f.World.gp, inventory: [...f.World.gp.inventory, { slot: 20, refObjId: 2143, typeFlags: 8428, quantity: 5, tooltip: { fields: { itemParam1_29c: 360 } } }], cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 300, satiety: 2000, status: 5, dead: false }] });
   f.Controller.tick(); assert.equal(petUses(f)[0].slot, 20, 'the recovery kit goes first');
   f.World.applyGameplay({ ...f.World.gp, inventory: f.World.gp.inventory.map(i => i.slot === 20 ? { ...i, quantity: 4 } : i), cosRecords: [{ gid: 50, refObjId: 500, band: 3, hp: 1000, satiety: 2000, status: 5, dead: false }] });
