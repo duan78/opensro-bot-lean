@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.5.3
+// @version      1.6.0
 // @updateURL    https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking, walk-back and an optional team relay in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.5.3';
+const VERSION = '1.6.0';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -199,6 +199,7 @@ const DEFAULT_PROFILE = {
   trace: { enabled: false, name: '', distance: 12, fight: true },
   mastery: { enabled: false, ids: [], gap: 0, skills: false, scope: 'rotation', reserve: 0, order: 'masteries' },
   lure: { enabled: false, points: [], taunt: { id: 0, group: 0 }, area: { id: 0, group: 0 }, holdS: 10, pauseEveryM: 10, pauseS: 4, radius: 15, returnHpPct: 50, stopAt: 0 },
+  pet: { attack: { on: false, recall: true, radius: 15, timeout: 3, resend: 5 } },
   party: { autoAcceptMatching: false, autoRecruit: false, joinMain: false, mainName: '', leaveIfNotLeader: false, acceptNames: '', autoRes: false, acceptRes: false, resRadius: 300, title: 'Hunting party', min: 1, max: 90, purpose: 0, expShare: true, itemShare: true,
     support: { enabled: false, whileStopped: false, range: 30, heal: { id: 0, group: 0, pct: 60, self: false }, group: { id: 0, group: 0, pct: 60, count: 2 }, buffs: [] } },
   team: { enabled: false, url: '', token: '', role: 'none', assist: false, townSync: false, converge: false, share: { public: false, monsters: true, players: true, uniques: true } },
@@ -247,7 +248,7 @@ const DEFAULT_PROFILE = {
 function botProfile(input) {
   const result = deepMerge(DEFAULT_PROFILE, {});
   if (!input || typeof input !== 'object') return result;
-  for (const key of ['macro', 'potion', 'hunt', 'lure', 'wardrobe', 'party', 'team', 'alchemy', 'mastery', 'statPoints', 'trace', 'items', 'trade', 'stall']) {
+  for (const key of ['macro', 'potion', 'hunt', 'lure', 'pet', 'wardrobe', 'party', 'team', 'alchemy', 'mastery', 'statPoints', 'trace', 'items', 'trade', 'stall']) {
     if (!input[key] || typeof input[key] !== 'object') continue;
     for (const field of Object.keys(DEFAULT_PROFILE[key])) {
       if (field in input[key]) result[key][field] = deepMerge(DEFAULT_PROFILE[key][field], input[key][field]);
@@ -10335,6 +10336,113 @@ const Controller = {
 };
 
 
+// The attack pet assists the hunter: every monster the bot engages is handed to the attack pet too, with the same
+// command the game's own pet bar sends (cos-pet-attack — the server admits an owned living band-3 pet and a monster
+// target only, so cos-attack, which is for the mount you ride, is never used). A pet that stayed behind on an old
+// monster is first called back (cos-follow) whenever it is farther from the player than the recall radius; it sets
+// out to the new target from the player's side, dragging whatever chases it along — a walking lure. Between targets
+// the pet is kept at the player's side. Orders repeat every few seconds so a lost or refused one never leaves the
+// pet idle. Nothing is commanded while a trip owns the character, and the pickup pet (band 4) is never touched:
+// pickup keeps running beside this.
+const PET_FOLLOW_MS = 5000; // re-sending the return order more often than this only spams the same intent
+const PetAttack = {
+  mode: 'idle',       // idle | home (called back first) | attack
+  pending: 0,         // the monster we want the pet on; 0 = none
+  since: -Infinity,   // when the current job started (bounds the call-back wait)
+  lastOrderAt: -Infinity, lastFollowAt: -Infinity, message: 'Pet attack off.',
+  cfg() { return Settings.profile.pet.attack; },
+  on() { return !!this.cfg().on; },
+  reset() { this.mode = 'idle'; this.pending = 0; this.since = now(); this.message = this.on() ? 'Waiting for a target.' : 'Pet attack off.'; },
+  // The one living attack pet (band 3) we own; transports (band 2) and the pickup pet (band 4) are not ours to command.
+  pet() {
+    for (const rec of World.gp?.cosRecords || []) {
+      const ent = World.ents.get(rec.gid);
+      if (rec.band === 3 && !rec.dead && rec.hp > 0 && ent?.kind === 'cos' && ent.ownerGid === World.localGid() && ent.refObjId === rec.refObjId) return { rec, ent };
+    }
+    return null;
+  },
+  follow(pet) { return Cmd.spaced('cos-follow') && Cmd.raw({ kind: 'cos-follow', gid: pet.rec.gid }, 'Pet: return to me'); },
+  send(pet, gid) {
+    const e = World.ents.get(gid);
+    if (!e || !isAttackableMob(e)) return false; // the server admits monster targets only
+    return Cmd.spaced('cos-pet-attack') && Cmd.raw({ kind: 'cos-pet-attack', gid, pet: pet.rec.gid }, 'Pet attack: ' + (e.name || gid));
+  },
+  // Farther than the recall radius from the player (another region counts as far) — worth calling home first.
+  far(pet) { const d = dist2D(World.pose(), pet.ent); return !Number.isFinite(d) || d > (Number(this.cfg().radius) || 15) * 10; },
+  // A new bot target hands the pet a new job; a job may be replaced while the pet is still on its way home.
+  retarget(gid) {
+    if (!this.on()) { this.pending = 0; this.mode = 'idle'; return; }
+    if (this.pending !== gid) this.lastOrderAt = -Infinity; // a new target may be ordered at once
+    this.pending = gid; this.since = now();
+    this.mode = this.cfg().recall ? 'home' : 'attack'; // a near pet resolves home in the same tick
+  },
+  tick() {
+    const c = this.cfg();
+    if (!this.on()) { this.mode = 'idle'; this.pending = 0; this.message = 'Pet attack off.'; return; }
+    if (!World.inWorld() || World.isDead()) { this.mode = 'idle'; this.pending = 0; this.message = 'Pet attack waiting for the game.'; return; }
+    const pet = this.pet();
+    if (!pet) { this.mode = 'idle'; this.pending = 0; this.message = 'Summon an attack pet to assist.'; return; }
+    // A pet that appears mid-fight (summoned, revived, or the switch just turned on) adopts the target the bot
+    // is already on instead of waiting for the next one.
+    if (!this.pending && Hunt.targetGid) {
+      this.pending = Hunt.targetGid; this.since = now(); this.lastOrderAt = -Infinity;
+      this.mode = c.recall && this.far(pet) ? 'home' : 'attack';
+    }
+    const target = this.pending ? World.ents.get(this.pending) : null;
+    // Wanted only while the bot still wants it too: a target it released while alive (banned, unreachable) is
+    // released with it, instead of the pet soloing it forever.
+    const wanted = !!(target && isAttackableMob(target) && Hunt.targetGid === this.pending);
+    // The call-back owns the pet until it is back (or the wait gives up); even for a target that died meanwhile,
+    // coming home is still where it should be.
+    if (this.mode === 'home') {
+      if (this.far(pet) && now() - this.since < (Number(c.timeout) || 3) * 1000) {
+        this.message = 'Pet returning before the next attack.';
+        if (now() - this.lastFollowAt >= PET_FOLLOW_MS && this.follow(pet)) this.lastFollowAt = now();
+        return;
+      }
+      this.mode = wanted ? 'attack' : 'idle';
+    }
+    if (wanted) {
+      this.mode = 'attack';
+      if (now() - this.lastOrderAt >= (Number(c.resend) || 5) * 1000 && this.send(pet, this.pending)) {
+        this.lastOrderAt = now();
+        this.message = 'Pet attacking ' + (target.name || this.pending) + '.';
+      }
+      return;
+    }
+    // Between targets the pet stays at the player's side, ready to set out from there.
+    this.mode = 'idle'; this.pending = 0;
+    this.message = 'Waiting for a target.';
+    if (c.recall && this.far(pet) && now() - this.lastFollowAt >= PET_FOLLOW_MS && this.follow(pet)) this.lastFollowAt = now();
+  },
+  status() {
+    if (!this.on()) return 'Pet attack off.';
+    if (!World.inWorld()) return 'Pet attack waiting for the game.';
+    return Hunt.running ? this.message : 'Start the bot to command the pet.';
+  },
+};
+// engage() re-runs every tick with the same target, so only a real change hands the pet a new job.
+const petAttackEngage = Hunt.engage;
+Hunt.engage = function (target) {
+  const before = this.targetGid;
+  const out = petAttackEngage.apply(this, arguments);
+  if (this.targetGid && this.targetGid !== before) PetAttack.retarget(this.targetGid);
+  return out;
+};
+// The state machine runs after every hunting tick — fights, loot and rests included — but never beside a trip that
+// owns the character, and only while hunting: a stopped bot leaves the pet to its owner.
+const petAttackHuntTick = Hunt.tick;
+Hunt.tick = function () {
+  const out = petAttackHuntTick.apply(this, arguments);
+  if (this.running && !Town.trip && !Restock.trip && !WalkBack.active && !Resurrect.trip && !Travel.active && !World.gp?.storage) {
+    try { PetAttack.tick(); } catch (e) { Log.error('Pet attack: ' + (e?.message || e)); }
+  }
+  return out;
+};
+bus.on('hunt', running => { if (!running) PetAttack.reset(); });
+for (const event of ['reset', 'profile', 'character']) bus.on(event, () => PetAttack.reset());
+
+
 // Team arbiter: the decisions that make a group of characters act like a team instead of five solo
 // bots in the same field. Assist focuses your target chooser on the monster a teammate is fighting
 // (party members' hits never mark a monster, and by default any other player's hits do — so team
@@ -14694,7 +14802,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.5.3", "title": "Upstream sync: support, party and alchemy", "items": ["Merges upstream 1.2.175–1.2.186: party buffs that would not stack are skipped without holding up the others, \"Attack monsters\" can be turned off so a support character never starts a fight, party members who died out of view are resurrected, town trips recover from transactions the game never answered, buffs sharing a weapon need one weapon change, the party stays together and answers applications, auto-start remembers your last Start or Stop, the bot can start again after it stops by itself (off), attribute alchemy skips a stat that ran out of stones and moves on, an Immortal stone is fused first when an Astral one needs it, and up to 9999 enhancement attempts per run are allowed.", "The team edition (relay, intel, knowledge, arbiter) is unchanged; the upstream support-character guard and the team target share keep working together, and the new retry guard runs beside the team tick."], "note": "Verified in simulation only (593+ upstream tests plus the team suite)."}, {"version": "1.5.2", "title": "Upstream sync: pet care", "items": ["Merges upstream 1.2.174: pet HP recovery kits stop draining on a wrong HP reading (catalogue-only maximum plus a flat-HP guard with a grace window), HGP recovery potions feed the attack pet and are bought in town, pet recovery kits are bought on the same trips and picked by their real (owner-scaled) heal, and a dead pet is revived with a Grass of life during a town trip.", "Adds upstream fix: each pet's maximum HP is learned from its own live HP (the highest value seen) instead of the pet catalogue, whose asset the live server removed while a stale cached copy kept serving wrong values — that copy made the bot burn kits on a full pet and then rest it while it was dying. A rested pet is now unblocked the moment its HP moves again.", "The team edition is unchanged and re-verified on the new base (590 tests)."], "note": "The observed-maximum fix is confirmed against the live session readings; the rest was verified in simulation only."}, {"version": "1.5.1", "title": "Upstream sync: combat gear, party-buff weapon swaps, ammo wear", "items": ["Merges upstream 1.2.170-1.2.173: the chosen weapons and shield stay listed once worn and move to Combat; the primary weapon is worn as combat gear and party buffs can swap weapons and return to the primary; bows and crossbows wear arrows or bolts from the bag.", "The team edition is unchanged and re-verified on the new base (579 tests)."], "note": "Re-verified in simulation only; nothing has run with real characters."}, {"version": "1.5.0", "title": "Upstream sync: travel, trade, lure, auto-start, and the released auto stall", "items": ["This fork merges upstream 1.2.128 → 1.2.169: teleport and ferry travel, the auto trade routes, the lure areas, auto-start, item balance, repair hammer, walk-back over teleports, and many fixes.", "The auto stall is now the upstream released version (1.2.169), which keeps this fork's original flow plus the maintainer's review fixes: a sale counts even when its gold arrives a tick later, potion and inventory refusals no longer close the stall, and a refused offer skips just that item.", "The team edition is unchanged and re-verified on the new base (545 tests): presence, live shared intel with the map layer, the unique tracker and shared knowledge, assist, town sync, resurrection claims, unique converge, the public pool, the relay console, and the three hosting options (Node, Cloudflare Workers, fly.io/VPS).", "Diagnostics now use the name-free team status line, matching the upstream review's finding."], "note": "Everything is re-verified in simulation on the merged base; nothing has run with real characters yet."}, {"version": "1.4.3", "title": "Relay hosting: the administrator's choice; auto stall", "items": ["The relay can now run in three places with the same protocol: Cloudflare Workers (new edition under relay/cloudflare: Durable Objects, WebSocket hibernation, storage that survives restarts, zero administration), fly.io (the Node relay as-is with a Dockerfile), or your own VPS (systemd unit included).", "The bot now sends the room key in the WebSocket URL (?key=…) for hosts that route by it; the Node relay ignores it, so all three hosts work with one address format.", "relay/smoke-test.cjs can verify a live deployment: WS_URL=wss://your-relay/ws node smoke-test.cjs.", "Auto stall: price items on a new page, stand in town, and the character opens its own street stall, offers them, and runs it; a sale is confirmed by the offer disappearing and gold rising, never by a dispatch. Hunting refuses to start while a stall session runs."], "note": "Both parts are tested in simulation (464 tests). The Workers edition follows the documented Durable Objects patterns but has only been syntax-checked and reviewed, not deployed — run its smoke test after wrangler deploy. Neither has run with real characters."}, {"version": "1.4.2", "title": "Coherence fixes for the team layer", "items": ["A unique's death reported by a teammate is recorded quietly; it used to be re-announced, which echoed between clients forever.", "A teammate's store write no longer cancels the sync this client still owes the room (a pending local sighting could be lost until the next change).", "Moving the hunting spot from the tracker cancels any automatic unique converge, so its later restore cannot overwrite the manual spot.", "Shared live intel is cleared when the character changes; the \"Hunt here\" button still works the same."], "note": "Found by re-reading the code with two clients in mind; tested in simulation, not yet with real characters."}, {"version": "1.4.1", "title": "Team edition rounded out", "items": ["Optional unique converge: when a unique appears and its position is known, a hunting character moves its hunting spot there (toasts say so); the saved spot comes back when the unique dies or after 20 minutes. Off by default.", "The public pool grows a memory: with public sharing on, the unique tracker also reads and writes the relay's public store, so every room keeps the spawn history.", "Bug reports now include a team summary line (shared entities, combat edges, tracked uniques, known players).", "The repository README describes this fork's team edition."], "note": "Still simulation-tested only; no live run with real characters yet."}, {"version": "1.4.0", "title": "Team edition complete (phases 2-6)", "items": ["Live shared world: each character publishes the interesting monsters it sees (champion and up, party mobs, uniques with an HP estimate), the other players in view, and who attacks what (observed from every cast around); the map draws it all as a dimmed team layer, own view always winning.", "Unique tracker: the game's own server-wide announcements plus shared sightings build a history per unique with respawn windows (the timer restarts at death; 3-6 h per unique), toasts, a sound, map pins, and a Hunt here button that moves your hunting spot to the last known position.", "Player knowledge: every player the team sees is remembered with position and level; a player attacking a teammate outside a party is marked hostile (red on the map, flagged in the panel).", "Team drops: the room shares pickup counters.", "Team decisions: assist (fight what a teammate or party member fights), spot claims (a warning when two characters start hunting on top of each other), synchronized town trips (optional; a teammate's town trip starts yours), and resurrection claims (the dead member waits up to 60 s for the peer walking over instead of reviving itself).", "The room key holders always see everything; an optional public pool (per-relay, per-category checkboxes) shares monsters, players and unique events with every room on your relay — never your own position or inventory.", "The reference relay grows a room key-value store (the team's shared memory, persisted across restarts) and a console page (/?key=room key) showing the fleet with Stop everyone and Town trip buttons."], "note": "All of it is tested in simulation and against a local relay only; a live check with real characters is still to do."}];
+const RELEASE_NOTES = [{"version": "1.6.0", "title": "Attack pet assist", "items": ["New, off by default, under Combat → Hunt area: every monster the bot engages is also given to the attack pet, with the same order the game's own pet bar sends. The pet stops staying behind on an old monster while you fight a new one.", "With the call-back on (default), a pet farther than the radius (15 m) is first called back to you, then sets out to the new target from your side — whatever chases it comes along, a walking lure. Between targets the pet stays at your side. The wait gives up after a timeout (3 s) and orders the attack anyway; the order repeats every few seconds (5 s) so a lost one never leaves the pet idle.", "Only your own living attack pet is commanded; the pickup pet keeps collecting beside this, transports are untouched, and nothing is sent while a town trip, a restock, a walk-back or a resurrection owns the character, or while the bot is stopped."], "note": "Verified in simulation only (world-mirror tests); not yet exercised against the live server."}, {"version": "1.5.3", "title": "Upstream sync: support, party and alchemy", "items": ["Merges upstream 1.2.175–1.2.186: party buffs that would not stack are skipped without holding up the others, \"Attack monsters\" can be turned off so a support character never starts a fight, party members who died out of view are resurrected, town trips recover from transactions the game never answered, buffs sharing a weapon need one weapon change, the party stays together and answers applications, auto-start remembers your last Start or Stop, the bot can start again after it stops by itself (off), attribute alchemy skips a stat that ran out of stones and moves on, an Immortal stone is fused first when an Astral one needs it, and up to 9999 enhancement attempts per run are allowed.", "The team edition (relay, intel, knowledge, arbiter) is unchanged; the upstream support-character guard and the team target share keep working together, and the new retry guard runs beside the team tick."], "note": "Verified in simulation only (593+ upstream tests plus the team suite)."}, {"version": "1.5.2", "title": "Upstream sync: pet care", "items": ["Merges upstream 1.2.174: pet HP recovery kits stop draining on a wrong HP reading (catalogue-only maximum plus a flat-HP guard with a grace window), HGP recovery potions feed the attack pet and are bought in town, pet recovery kits are bought on the same trips and picked by their real (owner-scaled) heal, and a dead pet is revived with a Grass of life during a town trip.", "Adds upstream fix: each pet's maximum HP is learned from its own live HP (the highest value seen) instead of the pet catalogue, whose asset the live server removed while a stale cached copy kept serving wrong values — that copy made the bot burn kits on a full pet and then rest it while it was dying. A rested pet is now unblocked the moment its HP moves again.", "The team edition is unchanged and re-verified on the new base (590 tests)."], "note": "The observed-maximum fix is confirmed against the live session readings; the rest was verified in simulation only."}, {"version": "1.5.1", "title": "Upstream sync: combat gear, party-buff weapon swaps, ammo wear", "items": ["Merges upstream 1.2.170-1.2.173: the chosen weapons and shield stay listed once worn and move to Combat; the primary weapon is worn as combat gear and party buffs can swap weapons and return to the primary; bows and crossbows wear arrows or bolts from the bag.", "The team edition is unchanged and re-verified on the new base (579 tests)."], "note": "Re-verified in simulation only; nothing has run with real characters."}, {"version": "1.5.0", "title": "Upstream sync: travel, trade, lure, auto-start, and the released auto stall", "items": ["This fork merges upstream 1.2.128 → 1.2.169: teleport and ferry travel, the auto trade routes, the lure areas, auto-start, item balance, repair hammer, walk-back over teleports, and many fixes.", "The auto stall is now the upstream released version (1.2.169), which keeps this fork's original flow plus the maintainer's review fixes: a sale counts even when its gold arrives a tick later, potion and inventory refusals no longer close the stall, and a refused offer skips just that item.", "The team edition is unchanged and re-verified on the new base (545 tests): presence, live shared intel with the map layer, the unique tracker and shared knowledge, assist, town sync, resurrection claims, unique converge, the public pool, the relay console, and the three hosting options (Node, Cloudflare Workers, fly.io/VPS).", "Diagnostics now use the name-free team status line, matching the upstream review's finding."], "note": "Everything is re-verified in simulation on the merged base; nothing has run with real characters yet."}, {"version": "1.4.3", "title": "Relay hosting: the administrator's choice; auto stall", "items": ["The relay can now run in three places with the same protocol: Cloudflare Workers (new edition under relay/cloudflare: Durable Objects, WebSocket hibernation, storage that survives restarts, zero administration), fly.io (the Node relay as-is with a Dockerfile), or your own VPS (systemd unit included).", "The bot now sends the room key in the WebSocket URL (?key=…) for hosts that route by it; the Node relay ignores it, so all three hosts work with one address format.", "relay/smoke-test.cjs can verify a live deployment: WS_URL=wss://your-relay/ws node smoke-test.cjs.", "Auto stall: price items on a new page, stand in town, and the character opens its own street stall, offers them, and runs it; a sale is confirmed by the offer disappearing and gold rising, never by a dispatch. Hunting refuses to start while a stall session runs."], "note": "Both parts are tested in simulation (464 tests). The Workers edition follows the documented Durable Objects patterns but has only been syntax-checked and reviewed, not deployed — run its smoke test after wrangler deploy. Neither has run with real characters."}, {"version": "1.4.2", "title": "Coherence fixes for the team layer", "items": ["A unique's death reported by a teammate is recorded quietly; it used to be re-announced, which echoed between clients forever.", "A teammate's store write no longer cancels the sync this client still owes the room (a pending local sighting could be lost until the next change).", "Moving the hunting spot from the tracker cancels any automatic unique converge, so its later restore cannot overwrite the manual spot.", "Shared live intel is cleared when the character changes; the \"Hunt here\" button still works the same."], "note": "Found by re-reading the code with two clients in mind; tested in simulation, not yet with real characters."}, {"version": "1.4.1", "title": "Team edition rounded out", "items": ["Optional unique converge: when a unique appears and its position is known, a hunting character moves its hunting spot there (toasts say so); the saved spot comes back when the unique dies or after 20 minutes. Off by default.", "The public pool grows a memory: with public sharing on, the unique tracker also reads and writes the relay's public store, so every room keeps the spawn history.", "Bug reports now include a team summary line (shared entities, combat edges, tracked uniques, known players).", "The repository README describes this fork's team edition."], "note": "Still simulation-tested only; no live run with real characters yet."}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -16314,7 +16422,7 @@ const UI = {
         tab.setAttribute('aria-selected', String(name === this.combatTab)); subtabs.append(tab);
       }
       this.pane.append(subtabs);
-      if (this.combatTab === 'Hunt area') this.sections('combatHuntArea', 'combatMonsters', 'combatLure');
+      if (this.combatTab === 'Hunt area') this.sections('combatHuntArea', 'combatMonsters', 'combatLure', 'combatPet');
       if (this.combatTab === 'Skills') this.sections('combatRotation', 'combatOptions', 'combatBerserk');
       if (this.combatTab === 'Buffs & imbue') this.sections('combatGear', 'combatBuffs', 'combatImbue');
     } else if (this.current === 'Loot') {
@@ -16362,7 +16470,7 @@ const UI = {
         ['combatRotation'], ['combatOptions'], ['combatGear'], ['combatBuffs'], ['combatImbue']] },
       { name: 'Items/Storage', icon: 'action\\cos_cmd_inventory', pages: ['Items', 'Town'], draw() {
         this.drawItems(); this.sections('townTrip', 'townCycle', 'townAmmo'); } },
-      { name: 'Training place', icon: 'action\\icon_cha_camp', pages: ['Combat', 'Party'], sections: [['combatHuntArea', 'Training place'], ['partyTrace'], ['combatLure']] },
+      { name: 'Training place', icon: 'action\\icon_cha_camp', pages: ['Combat', 'Party'], sections: [['combatHuntArea', 'Training place'], ['partyTrace'], ['combatLure'], ['combatPet']] },
       { name: 'Party/Autores', icon: 'action\\icon_cha_party', pages: ['Party'], sections: [
         ['partyMembers', 'Current party'], ['partyParty', 'Party settings'], ['partyHeal']] },
       { name: 'Player buffing', icon: 'action\\icon_cha_party', pages: ['Party'], sections: [['partyBuffs', 'Player buffing']] },
@@ -16821,6 +16929,17 @@ const UI = {
         el('p', 'Works during hunting and while stopped. Walks into skill range for visible dead members within the maximum radius, casts Rebirth, then returns. During hunting the radius is measured from the saved hunt spot; while stopped it uses your starting position. Collision data is required for walking. Travel stops after 30 seconds or 12 seconds without progress per leg. The member must accept the revival. Travel, shopping and manual control take priority.', 'muted')));
   },
   section_combatLure(host) { Lure.draw(host); },
+  section_combatPet(host) {
+    const P = () => Settings.profile.pet.attack;
+    host.append(this.group('Attack pet',
+      this.check('Attack pet assists my targets', () => P().on, v => { P().on = v; PetAttack.reset(); }),
+      el('p', 'Every monster the bot engages is also given to the attack pet, with the same order the game\'s pet bar sends. With the call-back on, a pet farther than the radius is first called back to you and sets out from your side, so what chases it comes along — a walking lure. Between targets it stays at your side. The pickup pet is not touched.', 'muted'),
+      this.check('Call the pet back before a new target', () => P().recall, v => P().recall = v),
+      this.number('Call-back radius (m)', () => P().radius, v => P().radius = v, 3, 50),
+      this.number('Wait for the pet for at most (s)', () => P().timeout, v => P().timeout = v, 1, 15),
+      this.number('Repeat the attack order every (s)', () => P().resend, v => P().resend = v, 3, 30),
+      this.petAttackNote = el('p', PetAttack.status(), 'muted')));
+  },
   section_partyTrace(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       Trace.draw(host);
@@ -17114,6 +17233,7 @@ const UI = {
     }
     if (!this.status) return;
     if (this.is('Supplies') && this.petPotionNote) { this.petPotionNote.textContent = this.petPotionNote.title = PetPotion.message; }
+    if (this.is('Combat') && this.petAttackNote) { this.petAttackNote.textContent = this.petAttackNote.title = PetAttack.status(); }
     if (this.is('Supplies') && this.speedNote) this.speedNote.textContent = SpeedScroll.message;
     if (this.is('Supplies') && this.hammerNote) this.hammerNote.textContent = RepairHammer.message;
     if (this.is('Loot') && this.petNote) { const text = Loot.petStatus(); this.petNote.style.visibility = Loot.petMode() ? '' : 'hidden'; this.petNote.textContent = text; this.petNote.title = text; }
@@ -18030,7 +18150,7 @@ function boot() {
   Ticker.start(() => Controller.tick(), 100);
   setInterval(() => { Wardrobe.tick(); UI.update(); }, 500);
   W.SROLean = { version: VERSION, stats: Stats, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, buffGear: BuffGear, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, repairHammer: RepairHammer, resurrect: Resurrect, stall: Stall, team: Team, teamIntel: TeamIntel, teamKnowledge: TeamKnowledge, teamArbiter: TeamArbiter,
-    restock: Restock, town: Town, walkBack: WalkBack, travel: Travel, antiStuck: AntiStuck, chase: Chase, trap: Trap, autoMastery: AutoMastery, statPoints: StatPoints, share: ProfileShare, trace: Trace, setup: Setup, reconnect: Reconnect, petPotion: PetPotion, navigation: Navigation, route: Route, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, activity: Activity, map: LeanMap, render: RenderControl, support: Support, items: ItemRules, stop: stopAll, log: Log };
+    restock: Restock, town: Town, walkBack: WalkBack, travel: Travel, antiStuck: AntiStuck, chase: Chase, trap: Trap, autoMastery: AutoMastery, statPoints: StatPoints, share: ProfileShare, trace: Trace, setup: Setup, reconnect: Reconnect, petPotion: PetPotion, petAttack: PetAttack, navigation: Navigation, route: Route, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, activity: Activity, map: LeanMap, render: RenderControl, support: Support, items: ItemRules, stop: stopAll, log: Log };
   Log.info('NIX ready. F8 starts/stops; F7 folds; F6 or the × minimises and restores; Shift+F7 hides/shows the window.');
 }
 
