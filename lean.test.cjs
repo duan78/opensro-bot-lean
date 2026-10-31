@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {AutoStart, RenderControl, Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, Trade, WalkBack, Navigation, ClipRoute, Route, RouteCheck, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, Travel, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, RepairHammer, Stall, Team, TeamIntel, TeamKnowledge, TeamArbiter, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, Lure, stopAll, toggleBot, boot, Ticker, Sound, LeanMap};\n})();';
+  'globalThis.bot = {AutoStart, RenderControl, Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, Trade, WalkBack, Navigation, ClipRoute, Route, RouteCheck, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, Travel, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, RepairHammer, Stall, Team, TeamIntel, TeamKnowledge, TeamArbiter, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, Lure, stopAll, toggleBot, userStop, RunIntent, Retry, boot, Ticker, Sound, LeanMap};\n})();';
 function fixture(document) {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -1496,6 +1496,7 @@ test('auto-accept answers only applicants on the name list, and everyone when th
 test('the alt leaves a party led by someone else only when asked to, and keeps the named leader party', () => {
   const f = joinMainFixture(); const party = f.Settings.profile.party;
   const inParty = leaderName => { f.World.gp.social = { localName: 'AltChar', self: 2, leader: 1, options: 1, members: [{ id: 1, name: leaderName }, { id: 2, name: 'AltChar' }], invitation: null }; };
+  f.World.ents.set(56, { gid: 56, kind: 'player', name: 'MainChar', ...f.Hunt.cfg().center });
   inParty('Stranger'); f.Party.tick(); assert.equal(f.commands.filter(c => c.kind === 'party-leave').length, 0, 'off by default');
   party.leaveIfNotLeader = true; f.Party.tick();
   assert.equal(f.commands.filter(c => c.kind === 'party-leave').length, 1, 'leader is someone else');
@@ -1505,12 +1506,52 @@ test('the alt leaves a party led by someone else only when asked to, and keeps t
   g.Party.tick(); assert.equal(g.commands.filter(c => c.kind === 'party-leave').length, 0, 'the named leader, any letter case');
 });
 
+test('the party the game hands to another member stays together until the party leader is back at the hunting spot', () => {
+  const f = joinMainFixture(); f.Settings.profile.party.leaveIfNotLeader = true;
+  f.World.gp.social = { localName: 'AltChar', self: 2, leader: 1, options: 1, members: [{ id: 1, name: 'OtherAlt' }, { id: 2, name: 'AltChar' }], invitation: null };
+  const leaves = () => f.commands.filter(c => c.kind === 'party-leave').length, H = f.Hunt.cfg();
+  f.Party.tick(); assert.equal(leaves(), 0, 'the main is not in view');
+  assert.match(f.Party.joinMessage, /leaving it once MainChar is back/);
+  const main = { gid: 56, kind: 'player', name: 'mainchar', regionId: H.center.regionId, x: H.center.x + H.radius + 400, y: 0, z: H.center.z };
+  f.World.ents.set(56, main); f.Party.tick(); assert.equal(leaves(), 0, 'in view, but away from the hunting area');
+  main.x = H.center.x + H.radius + 200; f.Party.tick(); assert.equal(leaves(), 1, 'back near the hunting area, any letter case');
+  const g = joinMainFixture(); g.Settings.profile.party.leaveIfNotLeader = true; g.Hunt.cfg().center = null;
+  g.World.gp.social = { localName: 'AltChar', self: 2, leader: 1, options: 1, members: [{ id: 1, name: 'OtherAlt' }, { id: 2, name: 'AltChar' }], invitation: null };
+  g.World.ents.set(56, { gid: 56, kind: 'player', name: 'MainChar', regionId: 9, x: 5000, y: 0, z: 5000 });
+  g.Party.tick(); assert.equal(g.commands.filter(c => c.kind === 'party-leave').length, 1, 'without a hunting spot, in view is enough');
+});
+
+test('the main answers a party application while dead or waiting after a revive', () => {
+  for (const state of ['dead', 'revived', 'not-local']) {
+    const f = fixture(); partyApplication(f); f.Hunt.start();
+    if (state === 'dead') f.World.isDead = () => true;
+    else if (state === 'revived') { f.Controller.resumeAfterRevive = true; f.World.gp.inventoryPending = true; }
+    else { f.Controller.resumeAfterRevive = true; f.World.local = () => false; }
+    f.Controller.tick();
+    assert.deepEqual(jm(f.commands.filter(c => c.kind === 'party-match-answer')), [{ kind: 'party-match-answer', a: 40, b: 50, answer: 1 }], state);
+  }
+});
+
 test('alt account applies again when the main never answered its application', () => {
   const f = joinMainFixture({ rows: [{ id: 7, name: 'MainChar', members: 2, type: 1, min: 1, max: 90 }] });
   f.Controller.tick(); assert.equal(f.commands.length, 1);
   f.World.gp.partyMatching = { ...f.World.gp.partyMatching, joining: { id: 7 } };
   f.advance(10000); f.Controller.tick(); assert.equal(f.commands.length, 1, 'still waiting for the answer');
-  f.advance(25000); f.Controller.tick(); assert.deepEqual(jm(f.commands[1]), { kind: 'party-match-join', id: 7 });
+  f.advance(25000); f.Controller.tick(); assert.deepEqual(jm(f.commands[1]), { kind: 'party-match-page', page: 1 }, 'the board is read again first');
+  f.advance(500); f.Controller.tick(); assert.deepEqual(jm(f.commands[2]), { kind: 'party-match-join', id: 7 });
+});
+
+test('alt account reads the board again before applying again, so it follows a listing the main registered anew', () => {
+  const f = joinMainFixture({ rows: [{ id: 7, name: 'MainChar', members: 2, type: 1, min: 1, max: 90 }] });
+  f.Controller.tick(); assert.deepEqual(jm(f.commands.at(-1)), { kind: 'party-match-join', id: 7 });
+  f.World.gp.partyMatching = { ...f.World.gp.partyMatching, pending: null, joining: { name: 'MainChar' }, result: 2 };
+  f.advance(31000); f.Controller.tick();
+  assert.deepEqual(jm(f.commands.at(-1)), { kind: 'party-match-page', page: 1 }, 'the old listing number is not used again');
+  assert.match(f.Party.joinMessage, /again/);
+  f.World.gp.partyMatching = { ...f.World.gp.partyMatching, pending: null, joining: null, result: null, rows: [{ id: 9, name: 'MainChar', members: 2, type: 1, min: 1, max: 90 }] };
+  f.advance(500); f.Controller.tick();
+  assert.deepEqual(jm(f.commands.at(-1)), { kind: 'party-match-join', id: 9 });
+  assert.equal(f.commands.filter(c => c.kind === 'party-match-join' && c.id === 7).length, 1);
 });
 
 test('alt account pages the board until it finds the main, then rests', () => {
@@ -1842,6 +1883,69 @@ test('party buffs honour the member list, back off after two misses and never wa
   f.advance(10000); f.Controller.tick(); assert.equal(casts(f).length, 0, 'out of range: nothing cast');
   assert.equal(f.commands.some(c => c.kind === 'move' && c.destination?.x === 600), false, 'and no walking to the member');
 });
+// Tank wears Earth Fire Protection (3001), which the server says Guard (2002) cannot overlap.
+function overlapping() {
+  const f = fixture(), c = support(f);
+  f.World.rebuildCatalog([
+    { id: 2001, group: 900, level: 1, name: 'Heal', targetRequired: true, targets: 1 | 16 | 32 },
+    { id: 2002, group: 901, level: 1, name: 'Guard', targetRequired: true, targets: 1 | 16 | 32 },
+    { id: 2003, group: 902, level: 1, name: 'Healing circle', targetRequired: false, targets: 1 },
+    { id: 3001, group: 950, level: 1, name: 'Earth Fire Protection', targetRequired: true, targets: 1 | 16 | 32 },
+  ]);
+  c.enabled = true; f.World.gp.social.members[1].status = 0x5a; c.buffs = [{ id: 2002, group: 901 }];
+  f.World.gp.attachedEffects = [{ gid: 60, skill: 3001, token: 9 }];
+  f.Combat.init(); // as in the game: the refusal notice also blocks the skill for the selected member
+  return { f, c };
+}
+test('a party buff the game refuses as "cannot overlap" skips that member and still reaches the others', () => {
+  const { f } = overlapping();
+  f.advance(1000); f.Controller.tick(); assert.deepEqual(casts(f), ['select 60', 'skill 2002 60'], 'Tank first');
+  f.World.gp.target = 60; f.bus.emit('notice', { key: 'UIIT_SKILL_USE_FAIL_OVERLAP' });
+  assert.ok(f.Log.lines.some(l => /Tank has a buff that Guard does not stack with; skipping Tank until it ends/.test(l.text)));
+  assert.equal(f.Combat.stuck.has('2002:60'), true, 'Combat counts the refusal against Tank, as in the game');
+  f.commands.length = 0; f.advance(2000); f.Controller.tick();
+  assert.deepEqual(casts(f), ['select 61', 'skill 2002 61'], 'Tank is still selected, but Mage gets the buff');
+  assert.equal(f.Combat.stuck.has('2002:60'), false, 'the refusal no longer blocks Guard for self buffs and the rotation');
+  f.World.gp.attachedEffects.push({ gid: 61, skill: 2002, token: 2 }); f.commands.length = 0;
+  f.advance(2000); f.Controller.tick(); assert.deepEqual(casts(f), ['skill 2002 1'], 'then the caster');
+  f.World.gp.attachedEffects.push({ gid: 1, skill: 2002, token: 3 }); f.commands.length = 0;
+  f.advance(60000); f.Controller.tick(); assert.deepEqual(casts(f), [], 'Tank is skipped while it wears Earth Fire Protection');
+  assert.match(f.Support.message, /Skipped \(a buff that does not stack\): Tank/);
+  assert.equal(f.Log.lines.some(l => /did not show on Tank/.test(l.text)), false, 'no "did not show" warnings for a refused member');
+  f.World.gp.attachedEffects = f.World.gp.attachedEffects.filter(e => e.skill !== 3001);
+  f.advance(1000); f.Controller.tick(); assert.deepEqual(casts(f), ['skill 2002 60'], 'its protection ended: Tank (still selected) is tried again');
+});
+test('only an overlap refusal right after a party buff marks the member', () => {
+  const { f } = overlapping();
+  f.advance(1000); f.Controller.tick(); assert.deepEqual(casts(f), ['select 60', 'skill 2002 60']);
+  f.bus.emit('notice', { key: 'UIIT_SKILL_USE_FAIL_WRONGDISTANCE' });
+  assert.equal(f.Support.overlaps.size, 0, 'another refusal is not an overlap');
+  Object.assign(f.Combat, { lastCastId: 2003, lastCastGid: 0 }); f.bus.emit('notice', { key: 'UIIT_SKILL_USE_FAIL_OVERLAP' });
+  assert.equal(f.Support.overlaps.size, 0, 'another skill was cast after the party buff: the refusal is not ours');
+  f.Support.reset(); f.commands.length = 0; f.advance(60000); f.Controller.tick();
+  f.advance(3000); f.bus.emit('notice', { key: 'UIIT_SKILL_USE_FAIL_OVERLAP' });
+  assert.equal(f.Support.overlaps.size, 0, 'too late to belong to the party buff');
+  f.Support.reset(); f.commands.length = 0; f.advance(60000); f.Controller.tick();
+  f.bus.emit('notice', { key: 'UIIT_STT_SKILL_USE_FAIL_OVERLAP_COUNT' });
+  assert.equal(f.Support.overlaps.size, 1, 'too many buffs on the member counts as well');
+  f.Support.reset(); assert.equal(f.Support.overlaps.size, 0, 'a reset forgets it');
+});
+test('a member refused without a visible buff to wait for is tried again after a minute', () => {
+  const { f } = overlapping();
+  f.World.gp.attachedEffects = [];
+  f.advance(1000); f.Controller.tick(); f.bus.emit('notice', { key: 'UIIT_SKILL_USE_FAIL_OVERLAP' });
+  f.World.gp.attachedEffects = [{ gid: 61, skill: 2002, token: 2 }, { gid: 1, skill: 2002, token: 3 }]; f.commands.length = 0;
+  f.advance(30000); f.Controller.tick(); assert.deepEqual(casts(f), [], 'skipped for now');
+  f.advance(31000); f.Controller.tick(); assert.deepEqual(casts(f), ['select 60', 'skill 2002 60'], 'tried again a minute later');
+});
+test('a heal refused for one member still goes to another low member', () => {
+  const f = fixture(), c = support(f);
+  c.enabled = true; c.heal = { id: 2001, group: 900, pct: 95, self: false }; f.Combat.init();
+  f.advance(1000); f.Controller.tick(); assert.deepEqual(casts(f), ['select 60', 'skill 2001 60'], 'Tank at 40% first');
+  f.World.gp.target = 60; f.bus.emit('notice', { key: 'UIIT_SKILL_USE_FAIL_WRONGDISTANCE' });
+  f.commands.length = 0; f.advance(2000); f.Controller.tick();
+  assert.deepEqual(casts(f), ['select 61', 'skill 2001 61'], 'Tank is blocked for now, Mage at 90% is healed');
+});
 // Party buff Guard (2002) on Tank only, a worn blade (one-handed) and a harp in the bag.
 function partyGear() {
   const f = fixture(), c = support(f), gp = f.World.gp;
@@ -1875,6 +1979,24 @@ test('a party buff that needs another weapon is cast after a swap, then the weap
   f.World.gp.attachedEffects = [{ gid: 60, skill: 2002, token: 1 }]; f.commands.length = 0;
   f.advance(2000); f.Controller.tick(); assert.equal(f.BuffGear.run, null, 'Tank has it: no more swaps'); assert.deepEqual(casts(f), []);
 });
+test('a party buff swap ends at once when the member cannot take the buff', () => {
+  const { f, gp, at } = partyGear();
+  f.advance(1000); f.Controller.tick(); assert.ok(f.BuffGear.run?.party);
+  let after = -1;
+  for (let n = 0; n < 80 && f.BuffGear.run; n++) {
+    f.advance(300); f.Controller.tick();
+    const p = f.BuffGear.run?.pending;
+    if (p) { const from = gp.inventory.find(i => i.slot === p.source), to = gp.inventory.find(i => i.slot === p.destination); from.slot = p.destination; if (to) to.slot = p.source; }
+    if (after >= 0) after++;
+    else if (f.BuffGear.run?.cast) { f.bus.emit('notice', { key: 'UIIT_SKILL_USE_FAIL_OVERLAP' }); after = 0; }
+  }
+  assert.equal(f.BuffGear.run, null, 'the swap is over');
+  assert.ok(after >= 0 && after <= 10, `the gear came back within 3 s of the refusal (took ${after} ticks), not after the 10 s cast wait`);
+  assert.equal(at(6), 100, 'the blade is back'); assert.equal(f.Hunt.running, true);
+  assert.ok(f.Log.lines.some(l => /Tank has a buff that Guard does not stack with/.test(l.text)));
+  f.commands.length = 0; f.advance(5000); f.Controller.tick();
+  assert.equal(f.BuffGear.run, null, 'no new swap for Tank'); assert.deepEqual(casts(f), []);
+});
 test('a party buff can wear the secondary weapon while hunting is stopped, then the primary comes back', () => {
   const { f, c, gp, at, worn, drive } = partyGear();
   gp.inventory.push({ slot: 14, refObjId: 200, typeFlags: (15 << 11) | (6 << 7) | 44, plus: 0, variance: '1', durability: 100 });
@@ -1885,6 +2007,148 @@ test('a party buff can wear the secondary weapon while hunting is stopped, then 
   f.advance(1000); f.Controller.tick(); drive();
   assert.deepEqual(worn, [[2002, 200]], 'cast with the secondary staff');
   assert.equal(at(6), 100, 'then the primary blade'); assert.equal(f.Hunt.running, false);
+});
+// Run a weapon change for buffs to its end. Each cast shows on its target unless show(command) says otherwise.
+function batch(f, gp, show = () => true) {
+  let seen = 0;
+  for (let n = 0; n < 500; n++) {
+    f.advance(300); f.Controller.tick();
+    const p = f.BuffGear.run?.pending;
+    if (p) { const from = gp.inventory.find(i => i.slot === p.source), to = gp.inventory.find(i => i.slot === p.destination); from.slot = p.destination; if (to) to.slot = p.source; }
+    const skills = f.commands.filter(c => c.kind === 'skill');
+    for (; seen < skills.length; seen++) {
+      const s = skills[seen];
+      if (show(s, n)) gp.attachedEffects = [...(gp.attachedEffects || []), { gid: s.gid || 1, skill: s.skillId, token: 100 + seen }];
+    }
+    if (!f.BuffGear.run) return;
+  }
+  throw Error('the weapon change for buffs did not finish');
+}
+const gearMoves = f => f.commands.filter(c => c.kind === 'inventory-move').length;
+test('one weapon change casts a party buff on every member that needs it, then the weapon comes back once', () => {
+  const { f, c, gp, at, worn } = partyGear();
+  delete c.buffs[0].only;
+  f.advance(1000); f.Controller.tick(); assert.ok(f.BuffGear.run?.party);
+  batch(f, gp);
+  assert.deepEqual(worn, [[2002, 300], [2002, 300], [2002, 300]], 'Tank, Mage and the caster, all with the harp');
+  assert.deepEqual(casts(f), ['select 60', 'skill 2002 60', 'select 61', 'skill 2002 61', 'skill 2002 1']);
+  assert.equal(gearMoves(f), 2, 'the harp goes on once and the blade comes back once');
+  assert.equal(at(6), 100);
+  f.commands.length = 0; f.advance(5000); f.Controller.tick();
+  assert.equal(f.BuffGear.run, null, 'everyone has it: no second change'); assert.deepEqual(casts(f), []);
+});
+test('a party buff with less than a minute left is renewed in the same weapon change, a longer one is not', () => {
+  for (const [left, renewed] of [[30000, true], [120000, false]]) {
+    const { f, c, gp, worn } = partyGear();
+    delete c.buffs[0].only;
+    const at = f.World.simNow();
+    gp.attachedEffects = [{ gid: 61, skill: 2002, token: 7, remainingMs: left, receivedAtMs: at }, { gid: 1, skill: 2002, token: 8, remainingMs: 600000, receivedAtMs: at }];
+    f.advance(1000); f.Controller.tick(); batch(f, gp);
+    assert.equal(casts(f).includes('skill 2002 61'), renewed, `Mage with ${left / 1000} s left`);
+    assert.equal(worn.length, renewed ? 2 : 1); assert.equal(gearMoves(f), 2);
+  }
+});
+test('a member who cannot take the party buff does not end the weapon change for the others', () => {
+  const { f, c, gp, worn } = partyGear(); f.Combat.init();
+  delete c.buffs[0].only;
+  f.advance(1000); f.Controller.tick();
+  let refused = false;
+  batch(f, gp, s => {
+    if (s.gid !== 60 || refused) return true;
+    refused = true; f.bus.emit('notice', { key: 'UIIT_SKILL_USE_FAIL_OVERLAP' }); return false;
+  });
+  assert.deepEqual(casts(f).filter(x => x.startsWith('skill')), ['skill 2002 60', 'skill 2002 61', 'skill 2002 1'], 'Mage and the caster still get it');
+  assert.equal(worn.length, 3); assert.equal(gearMoves(f), 2);
+  assert.equal(f.Support.overlaps.has('Tank:901'), true);
+});
+test('your own buff on the same gear with less than a minute left is cast during a party buff weapon change', () => {
+  const { f, gp, worn } = partyGear();
+  f.World.rebuildCatalog([
+    { id: 2001, group: 900, level: 1, name: 'Heal', targetRequired: true, targets: 1 | 16 | 32 },
+    { id: 2002, group: 901, level: 1, name: 'Guard', targetRequired: true, targets: 1 | 16 | 32, actionMs: 1000, admit: { weaponKinds: [14, 255] } },
+    { id: 2003, group: 902, level: 1, name: 'Healing circle', targetRequired: false, targets: 1 },
+    { id: 2004, group: 904, level: 1, name: 'Song', targetRequired: false, targets: 1, actionMs: 1000, durationMs: 600000, admit: { weaponKinds: [14, 255] } },
+  ]);
+  gp.skills = [2001, 2002, 2003, 2004];
+  gp.buffSlots = [{ state: 'active', effect: { gid: 1, skill: 2004, remainingMs: 40000, receivedAtMs: f.World.simNow() } }];
+  f.Settings.profile.macro.buffs = [{ id: 2004, group: 904, enabled: true }];
+  f.advance(1000); f.Controller.tick(); assert.ok(f.BuffGear.run?.party, 'Guard on Tank starts the change');
+  batch(f, gp, s => {
+    if (s.skillId === 2004) gp.buffSlots = [{ state: 'active', effect: { gid: 1, skill: 2004, remainingMs: 600000, receivedAtMs: f.World.simNow() } }];
+    return true;
+  });
+  assert.deepEqual(worn, [[2002, 300], [2004, 300]], 'Guard on Tank, then your Song with the same harp');
+  assert.equal(gearMoves(f), 2);
+});
+test('an early renewal the game refuses while the member still wears the buff waits for it to run out', () => {
+  const { f, c, gp } = partyGear(); f.Combat.init();
+  delete c.buffs[0].only;
+  const t0 = f.World.simNow();
+  gp.attachedEffects = [{ gid: 61, skill: 2002, token: 7, remainingMs: 30000, receivedAtMs: t0 }, { gid: 1, skill: 2002, token: 8, remainingMs: 600000, receivedAtMs: t0 }];
+  f.advance(1000); f.Controller.tick();
+  batch(f, gp, s => {
+    if (s.gid !== 61) return true;
+    f.bus.emit('notice', { key: 'UIIT_SKILL_USE_FAIL_OVERLAP' }); return false;
+  });
+  assert.equal(f.Support.early.has('Mage:901'), true, 'Mage still wears Guard: an early renewal it does not take');
+  assert.equal(f.Support.overlaps.has('Mage:901'), false, 'not a buff that does not stack');
+  gp.attachedEffects = gp.attachedEffects.filter(e => e.gid !== 60);
+  f.commands.length = 0; f.advance(1000); f.Controller.tick(); batch(f, gp);
+  assert.deepEqual(casts(f).filter(x => x.startsWith('skill')), ['skill 2002 60'], 'the next change does not try Mage early again');
+  assert.equal(f.Combat.stuck.has('2002:61'), false, "Combat's block from the refused renewal is lifted");
+  const mage = gp.attachedEffects.find(e => e.gid === 61);
+  Object.assign(mage, { remainingMs: 2000, receivedAtMs: f.World.simNow() });
+  f.commands.length = 0; f.advance(500); f.Controller.tick();
+  assert.equal(f.BuffGear.run, null, 'with 2 s left and still worn, it is not tried again'); assert.deepEqual(casts(f), []);
+  gp.attachedEffects = gp.attachedEffects.filter(e => e.gid !== 61);
+  f.commands.length = 0; f.advance(1000); f.Controller.tick(); batch(f, gp);
+  assert.ok(casts(f).includes('skill 2002 61'), 'once it has run out, Mage gets it again');
+  assert.equal(f.Support.early.has('Mage:901'), false);
+});
+test('a refusal that is not about stacking also moves the weapon change on to the next member at once', () => {
+  const { f, c, gp } = partyGear(); f.Combat.init();
+  delete c.buffs[0].only;
+  f.advance(1000); f.Controller.tick();
+  const step = {};
+  batch(f, gp, (s, n) => {
+    step[s.gid] = n;
+    if (s.gid !== 60) return true;
+    f.World.gp.target = 60; f.bus.emit('notice', { key: 'UIIT_SKILL_USE_FAIL_WRONGDISTANCE' }); return false;
+  });
+  assert.ok(step[61] - step[60] < 10, `Mage followed within 3 s of the refusal, not after 10 s (${(step[61] - step[60]) * 0.3} s)`);
+  assert.equal(gearMoves(f), 2);
+});
+test('a long chain of casts that never show stops in time and restores the combat gear normally', () => {
+  const { f, c, gp, at } = partyGear();
+  delete c.buffs[0].only;
+  for (let i = 0; i < 6; i++) {
+    gp.social.members.push({ id: 20 + i, name: 'Extra' + i, status: 0x5a });
+    f.World.ents.set(70 + i, { gid: 70 + i, kind: 'player', name: 'Extra' + i, regionId: 1, x: 130 + i, y: 0, z: 100, appearanceState: [0, 0, 0] });
+  }
+  f.advance(1000); f.Controller.tick();
+  batch(f, gp, () => false);
+  const tried = casts(f).filter(x => x.startsWith('skill')).length;
+  assert.ok(tried >= 5 && tried < 9, `some casts, then the time budget (${tried} of 9)`);
+  assert.equal(at(6), 100, 'the blade is back'); assert.equal(f.Hunt.running, true, 'hunting goes on');
+  assert.equal(f.BuffGear.recovery, null, 'no gear left waiting for a manual restore');
+});
+test('when hunting stops in the middle, your own queued buffs are dropped and the party buffs still go out', () => {
+  const { f, gp, worn } = partyGear();
+  f.World.rebuildCatalog([
+    { id: 2001, group: 900, level: 1, name: 'Heal', targetRequired: true, targets: 1 | 16 | 32 },
+    { id: 2002, group: 901, level: 1, name: 'Guard', targetRequired: true, targets: 1 | 16 | 32, actionMs: 1000, admit: { weaponKinds: [14, 255] } },
+    { id: 2003, group: 902, level: 1, name: 'Healing circle', targetRequired: false, targets: 1 },
+    { id: 2004, group: 904, level: 1, name: 'Song', targetRequired: false, targets: 1, actionMs: 1000, durationMs: 600000, admit: { weaponKinds: [14, 255] } },
+  ]);
+  gp.skills = [2001, 2002, 2003, 2004];
+  gp.buffSlots = [{ state: 'active', effect: { gid: 1, skill: 2004, remainingMs: 40000, receivedAtMs: f.World.simNow() } }];
+  f.Settings.profile.macro.buffs = [{ id: 2004, group: 904, enabled: true }];
+  f.Settings.profile.party.support.whileStopped = true;
+  f.advance(1000); f.Controller.tick(); assert.ok(f.BuffGear.run?.party);
+  f.Hunt.running = false;
+  batch(f, gp);
+  assert.deepEqual(worn, [[2002, 300]], 'Guard on Tank only: your Song waits for hunting');
+  assert.equal(gearMoves(f), 2);
 });
 test('a party buff that cannot swap now does not hold back the others, and a primary bow keeps its arrows', () => {
   let { f, c, gp, at, worn, drive } = partyGear();
@@ -2157,12 +2421,30 @@ test('auto-resurrect needs a fallen party member whose corpse is in view', () =>
   const f = fixture(), mate = resurrection(f);
   f.World.ents.delete(50); f.Controller.tick(); assert.equal(f.commands.length, 0);
   f.World.ents.set(50, { gid: 50, kind: 'player', name: 'Mate', regionId: 1, x: 110, y: 0, z: 100, appearanceState: [0] });
-  f.Controller.tick(); assert.equal(f.commands.length, 0);
-  f.World.ents.get(50).appearanceState = [2]; f.advance(800); f.Controller.tick();
+  f.World.hpSeen.set(50, 120); f.Controller.tick(); assert.equal(f.commands.length, 0, 'standing, and the server HP says alive');
+  f.World.hpSeen.delete(50); f.World.ents.get(50).appearanceState = [2]; f.advance(31000); f.Controller.tick();
   assert.equal(f.commands.length, 2);
   mate.status = 10; f.advance(7000); f.Controller.tick(); mate.status = 0;
   f.World.ents.get(50).name = 'Stranger'; f.advance(800); f.Controller.tick(); assert.equal(f.commands.length, 2);
   f.World.ents.get(50).name = 'Mate'; f.advance(800); f.Controller.tick(); assert.equal(f.commands.length, 4);
+});
+test('auto-resurrect offers the rebirth to a member who died out of view and is drawn standing on return', () => {
+  const f = fixture(), mate = resurrection(f);
+  f.World.ents.get(50).appearanceState = [1, 0, 0];
+  f.Controller.tick();
+  assert.deepEqual(casts(f), ['select 50', 'skill 10067 50'], 'party list at 0 and no HP that says otherwise: the server decides');
+  assert.ok(f.Log.lines.some(l => /Mate is at 0 HP in the party list but shown standing; offering resurrection/.test(l.text)));
+  f.advance(2000); f.Controller.tick(); assert.equal(casts(f).length, 2, 'one offer per answer window');
+  f.advance(30000); f.Controller.tick(); assert.equal(casts(f).length, 4, 'refused or unanswered: offered again after the window');
+  mate.status = 10; f.advance(7000); f.Controller.tick(); assert.equal(casts(f).length, 4, 'revived: nothing more');
+});
+test('auto-resurrect leaves a standing member alone when the server reports it alive', () => {
+  const f = fixture(); resurrection(f);
+  f.World.ents.get(50).appearanceState = [1, 0, 0]; f.World.applyEvent({ kind: 'hp-seed', gid: 50, hp: 80 });
+  f.Controller.tick(); assert.deepEqual(casts(f), [], 'alive with little HP (0 tenths in the party list): no rebirth');
+  f.World.applyEvent({ kind: 'hp-seed', gid: 50, hp: 0 }); f.advance(20000); f.Controller.tick();
+  assert.deepEqual(casts(f), [], 'not looked at again for 30 s');
+  f.advance(11000); f.Controller.tick(); assert.deepEqual(casts(f), ['select 50', 'skill 10067 50'], 'then the server HP of 0 counts');
 });
 test('auto-resurrect idles without a learned corpse-targeted skill', () => {
   const f = fixture(); resurrection(f);
@@ -2206,6 +2488,31 @@ function petFight(f) {
   return pet;
 }
 function idleFor(f, ms) { for (let t = 0; t < ms; t += 100) { f.advance(100); f.Controller.tick(); } }
+test('a support character with Attack monsters off never starts a fight, and is not stopped as stuck', () => {
+  const f = fixture(); f.Hunt.start(); let fights = 0;
+  f.Combat.fight = () => { fights++; };
+  assert.equal(f.Settings.profile.hunt.attack, true, 'attacking is on by default');
+  f.World.ents.set(30, { gid: 30, kind: 'monster', name: 'Mob', regionId: 1, x: 120, z: 100, attackFlags: 16, appearanceState: [0] });
+  f.Hunt.targetGid = 30; f.World.gp.target = 30;
+  f.Settings.profile.hunt.attack = false;
+  idleFor(f, 1000);
+  assert.equal(fights, 0, 'no fight, not even with the monster it was fighting');
+  assert.equal(f.Hunt.targetGid, 0); assert.equal(f.Hunt.state, 'support only'); assert.equal(f.Controller.mode, 'support only');
+  f.World.attackers.set(30, f.World.simNow() ?? 0);
+  idleFor(f, 240000);
+  assert.equal(fights, 0, 'a monster that hits it is not fought either');
+  assert.equal(f.AntiStuck.recoveries, 0, 'no kills is not being stuck'); assert.equal(f.Hunt.running, true);
+  assert.equal(f.commands.some(c => c.kind === 'select' && c.gid === 30 || c.kind === 'skill' && c.gid === 30), false);
+  f.Settings.profile.hunt.attack = true; f.World.attackers.set(30, f.World.simNow() ?? 0);
+  idleFor(f, 500);
+  assert.notEqual(f.Hunt.state, 'support only'); assert.equal(f.Hunt.targetGid, 30, 'attacking again once switched back on');
+});
+test('Attack monsters off also keeps luring from starting fights', () => {
+  const f = fixture(); f.Hunt.start(); let lured = 0;
+  f.Lure.on = () => true; f.Lure.tick = () => { lured++; };
+  f.Settings.profile.hunt.attack = false; idleFor(f, 1000); assert.equal(lured, 0);
+  f.Settings.profile.hunt.attack = true; idleFor(f, 300); assert.ok(lured > 0);
+});
 test('anti-stuck drops the target, then walks back, then stops after the configured recoveries', () => {
   const f = fixture(); f.Hunt.start(); idleFor(f, 1000);
   assert.equal(f.Hunt.state, 'search');
@@ -4002,7 +4309,9 @@ test('town cycle does not repeat unconfirmed pet transfers and stops on full sto
   f.World.gp.storage = { npc: 60, phase: 'open', capacity: 1, items: [] }; f.World.gp.target = 60;
   f.Town.store(); assert.equal(f.commands.at(-1).kind, 'cos-transfer');
   f.advance(600); f.Town.store(); assert.equal(f.commands.filter(c => c.kind === 'cos-transfer').length, 1);
-  f.advance(15000); f.Town.store(); assert.equal(f.Hunt.running, false); assert.equal(f.Town.trip, null);
+  f.advance(15000); f.Town.store(); assert.equal(f.Town.trip.phase, 'settle'); assert.equal(f.Hunt.running, true);
+  f.Town.tick(); assert.equal(f.commands.filter(c => c.kind === 'cos-transfer').length, 1);
+  assert.equal(f.commands.at(-1).kind, 'npc-close');
   const g = townFixture(); g.Town.begin(); g.Town.enter('store');
   g.World.gp.storage = { npc: 60, phase: 'open', capacity: 1, items: [{ slot: 0, refObjId: 999 }] }; g.World.gp.target = 60;
   g.Town.store(); assert.match(g.Town.message, /Storage is full/); assert.equal(g.commands.some(c => c.kind === 'cos-transfer'), false);
@@ -4169,7 +4478,8 @@ test('town sells only unprotected non-elixir pet loot and waits for a full sale 
   f.pet.inventory[1].quantity = 1; f.advance(1000); f.Town.tick();
   assert.ok(f.Town.trip.pending); assert.equal(f.commands.filter(c => c.kind === 'cos-shop-sell').length, 1);
   f.advance(15000); f.Town.tick();
-  assert.equal(f.Town.trip, null); assert.match(f.Town.message, /not confirmed/);
+  assert.equal(f.Town.trip.phase, 'settle'); assert.match(f.Town.message, /not confirmed/);
+  f.Town.tick(); assert.equal(f.commands.at(-1).kind, 'npc-close');
   assert.equal(f.commands.filter(c => c.kind === 'cos-shop-sell').length, 1);
   assert.equal(f.commands.some(c => c.kind === 'shop-sell'), false);
 });
@@ -4243,6 +4553,90 @@ test('town never sells items the game marks unsellable, and skips a refused sale
   gp.error = null; f.pet.inventory = [quest, refused]; f.advance(1000); f.Town.tick();
   assert.equal(f.Town.trip.phase, 'repair');
   assert.equal(f.commands.filter(c => c.kind === 'cos-shop-sell').length, 2, 'the refused item is not offered again');
+});
+
+function stalledSale() {
+  const f = townFixture(), gp = f.World.gp;
+  const ware = (slot, ref) => ({ slot, refObjId: ref, typeFlags: 44 | (6 << 7), quantity: 1, plus: 0, magic: [], tooltip: { fields: { rarity: 0 } } });
+  f.Town.cfg().storeSox = false;
+  f.pet.status = 20; f.pet.inventory = [ware(5, 1100), ware(6, 1101)];
+  f.Town.begin(); f.Town.enter('sell'); gp.target = 62; gp.shop = { npc: 62 };
+  f.Town.tick(); assert.equal(f.commands.at(-1).slot, 5);
+  gp.inventoryPending = true; f.advance(16000); f.Town.tick();
+  return { f, gp, ware };
+}
+const sales = f => f.commands.filter(c => c.kind === 'cos-shop-sell');
+test('a stalled sale is not sent again: the trip waits for the game, closes the shop and sells from what is left', () => {
+  const { f, gp, ware } = stalledSale();
+  assert.equal(f.Town.trip?.phase, 'settle'); assert.equal(f.Hunt.running, true);
+  assert.match(f.Town.message, /timed out.*Nothing is sent again.*repair merchant over/);
+  f.advance(30000); f.Town.tick();
+  assert.equal(f.Town.trip.phase, 'settle'); assert.equal(sales(f).length, 1, 'nothing is sent while the game is busy');
+  gp.inventoryPending = false; f.pet.inventory = [ware(6, 1101)]; f.Town.tick();
+  assert.equal(f.commands.at(-1).kind, 'npc-close');
+  f.Town.tick(); assert.equal(f.commands.filter(c => c.kind === 'npc-close').length, 1, 'the close is sent once');
+  gp.target = null; gp.shop = null; f.Town.tick();
+  assert.equal(f.Town.trip.phase, 'walk-smith');
+  f.Town.walk = () => true; f.Town.tick(); f.Town.tick();
+  assert.equal(f.Town.trip.phase, 'open-smith'); assert.equal(f.commands.at(-1).kind, 'select');
+  gp.target = 62; gp.targetCapabilities = 9; f.Town.tick(); assert.equal(f.commands.at(-1).kind, 'shop-open');
+  gp.shop = { npc: 62 }; gp.shopCompletionRevision++; f.Town.tick(); f.Town.tick();
+  assert.deepEqual(sales(f).map(c => c.slot), [5, 6], 'the item the stalled sale took is not offered again');
+  f.pet.inventory = []; f.advance(1000); f.Town.tick();
+  assert.equal(f.Town.trip.phase, 'repair');
+});
+test('a second stalled transaction in the same trip stops the town cycle', () => {
+  const { f, gp } = stalledSale();
+  gp.inventoryPending = false; gp.target = null; gp.shop = null; f.Town.tick();
+  f.Town.enter('sell'); gp.target = 62; gp.shop = { npc: 62 }; f.Town.tick();
+  assert.equal(sales(f).at(-1).slot, 5);
+  gp.inventoryPending = true; f.advance(16000); f.Town.tick();
+  assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false);
+  assert.match(f.Town.message, /Inventory transaction timed out\. No repeat command sent/);
+  assert.equal(sales(f).length, 2);
+});
+test('a game that never finishes the stalled transaction is reloaded once, with hunting kept for the reconnect', () => {
+  const { f, gp } = stalledSale(); let reloads = 0;
+  f.Reconnect.doReload = () => { reloads++; };
+  f.World.charName = f.Town.trip.character = 'Tester'; f.Reconnect.snapshot();
+  assert.equal(f.Town.trip.phase, 'settle');
+  f.advance(59000); f.Town.tick(); assert.equal(reloads, 0);
+  f.advance(2000); f.Town.tick();
+  assert.equal(reloads, 1); assert.equal(f.Town.trip, null);
+  assert.equal(JSON.parse(f.storage.get('sro-lean-reload')).pending.hunting, true);
+  assert.equal(gp.inventoryPending, true);
+  assert.equal(sales(f).length, 1);
+  f.Town.begin(); f.Town.enter('settle'); f.Town.trip.resume = 'walk-smith';
+  f.advance(61000); f.Town.tick();
+  assert.equal(reloads, 1, 'a game that never answers is not reloaded in a loop');
+  assert.equal(f.Town.trip, null); assert.equal(f.Hunt.running, false); assert.match(f.Town.message, /again after a reload/);
+});
+test('a stalled warehouse deposit puts the item first in line when the warehouse is opened again', () => {
+  const f = townFixture(), gp = f.World.gp;
+  f.Town.begin(); f.Town.enter('store');
+  gp.storage = { npc: 60, phase: 'open', capacity: 5, items: [] }; gp.target = 60;
+  f.Town.store(); const move = f.commands.at(-1); assert.equal(move.kind, 'cos-transfer');
+  const item = f.pet.inventory.find(i => i.slot === move.source);
+  f.pet.inventory = f.pet.inventory.filter(i => i !== item); gp.inventory.push({ ...item, slot: move.destination });
+  f.advance(1000); f.Town.store();
+  const deposits = () => f.commands.filter(c => c.kind === 'storage-move');
+  assert.equal(deposits().length, 1); assert.equal(deposits()[0].move.source, move.destination);
+  gp.inventoryPending = true; f.advance(16000); f.Town.store();
+  assert.equal(f.Town.trip.phase, 'settle');
+  gp.inventoryPending = false; f.Town.tick(); assert.equal(f.commands.at(-1).kind, 'npc-close');
+  gp.storage = null; gp.target = null; f.Town.tick();
+  assert.equal(f.Town.trip.phase, 'walk-storage');
+  f.Town.walk = () => true; f.Town.tick(); f.Town.tick();
+  gp.target = 60; gp.targetCapabilities = 4; f.Town.tick(); assert.equal(f.commands.at(-1).kind, 'storage-open');
+  gp.storage = { npc: 60, phase: 'open', capacity: 5, items: [] }; f.Town.tick(); f.Town.tick();
+  assert.equal(deposits().length, 2); assert.equal(deposits()[1].move.source, move.destination, 'the bag item is deposited, not left in the bag');
+});
+test('a stalled transaction outside a shop or the warehouse still stops the trip', () => {
+  const f = townFixture();
+  f.Town.begin(); f.Town.enter('pet-revive'); f.Town.trip.pending = { at: f.Town.trip.at };
+  f.World.gp.inventoryPending = true; f.advance(16000);
+  f.Town.pendingDone(() => false);
+  assert.equal(f.Town.trip, null); assert.match(f.Town.message, /timed out\. No repeat command sent/);
 });
 
 test('town sells unprotected character bag items only when the bag switch is on', () => {
@@ -4447,7 +4841,8 @@ test('town purchase requires exact quantity gain and enough gold, without duplic
   f.Town.buy(); assert.equal(f.commands.at(-1).quantity, 49);
   gp.inventory.find(i => i.refObjId === 15).quantity++; f.advance(1000); f.Town.buy();
   assert.ok(f.Town.trip.pending); assert.equal(f.commands.filter(c => c.kind === 'shop-buy').length, 1);
-  f.advance(15000); f.Town.buy(); assert.equal(f.Town.trip, null);
+  f.advance(15000); f.Town.buy(); assert.equal(f.Town.trip.phase, 'settle');
+  f.Town.tick(); assert.equal(f.commands.filter(c => c.kind === 'shop-buy').length, 1, 'an unconfirmed purchase is never sent again');
   const g = townFixture(); g.Town.begin(); g.Town.enter('buy'); g.World.gp.target = 61; g.World.gp.shop = gp.shop; g.World.gp.progression.gold = '1';
   g.Town.buy(); assert.equal(g.commands.some(c => c.kind === 'shop-buy'), false); assert.match(g.Town.message, /gold/);
 });
@@ -4936,6 +5331,12 @@ function alchemyFixture(powder = false) {
   return { ...f, result };
 }
 
+test('alchemy takes up to 9999 enhancement attempts', () => {
+  let f = alchemyFixture(); f.Settings.profile.alchemy.limit = 9999; f.Alchemy.start();
+  assert.ok(f.Alchemy.run, f.Alchemy.message); assert.equal(f.Alchemy.run.cfg.limit, 9999);
+  f = alchemyFixture(); f.Settings.profile.alchemy.limit = 10000; f.Alchemy.start();
+  assert.equal(f.Alchemy.run, null); assert.match(f.Alchemy.message, /attempts from 1 to 9999/);
+});
 test('alchemy closes its native window on stop without cancelling a sent reinforcement', () => {
   const f = alchemyFixture(); f.Alchemy.start(); f.Controller.tick();
   f.World.applyGameplay({ ...f.World.gp, alchemy: { ...f.World.gp.alchemy, pending: true, slot: 13 } });
@@ -5024,6 +5425,36 @@ test('alchemy fuses stones before the elixirs, in order, and stops when a stone 
   assert.equal(g.Alchemy.run, null); assert.match(g.Alchemy.message, /No Steady stone of degree 9 in the bag/);
   assert.equal(g.commands.filter(c => c.mode === 'reinforce').length, 0);
 });
+function astralFixture(change, astralStones = 2) {
+  const f = stoneFixture(change);
+  f.World.gp.inventory = f.World.gp.inventory.map(i => i.slot === 13 ? { ...i, magicReferences: [...i.magicReferences, { paramId: 80, optionName: 'MATTR_ASTRAL' }] } : i);
+  f.World.gp.inventory.push({ slot: 19, refObjId: 6891, typeFlags: 0x3dec, quantity: astralStones });
+  return f;
+}
+const stoneSlots = f => f.commands.filter(c => c.mode === 'magic').map(c => c.slots[1]);
+test('an Astral charge waits for an Immortal one: Immortal is fused first, even when it is not ticked', () => {
+  const f = astralFixture({ luck: 0, astral: 1 });
+  f.Alchemy.start(true); f.Controller.tick();
+  assert.deepEqual(stoneSlots(f), [18], 'Immortal first');
+  assert.match(f.Alchemy.message, /Immortal stone \(the next Astral charge needs it\)/);
+  f.fused(18, 79, 1); f.advance(1500); f.Controller.tick();
+  assert.deepEqual(stoneSlots(f), [18, 19], 'then Astral');
+  f.fused(19, 80, 1); f.advance(1500); f.Controller.tick();
+  assert.equal(f.Alchemy.run, null); assert.match(f.Alchemy.message, /wanted stone counts/);
+  assert.deepEqual(JSON.parse(JSON.stringify(f.Alchemy.result.stonesUsed)), { luck: 0, steady: 0, immortal: 1, astral: 1 });
+});
+test('Immortal goes before Astral below its own plus, and its missing stone is named', () => {
+  const f = astralFixture({ luck: 0, immortal: 1, astral: 2 }); f.Settings.profile.alchemy.from.immortal = 5;
+  f.Alchemy.start(); f.Controller.tick();
+  assert.deepEqual(stoneSlots(f), [18], 'Astral is due at +0, Immortal from +5: Immortal still goes first');
+  f.fused(18, 79, 1); f.advance(1500); f.Controller.tick(); assert.deepEqual(stoneSlots(f), [18, 19]);
+  f.fused(19, 80, 1); f.advance(1500); f.Controller.tick();
+  assert.deepEqual(stoneSlots(f), [18, 19, 18], 'a second Astral needs a second Immortal');
+  const g = astralFixture({ luck: 0, astral: 1 }); g.World.gp.inventory = g.World.gp.inventory.filter(i => i.slot !== 18);
+  g.Alchemy.start(true); g.Controller.tick();
+  assert.equal(g.Alchemy.run, null); assert.match(g.Alchemy.message, /No Immortal stone of degree 9 in the bag; each Astral charge needs an Immortal charge first/);
+  assert.deepEqual(stoneSlots(g), [], 'no Astral is tried without an Immortal charge');
+});
 function attributeFixture(targets = { NATTR_PA: 19 }, limit = 100) {
   const f = alchemyFixture(); const a = f.Settings.profile.alchemy;
   f.World.gp.inventory = f.World.gp.inventory.map(i => i.slot === 13 ? { ...i, variance: '0' } : i);
@@ -5064,6 +5495,28 @@ test('attribute stones: several attributes are worked down the list and a change
   assert.deepEqual(sent(f), { kind: 'alchemy-start', mode: 'attribute', slots: [13, 17] }, 'Phy. reinforce comes before Phy. attack power');
   f.fuse(17, { 1: 7, 4: 25 }); assert.match(f.Alchemy.log.at(-1).text, /Phy\. reinforce: 0% → 22% \(also changed: Phy\. attack power 0% → 80%\)/);
   f.advance(1500); f.Controller.tick(); assert.equal(f.Alchemy.run, null, 'the other stat already reached its target');
+});
+test('attribute stones: a stat without stones is passed over, the next one is done, and the end names what ran out', () => {
+  const f = attributeFixture({ NATTR_PASTR: 7, NATTR_PA: 13 });
+  f.World.gp.inventory = f.World.gp.inventory.filter(i => i.slot !== 17);
+  f.Alchemy.startAttributes(); f.Controller.tick();
+  assert.deepEqual(sent(f), { kind: 'alchemy-start', mode: 'attribute', slots: [13, 16] }, 'no Phy. reinforce stone: Phy. attack power is fused');
+  assert.match(f.Alchemy.log.at(-1).text, /No Phy\. reinforce stone of degree 9 in the bag; going on with Phy\. attack power/);
+  f.fuse(16, { 4: 13 }); f.advance(1500); f.Controller.tick();
+  assert.equal(f.Alchemy.run, null); assert.match(f.Alchemy.message, /^No Phy\. reinforce stone of degree 9 in the bag\./);
+  assert.equal(f.commands.filter(c => c.mode === 'attribute').length, 1);
+});
+test('attribute stones: when the stones of one stat run out on the way, the next stat is done', () => {
+  const f = attributeFixture({ NATTR_PASTR: 13, NATTR_PA: 13 });
+  f.World.gp.inventory = f.World.gp.inventory.map(i => i.slot === 17 ? { ...i, quantity: 1 } : i);
+  f.Alchemy.startAttributes(); f.Controller.tick(); assert.deepEqual(sent(f).slots, [13, 17]);
+  f.fuse(17, { 1: 7 }); f.advance(1500); f.Controller.tick();
+  assert.deepEqual(sent(f).slots, [13, 16], 'Phy. reinforce is out of stones at 22%: Phy. attack power next');
+  f.fuse(16, { 1: 7, 4: 13 }); f.advance(1500); f.Controller.tick();
+  assert.equal(f.Alchemy.run, null); assert.match(f.Alchemy.message, /No Phy\. reinforce stone/);
+  const g = attributeFixture({ NATTR_PASTR: 13, NATTR_PA: 13 }); g.World.gp.inventory = g.World.gp.inventory.filter(i => i.slot !== 16 && i.slot !== 17);
+  g.Alchemy.startAttributes(); g.Controller.tick();
+  assert.equal(g.Alchemy.run, null); assert.match(g.Alchemy.message, /No Phy\. reinforce or Phy\. attack power stone of degree 9 in the bag/);
 });
 test('attribute stones: need a target, a matching stone and respect the stone limit', () => {
   const none = attributeFixture({}); none.Alchemy.startAttributes(); assert.equal(none.Alchemy.run, null); assert.match(none.Alchemy.message, /at least one attribute/);
@@ -5419,7 +5872,7 @@ test('auto-start is off by default; on, it starts hunting at the spot once the g
   assert.equal(f.Hunt.running, false, 'waits for the game to settle'); assert.match(f.Diagnostics.main(), /^Auto-start: starting in \d s\.$/);
   f.advance(5000); f.Controller.tick();
   assert.equal(f.Hunt.running, true); assert.match(f.AutoStart.message, /hunting started at the hunting spot/);
-  f.stopAll(); f.advance(10000); f.Controller.tick(); assert.equal(f.Hunt.running, false, 'a stop by the player holds for this entry');
+  f.stopAll(); f.advance(10000); f.Controller.tick(); assert.equal(f.Hunt.running, false, 'a stop holds for this entry');
   f.bus.emit('phase', 'entering-world', 'world', false); f.advance(10000); f.Controller.tick();
   assert.equal(f.Hunt.running, false, 'a teleport is not a new entry');
   f.World.phase = 'character'; f.bus.emit('phase', 'character', 'world', true); f.Controller.tick(); f.World.phase = 'world';
@@ -5430,7 +5883,7 @@ test('auto-start waits out manual control and gives way to the player and to a r
   let f = autoStartFixture(); f.Controller.tick(); f.advance(4000); manualMove(f);
   f.advance(1500); f.Controller.tick(); assert.equal(f.Hunt.running, false); assert.match(f.AutoStart.message, /manual-control pause/);
   f.advance(6000); f.Controller.tick(); assert.equal(f.Hunt.running, true, 'starts once the manual pause is over');
-  f = autoStartFixture(); f.Controller.tick(); f.stopAll(); f.advance(10000); f.Controller.tick();
+  f = autoStartFixture(); f.Controller.tick(); f.userStop(); f.advance(10000); f.Controller.tick();
   assert.equal(f.Hunt.running, false); assert.match(f.AutoStart.message, /cancelled/);
   f = autoStartFixture(); f.Controller.tick(); f.toggleBot(); assert.equal(f.Hunt.running, true);
   f.Controller.tick(); assert.equal(f.AutoStart.entry, null, 'started by the player: nothing left to do');
@@ -5438,6 +5891,52 @@ test('auto-start waits out manual control and gives way to the player and to a r
   for (let i = 0; i < 6; i++) { r.f.advance(4000); r.f.Controller.tick(); }
   assert.equal(r.f.Hunt.running, false, 'the player had stopped the bot; the reconnect owns this entry and does not start it');
   assert.match(r.f.AutoStart.message, /reconnect/);
+});
+function heroAutoStart() {
+  const f = autoStartFixture(), center = f.Hunt.cfg().center;
+  f.World.charName = 'Hero'; f.Settings.useCharacter('Hero'); Object.assign(f.Settings.profile.hunt, { autoStart: true, center });
+  const enter = () => { f.World.phase = 'character'; f.bus.emit('phase', 'character', 'world', true); f.World.phase = 'world'; f.Controller.tick(); f.advance(5000); f.Controller.tick(); };
+  return { f, enter };
+}
+test('auto-start follows the last Start or Stop the player chose, kept per character across reloads', () => {
+  let { f, enter } = heroAutoStart(); f.Controller.tick(); f.advance(5000); f.Controller.tick();
+  assert.equal(f.Hunt.running, true, 'no choice saved yet: it starts as before');
+  f.toggleBot(); assert.equal(f.Hunt.running, false);
+  assert.equal(JSON.parse(f.storage.get('sroBotLean:v1:run:Hero')).on, false);
+  enter(); assert.equal(f.Hunt.running, false, 'the player stopped it: it stays stopped');
+  assert.match(f.AutoStart.message, /you stopped the bot last time/);
+  f.toggleBot(); assert.equal(f.Hunt.running, true); f.stopAll();
+  enter(); assert.equal(f.Hunt.running, true, 'stopped by the bot itself, last chosen Start: it starts again');
+  f.userStop(); f.World.charName = 'Other'; f.RunIntent.set(true); f.World.charName = 'Hero';
+  enter(); assert.equal(f.Hunt.running, false, 'the choice belongs to the character');
+});
+test('a stop the bot makes by itself does not cancel an auto-start that is waiting', () => {
+  const { f } = heroAutoStart(); f.Controller.tick(); f.advance(2000);
+  f.stopAll(); f.bus.emit('phase', 'entering-world', 'world', false); f.Controller.tick();
+  assert.ok(f.AutoStart.pending(), 'still waiting for the game to settle');
+  f.advance(4000); f.Controller.tick();
+  assert.equal(f.Hunt.running, true); assert.match(f.AutoStart.message, /hunting started/);
+});
+test('a connection lost while an auto-start waits is resumed after the reconnect', () => {
+  const r = reconnectFixture(); autoStartFixture(r.f); r.f.Hunt.stop(); r.f.AutoStart.entry = { at: 0 };
+  r.lose(); assert.equal(r.f.Reconnect.intent.hunting, true);
+});
+test('a stop by the player during a reconnect, or before a reload, is not undone when the character is back', () => {
+  const r = reconnectFixture(); r.f.Reconnect.snapAt = 0; r.f.Reconnect.snapshot();
+  const snap = () => JSON.parse(r.f.storage.get('sro-lean-reload')).snap;
+  assert.equal(snap().hunting, true);
+  r.lose(); assert.equal(r.f.Reconnect.intent.hunting, true);
+  r.f.userStop(); assert.equal(r.f.Reconnect.intent.hunting, false); assert.equal(snap().hunting, false);
+  r.back(); for (let i = 0; i < 6; i++) { r.f.advance(4000); r.f.Controller.tick(); }
+  assert.equal(r.f.Hunt.running, false); assert.equal(r.f.Reconnect.active(), false);
+});
+test('the Start / stop button shows whether the bot is running', () => {
+  const f = fixture(), led = f.UI.runLed = { dataset: {}, parentNode: { title: '' } };
+  f.UI.updateRunLed(); assert.equal(led.dataset.state, 'stop'); assert.match(led.parentNode.title, /stopped/);
+  f.Hunt.start(); f.UI.updateRunLed(); assert.equal(led.dataset.state, 'ok'); assert.match(led.parentNode.title, /running: Hunting/);
+  f.World.isDead = () => true; f.UI.updateRunLed(); assert.equal(led.dataset.state, 'ok', 'dead while started: still started');
+  f.World.isDead = () => false; f.WalkBack.active = true; f.UI.updateRunLed(); assert.equal(led.dataset.state, 'busy');
+  f.WalkBack.active = false; f.Hunt.stop(); f.UI.updateRunLed(); assert.equal(led.dataset.state, 'stop');
 });
 test('auto-start in the town of the saved services does the town services, then reverses to the hunting spot', () => {
   const f = townFixture(); autoStartFixture(f); f.Hunt.stop();
@@ -5468,6 +5967,70 @@ test('auto-start away from the spot outside town walks back; dead it revives fir
   f = fixture(); f.World.charName = 'Hero'; f.Controller.tick(); f.advance(121000); f.Controller.tick();
   assert.equal(f.AutoStart.entry, null, 'a profile that never loads still gives up');
   assert.match(f.AutoStart.message, /gave up/);
+});
+function retryFixture(on = true) {
+  const f = fixture(); f.Settings.profile.hunt.retry = on; f.Hunt.start(); f.Controller.tick();
+  const stop = reason => { f.Hunt.stop(reason); f.Controller.tick(); };
+  return { f, stop };
+}
+test('the bot starts again 2 minutes after it stopped by itself, only when asked to', () => {
+  let { f, stop } = retryFixture(false);
+  assert.equal(f.DEFAULT_PROFILE.hunt.retry, false, 'off by default');
+  stop('Town cycle stopped: Inventory transaction timed out.'); f.advance(130000); f.Controller.tick();
+  assert.equal(f.Hunt.running, false);
+  ({ f, stop } = retryFixture());
+  stop('Town cycle stopped: Inventory transaction timed out.');
+  assert.match(f.Diagnostics.main(), /stopped by itself \(Town cycle stopped: Inventory transaction timed out\.\); starting again in 120 s/);
+  f.advance(119000); f.Controller.tick(); assert.equal(f.Hunt.running, false);
+  f.advance(2000); f.Controller.tick(); assert.equal(f.Hunt.running, true, 'does what Return & hunt does');
+  assert.match(f.Retry.message, /^Started again/);
+});
+test('a stop the player chose, or the player stopping the bot, is never undone by the retry', () => {
+  for (const reason of ['out of HP potions', 'inventory full', 'character died', 'stuck: no progress after 3 recoveries', 'Town cycle stopped: Manual control interrupted the trip.',
+    'Town cycle stopped: Character died during town service.', 'Town cycle stopped: No saved hunting point to return to; set the hunting area first.']) {
+    const { f, stop } = retryFixture(); stop(reason); f.advance(130000); f.Controller.tick();
+    assert.equal(f.Hunt.running, false, reason); assert.match(f.Retry.message, /final/, reason);
+  }
+  const { f } = retryFixture(); f.World.charName = 'Hero'; f.userStop(); f.Controller.tick(); f.advance(130000); f.Controller.tick();
+  assert.equal(f.Hunt.running, false, 'the player pressed Stop');
+});
+test('the retry waits for the player to stop moving, and gives up on the same reason twice or a fourth stop in an hour', () => {
+  let { f, stop } = retryFixture();
+  stop('Walk back stopped: no progress towards the hunting spot.');
+  f.advance(100000); manualMove(f); f.advance(100000); f.Controller.tick(); assert.equal(f.Hunt.running, false, 'the player moved 100 s in');
+  f.advance(21000); f.Controller.tick(); assert.equal(f.Hunt.running, true, '2 minutes after the last manual move');
+  stop('Walk back stopped: no progress towards the hunting spot.'); f.advance(130000); f.Controller.tick();
+  assert.equal(f.Hunt.running, false, 'the same reason again within 30 minutes');
+  assert.ok(f.notices.some(n => /stopped again for the same reason/.test(n)));
+  ({ f, stop } = retryFixture());
+  for (const n of [1, 2, 3]) { stop('Town cycle stopped: reason ' + 'ABC'[n - 1] + '.'); f.advance(121000); f.Controller.tick(); assert.equal(f.Hunt.running, true, 'try ' + n); }
+  stop('Town cycle stopped: reason D.'); f.advance(130000); f.Controller.tick();
+  assert.equal(f.Hunt.running, false); assert.match(f.Retry.message, /4 times in an hour/);
+});
+test('a pending retry is dropped by Stop all, a character change or leaving the world', () => {
+  for (const how of ['stop', 'character', 'left']) {
+    const { f, stop } = retryFixture(); stop('Town cycle stopped: Inventory transaction timed out.'); assert.ok(f.Retry.stop, how);
+    if (how === 'stop') { f.World.charName = 'Hero'; f.userStop(); }
+    if (how === 'character') f.bus.emit('character', 'Other');
+    if (how === 'left') { f.bus.emit('phase', 'character', 'world', true); f.World.phase = 'world'; }
+    f.Controller.tick(); f.advance(130000); f.Controller.tick();
+    assert.equal(f.Hunt.running, false, how); assert.equal(f.Retry.stop, null, how);
+  }
+});
+test('a stop on a world change is retried, unless the player had just acted in the game', () => {
+  const change = f => { f.bus.emit('phase', 'entering-world', 'world', false); f.stopAll(); f.Controller.tick(); };
+  let { f } = retryFixture(); change(f);
+  assert.equal(f.Retry.stop.reason, 'world change'); f.advance(121000); f.Controller.tick(); assert.equal(f.Hunt.running, true);
+  ({ f } = retryFixture()); f.advance(60000);
+  f.Hook.observers.forEach(fn => fn({ kind: 'gameplay', command: { kind: 'item-use', slot: 13 } })); f.advance(5000); change(f);
+  f.advance(130000); f.Controller.tick();
+  assert.equal(f.Hunt.running, false, 'a scroll read by hand: the player moved on'); assert.match(f.Retry.message, /your own action/);
+});
+test('the retry also follows a walk back that failed after a town trip', () => {
+  const f = fixture(); f.Settings.profile.hunt.retry = true; f.World.gp.pose.x = 1800;
+  f.WalkBack.start(true); assert.ok(f.WalkBack.active); f.Controller.tick();
+  f.WalkBack.cancel('Walk back stopped: path blocked or travel timed out.'); f.Controller.tick();
+  assert.match(f.Retry.message, /path blocked or travel timed out\.\); starting again in/);
 });
 test('a walk that starts on a blocked tile or against a wall steps out to open ground first, never through the wall', () => {
   const wall = { x: 0, y: 0, z: 0, yaw: 0, mesh: { vertices: [200,0,0,200,0,1920], edges: [0,1,0,65535,3,0] } };
@@ -6122,8 +6685,8 @@ async function updateTests() {
   }
   await check('updates compare numeric version components and ignore malformed versions', async () => {
     const f = fixture();
-    for (const v of ['9.9.9', '1.5.3', '2.0.0']) assert.equal(f.Updates.newer(v), true);
-    for (const v of ['1.2.9', '1.2.36', '1.2.169', '1.2.173', '1.3.0', '1.4.3', '1.5.0', '1.5.1', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
+    for (const v of ['9.9.9', '1.5.4', '2.0.0']) assert.equal(f.Updates.newer(v), true);
+    for (const v of ['1.2.9', '1.2.36', '1.2.169', '1.2.173', '1.3.0', '1.4.3', '1.5.0', '1.5.1', '1.5.2', '1.5.3', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
   });
   await check('updates pin metadata and user-initiated installer to the same trusted commit', async () => {
     const f = fixture(), calls = updater(f); f.UI.updateButton = {};

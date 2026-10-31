@@ -88,10 +88,13 @@ Hunt.tick = function () {
     this.state = 'resting'; return;
   }
   if (Combat.buffs(true)) { this.state = 'buff'; return; }
-  if (Lure.on()) return Lure.tick();
-  const target = this.threat(current) || current || this.teamTarget(current) || this.chooseTarget();
+  // A support character (Attack monsters off) never starts a fight, not even with what hits it: it keeps looting,
+  // its own buffs and party support, at its hunting spot or beside the member it follows.
+  const attack = H.attack !== false;
+  if (attack && Lure.on()) return Lure.tick();
+  const target = attack ? this.threat(current) || current || this.teamTarget(current) || this.chooseTarget() : null;
   if (target) { this.engage(target); return; }
-  this.targetGid = 0; this.state = Loot.active?.petGid ? 'loot' : 'search';
+  this.targetGid = 0; this.state = !attack ? 'support only' : Loot.active?.petGid ? 'loot' : 'search';
   if (H.returnToCenter && H.center && dist2D(World.pose(), H.center) > Math.max(40, H.radius * 0.5) && now() - this.lastMoveAt > 2500) {
     // Hunting from town (dead at login and woken in town): the town cycle's own trip (services, then reverse or walk).
     if (!(dist2D(World.pose(), H.center) <= Math.max(H.radius * 1.5, 600)) && Controller.townReturn()) return;
@@ -101,8 +104,9 @@ Hunt.tick = function () {
   }
 };
 
+// Stops everything, for the player and for the bot itself. A pending auto-start survives it: only the player's own
+// Stop (userStop) cancels that.
 function stopAll() {
-  AutoStart.cancel('Auto-start cancelled.');
   Town.record('stop');
   Alchemy.stop();
   Trade.cancel();
@@ -206,18 +210,21 @@ const Controller = {
       this.guard('Reconnect', () => Reconnect.tick());
       this.guard('Auto-start', () => AutoStart.tick());
       this.guard('Team', () => { Team.tick(); TeamIntel.tick(); TeamKnowledge.tick(); TeamArbiter.tick(); });
+      this.guard('Retry', () => Retry.tick());
       Restock.sample();
       Alchemy.tick();
       BuffGear.resume();
+      // Party automation runs in every state, dead or busy included: the game refuses an application to your party
+      // that is not answered within 10 seconds.
+      this.guard('Party', () => Party.tick());
       if (BuffGear.run) {
-        if (World.inWorld()) { Party.tick(); Potion.tick(); }
+        if (World.inWorld()) Potion.tick();
         if (BuffGear.tick()) { this.mode = 'buff gear'; return; }
       }
-      if (Alchemy.run || Alchemy.pending) { if (World.inWorld()) Party.tick(); this.mode = 'alchemy'; return; }
-      if (Stall.run) { if (World.inWorld()) { Party.tick(); Potion.tick(); } Stall.tick(); this.mode = 'stall'; return; }
+      if (Alchemy.run || Alchemy.pending) { this.mode = 'alchemy'; return; }
+      if (Stall.run) { if (World.inWorld()) Potion.tick(); Stall.tick(); this.mode = 'stall'; return; }
       if (World.inWorld() && World.isDead() && Hunt.running) {
         Town.cancel(); Resurrect.cancelTrip(); Resurrect.holdUntil = 0;
-        Party.acceptResurrection();
         Hunt.tick(); this.mode = Hunt.state; return;
       }
       if (World.inWorld() && !World.isDead() && (this.resumeAfterRevive || Hunt.running && Hunt.deathAt)) {
@@ -227,7 +234,6 @@ const Controller = {
         } else this.returnAfterRevive();
       }
       if (Town.trip) {
-        if (World.inWorld()) Party.tick();
         // Reserve the first settled item-use window for departure. Continuing
         // alternating potions first can perpetually renew the 350 ms hold.
         if (Town.trip.phase !== 'recall' || !Town.trip.potionWindowReserved || World.isCasting() || World.gp?.inventoryPending) Potion.tick();
@@ -235,7 +241,6 @@ const Controller = {
         if (Town.tick()) { this.mode = 'town service'; return; }
       }
       if (!World.inWorld()) { this.mode = 'waiting'; return; }
-      Party.tick();
       Party.resumeTick();
       AutoMastery.tick();
       StatPoints.tick();

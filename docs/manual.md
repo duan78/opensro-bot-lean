@@ -107,21 +107,23 @@ In **Combat → Buffs & imbue**, equip your buff weapon and optional shield, nam
 
 Assign each selected buff to its set and enable **Swap weapons for buffs**. While hunting, the bot equips each needed set, casts its buffs and restores your original combat weapon and off-hand. Keep one bag slot free. Assigned buffs are skipped while swapping is off.
 
-The Buffs & imbue page shows, for each buff assigned to a set, how long it has left and what the swap is waiting for, and says why when a buff is due but the swap cannot start (for example a saved weapon that cannot be found in the bag). The swap happens when a buff is about to end, not when you start hunting. A buff whose cast was only unconfirmed is tried again after two minutes.
+The Buffs & imbue page shows, for each buff assigned to a set, how long it has left and what the swap is waiting for, and says why when a buff is due but the swap cannot start (for example a saved weapon that cannot be found in the bag). The swap happens when a buff is about to end, not when you start hunting.
+
+One weapon change covers what uses the same gear. That is your own buffs assigned to it and up to 10 party buff casts (Party → Party buffs) that need it, on the members and on you, cast one after another before the combat weapon comes back. After a minute it stops starting casts and puts the combat weapon back; the rest goes in the next change. Buffs that would run out within a minute are renewed in the same change, so the next change does not follow a minute later. A buff whose cast was only unconfirmed is tried again after two minutes.
 
 Some buffs end when their weapon is removed. If observed, the bot skips that buff until its buff settings change. Interrupted or unconfirmed swaps stop hunting; use **Restore combat gear**, or inspect your equipment and choose **Use current gear**. Reloads discard unfinished recovery. Live-server swapping still needs confirmation.
 
 ## Item alchemy
 
-Stop hunting/travel and put the item in your bag: a weapon, shield, armour piece or accessory. In **Alchemy**, select it, set **Target +** and **Maximum attempts**, choose an elixir (the list shows the elixirs of that item's kind) and optionally enable matching-degree lucky powder and the plus **Lucky powder from +**, then click **Start alchemy**. The tab shows the chance of the next attempt and how many elixirs to expect to reach the target, calculated from the server's own data (powder and Luck are counted the way the server counts them; skill and avatar bonuses are not), and a **Results** panel with attempts, successes, failures, destroyed items, the highest plus, what was used and a log of every attempt and fusion.
+Stop hunting/travel and put the item in your bag: a weapon, shield, armour piece or accessory. In **Alchemy**, select it, set **Target +** and **Maximum attempts** (up to 9999), choose an elixir (the list shows the elixirs of that item's kind) and optionally enable matching-degree lucky powder and the plus **Lucky powder from +**, then click **Start alchemy**. The tab shows the chance of the next attempt and how many elixirs to expect to reach the target, calculated from the server's own data (powder and Luck are counted the way the server counts them; skill and avatar bonuses are not), and a **Results** panel with attempts, successes, failures, destroyed items, the highest plus, what was used and a log of every attempt and fusion.
 
-Under **Stones that help and protect** tick **Use Luck / Steady / Immortal / Astral stones while enhancing** for the helpers you want, set how many charges to keep on the item (1 to 6) and the plus each is used **from** (defaults: Luck 0, Steady 5, Immortal 5, Astral 4). Before every attempt at or above that plus, if the item has fewer charges than you asked to keep, one is fused automatically from a stone of the item's degree in your bag. Nothing is fused for a helper that is not ticked. **Fuse stones now** ignores the plus and only fills the charges. Each stone adds 1 to that attribute: Luck raises the enhancement success chance, Steady stops durability damage and Immortal stops destruction when an enhancement fails (none of them stops the + from resetting; an Astral stone does, from +4). The stone must be of the weapon's degree and in your bag, and adding a kind the weapon does not have yet needs a free magic option slot. The bot reads the weapon's current counts and only fuses what is missing, confirms each fusion by the stone leaving the bag, counts a failed fusion (the stone is used up and nothing changes) and carries on, and stops if a stone is missing, the game refuses, the counts cannot be read, or when it reaches the optional **Stop after this many fusions** limit (0 = no limit, the default).
+Under **Stones that help and protect** tick **Use Luck / Steady / Immortal / Astral stones while enhancing** for the helpers you want, set how many charges to keep on the item (1 to 6) and the plus each is used **from** (defaults: Luck 0, Steady 5, Immortal 5, Astral 4). Before every attempt at or above that plus, if the item has fewer charges than you asked to keep, one is fused automatically from a stone of the item's degree in your bag. Nothing is fused for a helper that is not ticked. **Fuse stones now** ignores the plus and only fills the charges. Each stone adds 1 to that attribute: Luck raises the enhancement success chance, Steady stops durability damage and Immortal stops destruction when an enhancement fails (none of them stops the + from resetting; an Astral stone does, from +4). The game takes an Astral charge only while the weapon has more Immortal charges than Astral ones, so before an Astral stone the bot fuses an Immortal stone when the weapon needs one, even below Immortal's own plus or with Immortal not ticked; without an Immortal stone in the bag it stops and says so. The stone must be of the weapon's degree and in your bag, and adding a kind the weapon does not have yet needs a free magic option slot. The bot reads the weapon's current counts and only fuses what is missing, confirms each fusion by the stone leaving the bag, counts a failed fusion (the stone is used up and nothing changes) and carries on, and stops if a stone is missing, the game refuses, the counts cannot be read, or when it reaches the optional **Stop after this many fusions** limit (0 = no limit, the default).
 
 Stops at the target, attempt limit or missing materials. Failures can reduce +, damage or destroy the weapon. **Stop alchemy**, **Stop all** or **F8** prevents further attempts; a sent attempt can still finish. Unconfirmed results pause without retrying.
 
 ### Item attributes
 
-Under **Item attributes (stat percentages)** pick, for the item selected above, the lowest percentage you want for each stat (for a weapon: Phy. reinforce, Mag. reinforce, attack rating, Phy. and Mag. attack power, critical; armour, shields and accessories have their own list). Press **Fuse attribute stones**: the bot fuses attribute stones of the item's degree, working down the list, until every picked stat reaches its target. A successful fusion rolls the stat again, so it can come out lower, and it can re-roll another stat of the item, so the bot keeps checking all picked stats. The stone chance is 50% before bonuses and the high steps (80%, 100%) are rare, so set **Stop after this many attribute stones** (100 by default). It stops if a stone of the right kind is missing from the bag.
+Under **Item attributes (stat percentages)** pick, for the item selected above, the lowest percentage you want for each stat (for a weapon: Phy. reinforce, Mag. reinforce, attack rating, Phy. and Mag. attack power, critical; armour, shields and accessories have their own list). Press **Fuse attribute stones**: the bot fuses attribute stones of the item's degree, working down the list, until every picked stat reaches its target. A successful fusion rolls the stat again, so it can come out lower, and it can re-roll another stat of the item, so the bot keeps checking all picked stats. The stone chance is 50% before bonuses and the high steps (80%, 100%) are rare, so set **Stop after this many attribute stones** (100 by default). A stat whose stones run out, or that has none of the item's degree in the bag, is passed over and the next picked stat is done; the log says which. It stops when every picked stat has reached its target, or when the ones still below it have no stones left, and then names the stones that ran out.
 
 ## Auto stall
 
@@ -135,9 +137,15 @@ On the **Party** page tick **Buff and heal party members** (off by default). The
 
 1. **Group heal skill** (a skill without a target), when **Group heal when this many are low** members are below **Group heal below (%)**.
 2. **Heal skill** on the member with the lowest HP below **Heal below (%)**; tick **Heal myself too** to include yourself.
-3. **Party buffs**: pick them from your learned skills that can target a party member. Each goes to every member who does not show it, or only to the names you list under **Only these members**. With **Swap weapons for buffs** on (Combat → Buffs & imbue), **Gear for <skill>** decides what is worn for it: **Automatic** wears the weapon the skill needs from your bag (with **Wear the weapon each buff needs** on), or pick **Primary weapon**, **Secondary weapon** or **Shield**. The bot changes weapons, casts the buff, then puts your primary weapon (or what you wore) back, also while hunting is stopped. A party buff that ends when the weapon changes back waits ten minutes before the next try.
+3. **Party buffs**: pick them from your learned skills that can target a party member. Each goes to every member who does not show it, or only to the names you list under **Only these members**. With **Swap weapons for buffs** on (Combat → Buffs & imbue), **Gear for <skill>** decides what is worn for it: **Automatic** wears the weapon the skill needs from your bag (with **Wear the weapon each buff needs** on), or pick **Primary weapon**, **Secondary weapon** or **Shield**. The bot changes weapons, casts the buff, then puts your primary weapon (or what you wore) back, also while hunting is stopped. A party buff that ends when the weapon changes back waits ten minutes before the next try. Party buffs that need the same weapon go out in one weapon change, up to 10 casts on the members and on you, before your combat weapon comes back. A member who does not take one does not hold up the others. A member whose buff has less than a minute left is renewed in that change too. If the game will not renew a buff the member still wears, the bot waits until it runs out. When the game refuses a buff because the member already wears one it does not stack with (for example Earth Fire Protection or Might Guard of Ice), that member is skipped until that buff ends, at most 30 minutes, and the other members still get theirs. The status line lists who is skipped.
 
-It casts only on members you can see within **Support range (m)** (30 by default) and never walks to them. HP is exact for members in view and in tenths otherwise, as the game's party window shows it. A buff that does not appear on the member after two tries waits a minute before the next. It runs while hunting; tick **Also while hunting is stopped** to support a party while you stand still. The top of the page lists the party with HP and MP bars, distance and which assigned buffs each member has. The party matching, resurrection and recruit options are on the same page.
+It casts only on members you can see within **Support range (m)** (30 by default) and never walks to them. HP is exact for members in view and in tenths otherwise, as the game's party window shows it. A buff that does not appear on the member after two tries waits a minute before the next. It runs while hunting; tick **Also while hunting is stopped** to support a party while you stand still. For a character that only supports, untick **Attack monsters** (Combat → Hunt area). It then never starts a fight, not even with monsters that hit it, and while hunting it keeps picking up loot, its own buffs and party support, at the hunting spot or beside the member it follows (**Following a party member**). Town trips, revival and the walk back work as usual, and the anti-stuck watchdog does not count the time without kills. The top of the page lists the party with HP and MP bars, distance and which assigned buffs each member has. The party matching, resurrection and recruit options are on the same page.
+
+## Resurrecting party members
+
+Tick **Auto-resurrect party members** on the **Party** page to cast your learned Rebirth skill on a dead party member in view. The party list shows HP in tenths, so 0 there can also mean nearly dead.
+
+A member who died while out of view is often drawn standing when you get back to them, because the game only shows deaths it saw. A standing member at 0 in the party list therefore counts as dead, unless the HP the server sent when the player came into view says otherwise. The bot casts Rebirth and the server decides: a nearly dead member refuses it, and the offer is not repeated within its 30-second answer window. A member the server's HP shows alive is checked again after 30 seconds.
 
 ## Accepting resurrection
 
@@ -149,6 +157,10 @@ If hunting was running when the character died, it resumes after a resurrection 
 
 For your other accounts. On the **Party** page tick **Join the main account's party** and type the main character's name. While the character is not in a party, the bot accepts a party invitation from that character, or pages the party-matching board for their listing and applies to it (every 20 seconds at most). It does nothing while the character is in another party, and stops when the party is full or the character's level is outside the listing's range; the status line says which. The main account needs **Auto-recruit** and **Auto-accept party-matching joins** ticked and must not use this option itself. After a disconnect the party is rejoined as soon as automatic reconnect has the character back in the game.
 
+**Leave someone else's party when the party leader is back** makes an alt leave a party led by another character, so it can join the main's party again. It leaves only when the main character is in view and within 30 m of the hunting area (anywhere in view without a saved hunting spot). When the main disconnects, the game makes another member the leader; the party then stays together, with its shared experience, buffs and resurrections, until the main is back at the hunting spot.
+
+The main answers an application within one tick, also while dead or busy. The game refuses an application that is not answered within 10 seconds, so a main that is loading (a teleport, a town scroll) can still refuse one. The alt then applies again, 20 seconds after its last application. Before each new application it reads the party board again: the main's listing gets a new number each time it is registered again (after a disconnect, or when the party broke up), and an application to the old number never reaches the main.
+
 ## Starting the bot when you enter the game
 
 Tick **Start the bot when this character enters the game** under **Settings → Behaviour** (off by default, saved per character). Each time the character enters the game (after logging in or after going back to character select), the bot waits about 5 seconds for the game to settle: the character loaded, the inventory known, no manual-control pause, and collision data for up to 20 more seconds. Then it continues from where the character stands, the same way as after a reconnect:
@@ -159,6 +171,46 @@ Tick **Start the bot when this character enters the game** under **Settings → 
 - **Dead:** it starts hunting so your death handling revives it and returns. With **On death: Stop** and the town revive off, it stays stopped and says so.
 
 It acts once per entry. A teleport or a town scroll is not a new entry. Pressing **Stop all**, **F8** or **Start / stop** before it fires cancels it for that entry, and after a reconnect the reconnect decides, so a bot you had stopped stays stopped. Without a saved hunting spot it does nothing and tells you. The status line shows what it is waiting for.
+
+**It remembers your last Start or Stop.** The bot keeps, per character and across reloads, whether you last started it (**F8**, **Start / stop**, **Return & hunt**, **Start training**) or stopped it (**F8**, **Start / stop**, **Stop all**, **Stop training**).
+
+- **You stopped it last:** auto-start leaves the character stopped on the next entry and says so.
+- **You started it last, or never chose:** auto-start starts it.
+- **Stops the bot makes by itself** do not change the choice and do not cancel an auto-start that is waiting. Examples: a world transition, a page reload or the settings loading after login.
+- **Connection lost while auto-start waits:** the reconnect counts the bot as running and resumes hunting once the character is back.
+- **You stop the bot during a reconnect, or just before the page reloads:** hunting does not come back when the character is back.
+
+## Starting again after the bot stops by itself
+
+Tick **Start again when the bot stops by itself** under **Settings → Behaviour** (off by default, saved per character). It is for stops nobody chose, for example a town trip that failed, a walk back that got stuck or a stop on a world change.
+
+**When it starts again**
+
+- The bot was running and stopped on its own.
+- Your last choice was Start, or you never chose (see **It remembers your last Start or Stop** above).
+- It waits 2 minutes, and also 2 minutes after your last manual move, so it does not take over while you play.
+- Then it does what **Return & hunt** does: hunting at the spot, town services in your town, or the walk back.
+- The status line counts down and names the reason it stopped.
+
+**When it does not**
+
+- **Stops you chose:** out of HP potions, bag full, **On death: Stop**, the anti-stuck and trapped limits, a trip interrupted by manual control, no saved hunting spot. These are final.
+- **A stop right after your own action in the game:** for example a scroll you read or a portal you took by hand. You moved on, so it is final.
+- **You pressed Stop:** the bot stays stopped.
+- **The character leaves the game or you change character:** a waiting retry is dropped. A reconnect or auto-start handles the next entry.
+- **The same reason twice within 30 minutes:** it stays stopped, writes a warning to the log and shows it on screen. Check the character.
+- **A fourth stop within an hour:** the same.
+- **A reconnect or an auto-start is already bringing it back:** it leaves that to them.
+
+## The Start / stop light
+
+A small light in the left corner of **Start / stop** shows whether the bot is running:
+
+- **Green:** hunting, also while dead and waiting to revive.
+- **Yellow:** a town trip, a walk back, a reconnect or other bot work.
+- **Grey:** stopped.
+
+Point at the button to read the state.
 
 ## Automatic reconnect
 
@@ -315,6 +367,17 @@ Before it retries, two things happen on their own. If the character stands where
 - **"Waiting for game collision data" / "Waiting for collision coverage":** the game has not given the bot a collision map for the town you arrived in. Reload the game and try again.
 - **"No walkable route found":** save that service point again from open ground a few steps in front of the NPC (stop hunting, stand there, select the NPC and click its Save button).
 - **"Blocked route (no progress for 20 s)":** something is physically in the way; check the character is not stuck behind another player or object.
+
+## If a sale, purchase or deposit gets no answer
+
+Sometimes the game never answers a sale, purchase or warehouse move, or the result does not show up in the bag within 15 seconds. The game's replies carry no request number, so the bot never sends the same command again: a late answer could sell or buy twice. Instead it continues in four steps:
+
+1. It waits for the game to finish the inventory action. The status line says "waiting for the game to finish the last inventory action".
+2. It closes the open shop or warehouse window.
+3. It starts that service again (the warehouse, the potion merchant or the repair merchant) from what the bag and the pet hold now. An item that was already sold is not offered again, and potions are bought only up to the refill target. An item whose deposit did not happen is deposited first.
+4. If the game is still busy after a minute, the bot reloads the page, and the reconnect enters the world again. With **Revive in town and go back to the hunting spot** on, it then does the town services from where the character stands. With it off, it resumes hunting as after any reconnect. The bot reloads for this at most once in 30 minutes: if the game hangs again within that time, the trip stops.
+
+The second time this happens in the same trip, the trip stops with "Town cycle stopped: Inventory transaction timed out. No repeat command sent." In that case, reload the game and check the bag before hunting again. An error the game reports still stops the trip at once, as before. The one exception is a sale the merchant refuses: that item is kept and the rest is sold.
 
 ## Sharing and importing settings
 

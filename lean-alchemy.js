@@ -12,6 +12,8 @@ const STONES = {
   astral: { label: 'Astral', option: 'MATTR_ASTRAL', base: 6883 },
 };
 const STONE_MAX = 6;
+// Enhancement attempts one run may make. A run also stops at the target, or when the elixirs, powder or stones run out.
+const ALCHEMY_MAX_ATTEMPTS = 9999;
 // The attributes an item's stat percentages come from, in the order the server keeps them (alchemy stones.go
 // attributes()): the index is the item's 5-bit variance field. Durability has no stone.
 const ATTRIBUTES = {
@@ -77,17 +79,21 @@ const Alchemy = {
   attrValues(item) { return Object.fromEntries(this.attributes(this.kind(item)).map(a => [a.name, this.attrValue(item, a.index)])); },
   attrTarget(name, cfg = this.cfg()) { return Math.min(31, Math.max(0, Math.floor(Number(cfg.attr?.targets?.[name])) || 0)); },
   attrPercent(value) { return Math.floor(value * 100 / 31); },
-  // The first attribute below its wanted value, with a bag stone of the item's degree.
+  // The first attribute below its wanted value that has a bag stone of the item's degree. Attributes without one are
+  // passed over (`skipped`), so the others are still done; with none left to fuse, `missing` names the stones that ran out.
   nextAttr(item, cfg = this.cfg()) {
-    const degree = this.degree(item);
+    const degree = this.degree(item), skipped = [];
     for (const a of this.attributes(this.kind(item))) {
       const target = this.attrTarget(a.name, cfg);
       if (!target || this.attrValue(item, a.index) >= target) continue;
       const ref = ALCHEMY_DATA.attrStones[a.name] + degree - 1;
       const stone = World.items().find(i => i.refObjId === ref && (i.typeFlags & 0xfffe) === 0x15ec && i.quantity > 0 && i.slot >= 13);
-      return stone ? { attr: a, item: stone } : { missing: `No ${ATTRIBUTE_LABEL[a.name]} stone of degree ${degree} in the bag.` };
+      if (stone) return { attr: a, item: stone, skipped };
+      skipped.push(a.name);
     }
-    return null;
+    if (!skipped.length) return null;
+    const names = skipped.map(name => ATTRIBUTE_LABEL[name]);
+    return { missing: `No ${names.length > 1 ? names.slice(0, -1).join(', ') + ' or ' + names.at(-1) : names[0]} stone of degree ${degree} in the bag.`, skipped };
   },
   // About how many stones one wanted value takes: a fusion works half the time (the stone's own chance, before skill and
   // avatar bonuses) and then the new value reaches step k only when all four rolls do, ((6 - k) / 6)^4, if the item allows it.
@@ -101,13 +107,20 @@ const Alchemy = {
   // The plus from which a helper is used.
   from(kind, cfg = this.cfg()) { return Math.max(0, Number(cfg.from?.[kind]) || 0); },
   // The next stone to fuse: the first kind still below its wanted count, with a bag stone of the weapon's degree.
+  // The game takes an Astral charge only while the weapon has more Immortal charges than Astral ones (refusal 0x24),
+  // so an Immortal stone goes first when needed, even below Immortal's own plus or with Immortal not ticked.
   nextStone(item, cfg = this.cfg(), plus = Infinity) {
     const degree = this.degree(item);
+    const bagStone = kind => World.items().find(i => i.refObjId === STONES[kind].base + degree - 1 && (i.typeFlags & 0xfffe) === 0x3dec && i.quantity > 0 && i.slot >= 13);
     for (const kind of this.wanted(cfg).filter(k => plus >= this.from(k, cfg))) {
       const want = this.keep(kind, cfg), have = this.attributeCount(item, STONES[kind].option);
       if (have >= want) continue;
-      const ref = STONES[kind].base + degree - 1;
-      const stone = World.items().find(i => i.refObjId === ref && (i.typeFlags & 0xfffe) === 0x3dec && i.quantity > 0 && i.slot >= 13);
+      const immortal = this.attributeCount(item, STONES.immortal.option);
+      if (kind === 'astral' && immortal <= have) {
+        const stone = bagStone('immortal');
+        return stone ? { kind: 'immortal', item: stone, count: immortal, forAstral: true } : { missing: 'immortal', forAstral: true };
+      }
+      const stone = bagStone(kind);
       return stone ? { kind, item: stone, count: have } : { missing: kind };
     }
     return null;
@@ -176,7 +189,7 @@ const Alchemy = {
     if (wants.length && !this.degree(item)) return reject('Weapon degree is unknown; cannot choose matching stones.');
     if (wants.length && !this.attributesKnown(item)) return reject('The weapon\'s attributes are not loaded yet. Try again in a moment.');
     if (!stonesOnly) {
-    if (!Number.isInteger(c.target) || c.target < 1 || c.target > 250 || !Number.isInteger(c.limit) || c.limit < 1 || c.limit > 1000) return reject('Set target + from 1 to 250 and attempts from 1 to 1000.');
+    if (!Number.isInteger(c.target) || c.target < 1 || c.target > 250 || !Number.isInteger(c.limit) || c.limit < 1 || c.limit > ALCHEMY_MAX_ATTEMPTS) return reject(`Set target + from 1 to 250 and attempts from 1 to ${ALCHEMY_MAX_ATTEMPTS}.`);
     if (item.plus >= c.target) return reject('Weapon already meets the target +.');
     const materials = this.materials(item);
     if (!materials.elixir) return reject(`No selected ${this.kind(item)} elixirs in the bag.`);
@@ -205,7 +218,7 @@ const Alchemy = {
     this.run = { kind: 'attr', slot: item.slot, identity: this.identity(item), shape: JSON.stringify([item.slot, item.refObjId, item.typeFlags]), fingerprint: this.fingerprint(item), stonesOnly: false,
       cfg: JSON.parse(JSON.stringify(c)), config: JSON.stringify(c), manualAt: Manual.lastAt, character: World.charName,
       attempts: 0, successes: 0, failures: 0, destroyed: 0, highest: item.plus, elixirs: 0, powders: 0, stoneAttempts: 0, stoneFailures: 0, attrFused: 0,
-      stonesUsed: { luck: 0, steady: 0, immortal: 0, astral: 0 }, nextAt: now(), opening: null };
+      stonesUsed: { luck: 0, steady: 0, immortal: 0, astral: 0 }, nextAt: now(), opening: null, skipped: [] };
     this.result = this.run; this.message = 'Preparing attribute stones.';
     this.note(`Started attribute stones on ${item.name || Items.name(item.refObjId)}.`);
   },
@@ -325,6 +338,10 @@ const Alchemy = {
       const next = this.nextAttr(item, r.cfg);
       if (!next) return this.stop('Every wanted percentage is reached.');
       if (next.missing) return this.stop(next.missing);
+      for (const name of next.skipped.filter(name => !(r.skipped ||= []).includes(name))) {
+        r.skipped.push(name);
+        this.note(`No ${ATTRIBUTE_LABEL[name]} stone of degree ${this.degree(item)} in the bag; going on with ${ATTRIBUTE_LABEL[next.attr.name]}.`);
+      }
       const cap = Math.max(1, Math.floor(Number(r.cfg.attr?.limit) || 100));
       if (r.stoneAttempts >= cap) return this.stop(`Stopped after ${cap} attribute stones (your limit).`);
       const slots = [item.slot, next.item.slot];
@@ -339,7 +356,7 @@ const Alchemy = {
       return;
     }
     const need = this.nextStone(item, r.cfg, r.stonesOnly ? Infinity : item.plus);
-    if (need?.missing) return this.stop(`No ${STONES[need.missing].label} stone of degree ${this.degree(item)} in the bag.`);
+    if (need?.missing) return this.stop(`No ${STONES[need.missing].label} stone of degree ${this.degree(item)} in the bag` + (need.forAstral ? '; each Astral charge needs an Immortal charge first.' : '.'));
     if (need) {
       const cap = Math.max(0, Math.floor(Number(r.cfg.stoneLimit) || 0));
       if (cap && r.stoneAttempts >= cap) return this.stop(`Stopped after ${cap} stone fusions (your limit).`);
@@ -350,7 +367,7 @@ const Alchemy = {
         r.stoneAttempts++;
         this.pending = { run: r, state: gp, before: gp.alchemy, at: now(), plus: item.plus,
           stone: { kind: need.kind, ref: need.item.refObjId, before: Restock.count(need.item.refObjId), count: need.count } };
-        this.message = `Fusing a ${STONES[need.kind].label} stone: waiting for the server result.`;
+        this.message = `Fusing a ${STONES[need.kind].label} stone${need.forAstral ? ' (the next Astral charge needs it)' : ''}: waiting for the server result.`;
       }
       return;
     }
@@ -377,7 +394,7 @@ const Alchemy = {
     const group = UI.group('Item enhancement');
     group.append(UI.select('Item', items, () => this.selected?.slot ?? -1, slot => { this.select(slot); UI.draw(); }),
       UI.number('Target +', () => c().target, n => c().target = n, 1, 250),
-      UI.number('Maximum attempts', () => c().limit, n => c().limit = n, 1, 1000),
+      UI.number('Maximum attempts', () => c().limit, n => c().limit = n, 1, ALCHEMY_MAX_ATTEMPTS),
       UI.select('Elixir', elixirs, () => c().elixir, value => c().elixir = Number(value)),
       UI.check('Use lucky powder of matching degree', () => c().powder, value => c().powder = value),
       UI.number('Lucky powder from +', () => c().from.powder, n => c().from.powder = n, 0, 250),
@@ -390,13 +407,13 @@ const Alchemy = {
       UI.number(s.label + ': from +', () => c().from[kind], n => c().from[kind] = n, 0, 250));
     stones.append(UI.number('Stop after this many fusions (0 = no limit)', () => c().stoneLimit, n => c().stoneLimit = n, 0, 1000));
     stones.append(UI.row(UI.button('Fuse stones now', () => this.start(true)), UI.button('Stop', () => this.stop())),
-      el('p', 'Each stone adds a charge to the item, up to 6. Tick Use for the stones you want. Before every attempt at or above the plus you set, if the item has fewer charges than you asked to keep, one is fused automatically from a stone of the item\'s degree in your bag. Luck adds 5% to the chance, Steady stops the durability damage and Immortal stops the destruction when an enhancement fails from +5, and Astral keeps +4 instead of resetting to 0 (it needs Immortal charges). A fusion can fail and use up the stone. Stops if a stone is missing, the game refuses, or when it reaches the fusion limit above (off by default). Fuse stones now ignores the plus and only fills the charges.', 'muted'));
+      el('p', 'Each stone adds a charge to the item, up to 6. Tick Use for the stones you want. Before every attempt at or above the plus you set, if the item has fewer charges than you asked to keep, one is fused automatically from a stone of the item\'s degree in your bag. Luck adds 5% to the chance, Steady stops the durability damage and Immortal stops the destruction when an enhancement fails from +5, and Astral keeps +4 instead of resetting to 0. Each Astral charge needs an Immortal charge, so an Immortal stone is fused first when the weapon needs one, even with Immortal not ticked. A fusion can fail and use up the stone. Stops if a stone is missing, the game refuses, or when it reaches the fusion limit above (off by default). Fuse stones now ignores the plus and only fills the charges.', 'muted'));
     UI.pane.append(stones);
     const attrs = UI.group('Item attributes (stat percentages)');
     UI.attrRows = el('div'); UI.attrNote = el('p', '', 'muted'); attrs.append(UI.attrRows, UI.attrNote);
     attrs.append(UI.number('Stop after this many attribute stones', () => c().attr.limit, n => c().attr.limit = n, 1, 1000),
       UI.row(UI.button('Fuse attribute stones', () => this.startAttributes()), UI.button('Stop', () => this.stop())),
-      el('p', 'Pick the lowest percentage you want for each stat of the item selected above, then start. The bot fuses attribute stones of the item\'s degree until every picked stat reaches its target, working down the list. Every successful fusion rolls the stat again, so it can also come out lower, and it can re-roll another stat of the item. The chance is 50% per stone before bonuses, and the higher steps get rare fast: 80% and 100% can take hundreds of stones. The item\'s own limit may stop it ever reaching the higher steps, so set a stone limit.', 'muted'));
+      el('p', 'Pick the lowest percentage you want for each stat of the item selected above, then start. The bot fuses attribute stones of the item\'s degree until every picked stat reaches its target, working down the list. A stat whose stones run out, or that has none in the bag, is passed over and the next one is done; it stops when no picked stat below its target has stones left. Every successful fusion rolls the stat again, so it can also come out lower, and it can re-roll another stat of the item. The chance is 50% per stone before bonuses, and the higher steps get rare fast: 80% and 100% can take hundreds of stones. The item\'s own limit may stop it ever reaching the higher steps, so set a stone limit.', 'muted'));
     UI.pane.append(attrs);
     const results = UI.group('Results');
     UI.alchemyStats = el('p', '', 'muted'); UI.alchemyLog = el('p', '', 'muted');
