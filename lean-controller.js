@@ -271,6 +271,7 @@ const Controller = {
       Party.resumeTick();
       AutoMastery.tick();
       StatPoints.tick();
+      this.guard('Level spot', () => LevelSpot.tick());
       Potion.tick();
       ItemRules.trackGear();
       if (!ItemRules.dropTick()) ItemRules.balanceTick();

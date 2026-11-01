@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {AutoStart, RenderControl, Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, Trade, WalkBack, Navigation, ClipRoute, Route, RouteCheck, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, Travel, Quest, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, RepairHammer, Stall, Team, TeamIntel, TeamKnowledge, TeamArbiter, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, Lure, stopAll, toggleBot, userStop, RunIntent, Retry, PetAttack, MallProbe, MallBuyer, ScrollBuff, boot, Ticker, Sound, LeanMap};\n})();';
+  'globalThis.bot = {AutoStart, RenderControl, Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, Trade, WalkBack, Navigation, ClipRoute, Route, RouteCheck, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, Travel, Quest, QuestData, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, RepairHammer, Stall, Team, TeamIntel, TeamKnowledge, TeamArbiter, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, Lure, stopAll, toggleBot, userStop, RunIntent, Retry, PetAttack, MallProbe, MallBuyer, LevelSpot, ScrollBuff, boot, Ticker, Sound, LeanMap};\n})();';
 function fixture(document) {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -256,6 +256,32 @@ test('pet chooses the nearest eligible drop to itself inside the configured hunt
   const outside = f.drop(22, 3436); outside.x = 410;
   assert.equal(f.Loot.choose()?.gid, nearPet.gid);
   nearPet.groundItem.ownerJid = 999; assert.equal(f.Loot.choose()?.gid, nearPlayer.gid);
+});
+test('seal of Sun, Moon and Star gear is collected before nearer ordinary drops', () => {
+  const f = fixture();
+  f.Items.data.set(900, { name: 'Plain sword', icon: '', code: 'ITEM_CH_SWORD_01' });
+  f.Items.data.set(901, { name: 'Star sword', icon: '', code: 'ITEM_CH_SWORD_01_A_RARE' });
+  f.Items.data.set(903, { name: 'Sun sword', icon: '', code: 'ITEM_CH_SWORD_01_C_RARE' });
+  const gear = (gid, ref, x) => { const e = f.drop(gid, 44); e.refObjId = ref; e.x = x; return e; };
+  const potion = f.drop(20, 2284), plain = gear(21, 900, 210), starNear = gear(22, 901, 220), starFar = gear(23, 901, 260), sun = gear(24, 903, 280);
+  assert.equal(f.Loot.allowed(plain), true, 'plain gear stays eligible, only ranked lower');
+  assert.equal(f.Loot.choose().gid, 24, 'Sun first although it is the farthest');
+  f.World.ents.delete(24);
+  assert.equal(f.Loot.choose().gid, 22, 'of two Stars, the nearest one goes first');
+  f.World.ents.delete(22);
+  assert.equal(f.Loot.choose().gid, 23);
+  f.World.ents.delete(23);
+  assert.equal(f.Loot.choose().gid, 20, 'then the nearest ordinary drop, not the plain sword');
+});
+test('the pickup pet also takes seal gear first; without the catalogue the nearest drop wins', () => {
+  const f = fixture(), P = f.Settings.profile.hunt.pickup;
+  pickupPet(f); P.equipment = true;
+  f.Items.data.set(903, { name: 'Sun sword', icon: '', code: 'ITEM_CH_SWORD_01_C_RARE' });
+  const elixir = f.drop(20, 3436);
+  const sun = f.drop(21, 44); sun.refObjId = 903; sun.x = 280;
+  assert.equal(f.Loot.choose('pet').gid, 21, 'seal gear before the nearer elixir');
+  f.Items.data.clear();
+  assert.equal(f.Loot.choose('pet').gid, 20, 'nearest-first again while the catalogue is empty');
 });
 test('pet yields to actual potion dispatch and pending inventory then collects without interrupting combat', () => {
   const f = fixture(); petFight(f); f.drop(20, 3436);
@@ -3390,6 +3416,68 @@ test('an unconfirmed mall order blocks all mall buying until the world is re-ent
   f.MallBuyer.unpoison(); f.MallBuyer.tick(); // re-entering the world unblocks
   assert.equal(mallBuys(f).length, 2, 'after the resync buying resumes');
 });
+test('the mall silk budget survives world transitions and counts an unconfirmed order; only a fresh run clears it', () => {
+  const f = mallFixture();
+  f.Settings.profile.mall.budgetSilk = 300; f.World.gp.itemMall.silk = 200;
+  f.Hunt.start();
+  f.MallBuyer.tick(); assert.equal(mallBuys(f).length, 1);
+  f.advance(2000);
+  f.World.applyGameplay({ ...f.World.gp, inventory: [{ slot: 16, refObjId: 5912, typeFlags: 2284, quantity: 1000, name: 'HP Recovery potion (X-large)' }],
+    itemMall: { ...f.World.gp.itemMall, revision: 2, silk: 118 } });
+  f.MallBuyer.tick();
+  assert.equal(f.MallBuyer.spentSilk, 82);
+  f.bus.emit('phase', 'loading'); // a recall / reverse scroll / town trip leaves the world
+  assert.equal(f.MallBuyer.spentSilk, 82, 'a world transition keeps what was spent');
+  f.bus.emit('hunt', true);
+  assert.equal(f.MallBuyer.spentSilk, 0, 'a fresh bot run gets a fresh budget');
+  const g = mallFixture();
+  g.Hunt.start(); g.MallBuyer.tick(); assert.equal(mallBuys(g).length, 1);
+  g.advance(10000); g.MallBuyer.tick();
+  assert.equal(g.MallBuyer.poison, true);
+  assert.equal(g.MallBuyer.spentSilk, 82, 'an unconfirmed order may have been delivered: it counts against the budget');
+});
+test('a quest visit restarting the hunt keeps the mall silk budget; a user start clears it', () => {
+  const f = mallFixture();
+  f.Hunt.start(); f.MallBuyer.spentSilk = 82;
+  f.Hunt.stop('visiting a quest NPC'); f.Quest.resumeHunt();
+  assert.ok(f.Hunt.running, 'the visit resumes hunting');
+  assert.equal(f.MallBuyer.spentSilk, 82, 'the same bot run keeps what it spent');
+  f.Hunt.stop(); f.Hunt.start();
+  assert.equal(f.MallBuyer.spentSilk, 0, 'a user-started run gets a fresh budget');
+});
+test('the hunting spot follows the character level and walks to the new spot', () => {
+  const f = mallFixture();
+  const here = f.Settings.profile.hunt.center = { regionId: 1, x: 100, y: 0, z: 100 };
+  assert.equal(f.LevelSpot.add(10), '', 'the current spot is saved for level 10');
+  f.Settings.profile.hunt.center = { regionId: 1, x: 5000, y: 0, z: 5000 };
+  assert.equal(f.LevelSpot.add(20), '');
+  assert.match(f.LevelSpot.add(0), /level/, 'a bad level is refused');
+  f.Settings.profile.hunt.center = { ...here };
+  f.Settings.profile.hunt.levelSpots.on = true;
+  f.Hunt.start();
+  f.World.gp.progression = { ...(f.World.gp.progression || {}), level: 25 };
+  f.advance(4000);
+  assert.equal(f.LevelSpot.tick(), true, 'level 25 uses the level 20 spot');
+  assert.equal(f.Settings.profile.hunt.center.x, 5000);
+  f.advance(4000);
+  assert.equal(f.LevelSpot.tick(), false, 'already there: nothing changes');
+  f.Settings.profile.hunt.levelSpots.on = false;
+  f.Settings.profile.hunt.center = { ...here };
+  f.advance(4000);
+  assert.equal(f.LevelSpot.tick(), false, 'off by default: never moves the spot');
+  assert.equal(f.Settings.profile.hunt.center.x, 100);
+  f.Settings.profile.hunt.levelSpots.on = true; f.Hunt.stop();
+  f.advance(4000);
+  assert.equal(f.LevelSpot.tick(), false, 'only while hunting');
+});
+test('icon paths accept names with or without the .ddj extension (setup checklist icons were blank)', () => {
+  const f = fixture(), base = '/assets/images/Media_extracted/icon/';
+  assert.equal(f.Icons.iconPath('action\\icon_cha_helper.ddj'), base + 'action/icon_cha_helper.png');
+  assert.equal(f.Icons.iconPath('action\\icon_cha_helper'), base + 'action/icon_cha_helper.png', 'no extension');
+  assert.equal(f.Icons.iconPath('item\\etc\\mall_return_scroll'), base + 'item/etc/mall_return_scroll.png');
+  assert.equal(f.Icons.iconPath('action/a.png'), base + 'action/a.png', 'png is left alone');
+  assert.equal(f.Icons.iconPath('../x'), '', 'traversal is still refused');
+});
 test('an order never races an in-flight inventory transaction (live regression)', () => {
   // Live: the scroll buff's item-use and the mall order went out in the same second; the worker silently
   // refuses mall commands inside an inventory transaction and the unconfirmed order looked like a poison.
@@ -6455,6 +6543,16 @@ test('the wait status box keeps one height for short and long text, so the panel
   assert.doesNotMatch(css, /\.waiting\{[^}]*min-height/, 'a minimum height still lets long text grow the box');
   assert.match(ui, /waitNote\.title = /, 'the full text stays readable in the tooltip');
 });
+test('the window fits the screen: the pane gives way instead of a guessed max-height cutting the bottom off', () => {
+  const fs = require('fs'), css = fs.readFileSync(__dirname + '/lean-skin.css', 'utf8'), ui = fs.readFileSync(__dirname + '/lean-ui.js', 'utf8');
+  assert.match(css, /:host\{[^}]*max-height:calc\(100vh - \d+px\)/, 'the host itself never grows past the viewport');
+  assert.doesNotMatch(css, /clamp\(2\d\dpx,calc\(100vh/, 'no viewport-derived guess for the pane height anywhere');
+  assert.match(css, /(^|\n)\.pane\{[^}]*flex:1 1 auto;[^}]*min-height:\d+px/, 'the scrolling pane is the part that shrinks');
+  assert.match(css, /\.panel:not\(\.dialog\)\{[^}]*flex-direction:column/, 'the panel lays out as one column that can be capped');
+  assert.match(css, /\.panel:not\(\.dialog\)>\.body\{[^}]*flex-direction:column/, 'the main body is the flexible column; dialog bodies are not');
+  assert.match(ui, /fitPanel\(\)\s*\{/, 'the cap is computed from the real window position');
+  assert.match(ui, /restorePanel\(\)[\s\S]{0,600}fitPanel/, 'and recomputed when the window is restored or moved');
+});
 test('buff gear says why a due buff is not being swapped in, instead of staying silent', () => {
   const f = buffGearFixture(), gp = f.World.gp;
   gp.inventory = gp.inventory.filter(i => i.slot !== 15);
@@ -7285,14 +7383,14 @@ function stallBag(f) {
   f.World.gp.inventory.push({ slot: 14, refObjId: 63, quantity: 4, typeFlags: 0x56c, name: 'Element', tooltip: { fields: { canSell: 1 } } });
 }
 // Applies the game's answer to the last command; refuse one add bagSlot by simply not answering it.
-function stallRespond(f, { ignoreAdd = -1 } = {}) {
+function stallRespond(f, { ignoreAdd = -1, ignoreOpen = false } = {}) {
   const c = f.commands.at(-1), stall = f.World.gp.stall;
   if (!c || c.__done) return;
   c.__done = true;
   if (c.kind === 'stall-name') f.World.gp.stall = { phase: 'naming', namingSequence: 1, owner: 0, title: '', greeting: '', savedGreeting: '', open: false, mode: 0, networkRegistered: false, offers: [], visitors: [], network: { open: false, rows: [], pages: 0, page: 0, category: 0, buying: null } };
   else if (c.kind === 'stall-create') { stall.phase = 'owner'; stall.owner = f.World.gp.localGid; stall.title = c.title; }
   else if (c.kind === 'stall-add') { if (c.bagSlot !== ignoreAdd) stall.offers.push({ slot: c.slot, bagSlot: c.bagSlot, quantity: c.quantity, price: c.price, item: { refObjId: c.bagSlot === 13 ? 62 : 63, name: c.bagSlot === 13 ? 'Lucky Powder' : 'Element', quantity: c.quantity } }); }
-  else if (c.kind === 'stall-open') stall.open = true;
+  else if (c.kind === 'stall-open') { if (!ignoreOpen) stall.open = true; }
   else if (c.kind === 'stall-close') f.World.gp.stall = undefined;
 }
 function stallDrive(f, ticks, options) {
@@ -7324,6 +7422,16 @@ test('the stall names, creates, registers each priced stack at its price and ope
   assert.deepEqual(f.World.gp.stall.offers.map(o => [o.slot, o.bagSlot, o.quantity, o.price]), [[1, 13, 20, 150], [2, 14, 4, 4000]]);
   assert.deepEqual(f.commands.map(c => c.kind), ['stall-name', 'stall-create', 'stall-add', 'stall-add', 'stall-open']);
   assert.equal(f.Stall.message.includes('2 offers'), true, f.Stall.message);
+});
+test('the stall presses Enter to answer the game prompt when opening for business is not confirmed', () => {
+  const f = stallFixture(); stallBag(f);
+  f.Settings.profile.stall.prices = { 62: 150 };
+  const keys = [], press = f.Stall.pressOk;
+  f.Stall.pressOk = function () { keys.push(1); return true; };
+  f.Stall.start();
+  for (let i = 0; i < 30 && f.Stall.run; i++) { f.advance(400); f.Controller.tick(); stallRespond(f, { ignoreOpen: true }); }
+  assert.ok(keys.length >= 2, 'Enter pressed while the open step waits; presses: ' + keys.length + ' ' + f.Stall.message);
+  f.Stall.pressOk = press;
 });
 test('a sale counts only when the offer disappears and gold rises; the stall then closes when empty', () => {
   const f = stallFixture(); stallBag(f);
@@ -7725,6 +7833,20 @@ const qDialog = (f, dialogue, gid = 901) => {
 const qMenu = f => { f.World.gp = { ...f.World.gp, npcConversation: { phase: 'menu', gid: 901, dialogueRevision: 0 } }; };
 const qSent = (f, kind) => f.commands.filter(c => c.kind === kind);
 
+test('a quest bot with nothing to do says why instead of staying silent', () => {
+  let f = questFixture();
+  f.Quest.observe();
+  assert.match(f.Quest.status(), /no quest markers/);
+  f = questFixture({ markers: [qMarker(7, 2)] });
+  f.Quest.observe();
+  assert.match(f.Quest.status(), /none open/);
+  f = questFixture({ markers: [qMarker(7, 1, 9)] });
+  f.Quest.observe();
+  assert.match(f.Quest.status(), /no usable NPC position/);
+  f.Settings.profile.quest.on = false;
+  f.Quest.observe();
+  assert.equal(f.Quest.status(), '', 'off means no status');
+});
 test('a ready kind-2 quest is rewarded with the quest window command, once', () => {
   const f = questFixture({ quests: [qRecord(512, { contents: [{ tag: 1, kind: 0, description: 'SN_CON_Q', objectiveSentinel: false, objectiveValues: [20] }] })] });
   f.Quest.observe();
@@ -7795,6 +7917,42 @@ test('an offered quest is accepted at its NPC end to end, and the codename is le
   assert.equal(f.Quest.trip, null);
 });
 
+function questData(f, rows) {
+  const Q = f.QuestData;
+  for (const [refId, level, token, npc] of rows) {
+    Q.quests.set(refId, { refId, level, key: 'SN_' + token, token, title: 'Quest ' + refId, npcCode: 'NPC_' + npc });
+    Q.npcs.set('NPC_' + npc, { refObjId: 900, regionId: 1, x: 110, y: 0, z: 100 });
+  }
+  Q.loaded = true;
+}
+test('a quest ticked on the list is accepted from the game data with no marker, lowest level first', () => {
+  const f = questFixture();
+  questData(f, [[600, 5, 'QNO_CH_A_1', 'CH_A'], [601, 1, 'QNO_CH_B_1', 'CH_B']]);
+  f.World.gp.progression = { ...(f.World.gp.progression || {}), level: 3 };
+  f.Settings.profile.quest.picked = [600, 601];
+  f.Quest.observe();
+  assert.equal(f.Quest.trip?.refId, 601, 'the level-1 quest comes first; the level-5 one is above the character');
+  assert.equal(f.Quest.trip.intent, 'accept');
+  assert.equal(f.Quest.token(601), 'QNO_CH_B_1', 'the codename comes from the data, not from learning');
+  f.Quest.tick(); f.World.gp = { ...f.World.gp, target: 901, targetPending: false, targetCapabilities: 2 };
+  qMenu(f); f.Quest.tick(); f.advance(1300); f.Quest.tick();
+  qDialog(f, { kind: 4, prompt: 'SN_TALK_MENU', options: [{ choice: 5, symbol: 'SN_CON_QNO_CH_A_1' }, { choice: 6, symbol: 'SN_CON_QNO_CH_B_1' }] });
+  f.Quest.tick(); f.Quest.tick();
+  assert.ok(qSent(f, 'npc-choice').some(c => c.choice === 6), 'its own row is chosen, not the other one');
+});
+test('picked quests that cannot run say why', () => {
+  const f = questFixture();
+  questData(f, [[600, 50, 'QNO_CH_A_1', 'CH_A']]);
+  f.World.gp.progression = { ...(f.World.gp.progression || {}), level: 3 };
+  f.Settings.profile.quest.picked = [600];
+  f.Quest.observe();
+  assert.equal(f.Quest.trip, null);
+  assert.match(f.Quest.status(), /above your level/);
+});
+test('a journal target list is hunted first', () => {
+  const f = questFixture({ quests: [qRecord(512, { targetIds: [77, 78] })] });
+  assert.deepEqual([...f.Quest.preferred()].sort(), [77, 78]);
+});
 test('a turn-in completes through its learned row; a report never guesses between unknown rows', () => {
   const f = questFixture({ quests: [qRecord(512, { u10: 1, contents: [{ tag: 1, kind: 0, description: 'SN_CON_Q', objectiveSentinel: false, objectiveValues: [20] }] })] });
   f.Settings.profile.quest.learned = { QNO_TEST_1: 512 };

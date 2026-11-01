@@ -163,7 +163,7 @@ const UI = {
   group(title, ...children) { const b = el('fieldset'); b.append(el('legend', title), ...children); return b; },
   toggleVisibility() {
     const host = this.root?.host;
-    if (host) host.hidden = !host.hidden;
+    if (host) { host.hidden = !host.hidden; this.fitPanel(); }
   },
   toggleMinimised() {
     const host = this.root?.host;
@@ -216,8 +216,8 @@ const UI = {
     this.panel = panel;
     this.tip = el('div', null, 'skill-tip'); this.tip.hidden = true; this.root.append(this.tip);
     // The panel's spot is remembered across reloads (global, like the minimised icon's).
-    this.dragBy(header, host, () => { if (host.style.left) this.uiPrefs({ panel: { x: host.offsetLeft, y: host.offsetTop } }); });
-    W.addEventListener('resize', () => { this.applyClassic(); this.fitWindow(this.reportBox); this.fitWindow(this.notesBox); this.fitWindow(this.sessionBox); this.fitWindow(this.activityExportBox); if (this.minimised) this.placeOrb(host.offsetLeft, host.offsetTop); else if (host.style.left) this.fitWindow(host); });
+    this.dragBy(header, host, () => { if (host.style.left) this.uiPrefs({ panel: { x: host.offsetLeft, y: host.offsetTop } }); this.fitPanel(); });
+    W.addEventListener('resize', () => { this.fitPanel(); this.applyClassic(); this.fitWindow(this.reportBox); this.fitWindow(this.notesBox); this.fitWindow(this.sessionBox); this.fitWindow(this.activityExportBox); if (this.minimised) this.placeOrb(host.offsetLeft, host.offsetTop); else if (host.style.left) this.fitWindow(host); });
     this.setWide(!!this.uiPrefs().wide && !this.uiPrefs().classic, false); this.applyClassic();
     this.draw(); this.update();
     this.restorePanel();
@@ -386,12 +386,20 @@ const UI = {
     orb.addEventListener('pointerenter', () => { if (this.orbAlert) setTimeout(() => { this.orbAlert = ''; this.updateOrb(); }, 2500); });
     return orb;
   },
+  // Keep the window inside the screen: the pane shrinks (it scrolls); the rows below it never get cut off.
+  // The CSS cap covers the default top-right spot; this refines it for wherever the window was moved.
+  // Skipped while hidden (Shift+F7): a hidden host reports offsetTop 0, which would loosen the cap.
+  fitPanel() {
+    const host = this.root?.host;
+    if (!host || this.minimised || host.hidden || !W.innerHeight) return;
+    host.style.maxHeight = Math.max(300, W.innerHeight - host.offsetTop - 8) + 'px';
+  },
   // Put the panel at its saved spot, kept on screen; without one it uses the default top-right position.
   restorePanel() {
     const host = this.root.host, saved = this.uiPrefs().panel;
     if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
-      host.style.right = 'auto'; host.style.left = saved.x + 'px'; host.style.top = saved.y + 'px'; this.fitWindow(host);
-    } else { host.style.left = ''; host.style.top = ''; host.style.right = ''; }
+      host.style.right = 'auto'; host.style.left = saved.x + 'px'; host.style.top = saved.y + 'px'; this.fitPanel(); this.fitWindow(host);
+    } else { host.style.left = ''; host.style.top = ''; host.style.right = ''; this.fitPanel(); }
   },
   placeOrb(x, y) {
     const host = this.root.host;
@@ -560,7 +568,7 @@ const UI = {
     } else if (this.current === 'Town') {
       this.sections('townTrip', 'townWhen', 'townCycle', 'townAmmo');
     } else if (this.current === 'Quest') {
-      this.sections('questAuto', 'questJournal');
+      this.sections('questAuto', 'questPick', 'questJournal');
     } else if (this.current === 'Party') {
       this.sections('partyMembers', 'partyHeal', 'partyBuffs', 'partyParty', 'partyTrace');
     } else if (this.current === 'Items') {
@@ -604,7 +612,7 @@ const UI = {
         ['partyMembers', 'Current party'], ['partyParty', 'Party settings'], ['partyHeal']] },
       { name: 'Player buffing', icon: 'action\\icon_cha_party', pages: ['Party'], sections: [['partyBuffs', 'Player buffing']] },
       { name: 'Team', icon: 'action\\icon_cha_party', pages: ['Team'], sections: [['teamRelay', 'Team relay']] },
-      { name: 'Quest', icon: 'action\\icon_cha_camp', pages: ['Quest'], sections: [['questAuto', 'Auto quest settings'], ['questJournal']] },
+      { name: 'Quest', icon: 'action\\icon_cha_camp', pages: ['Quest'], sections: [['questAuto', 'Auto quest settings'], ['questPick', 'Quests to do'], ['questJournal']] },
       { name: 'Auto alchemy', icon: 'action\\icon_cha_alchemy', pages: ['Alchemy'], draw() { Alchemy.draw(); } },
       { name: 'Stall', icon: 'action\\icon_cha_shop', pages: ['Stall'], draw() { Stall.draw(); } },
       { name: 'Extra', icon: 'action\\icon_cha_helper', pages: ['Settings'], sections: [
@@ -651,7 +659,7 @@ const UI = {
   buildNav() {
     this.nav.replaceChildren();
     const icons = { Items: 'action\\cos_cmd_inventory', Party: 'action\\icon_cha_party', Combat: 'action\\icon_cha_auto_attack', Loot: 'action\\icon_cha_autoget', Supplies: 'action\\icon_cha_recovery', Town: 'item\\etc\\mall_return_scroll', Quest: 'action\\icon_cha_camp',
-      Alchemy: 'action\\icon_cha_alchemy', Trade: 'action\\icon_cha_shop', Wardrobe: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper', Setup: 'action\\icon_cha_camp' };
+      Alchemy: 'action\\icon_cha_alchemy', Trade: 'action\\icon_cha_shop', Wardrobe: 'action\\icon_cha_shop', Stall: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper', Setup: 'action\\icon_cha_camp' };
     const entries = this.classic ? this.classicTabs().map(t => ({ name: t.name, icon: t.icon, open: () => { this.ctab = t.name; this.draw(); } }))
       : ['Setup', 'Map', 'Combat', 'Party', 'Team', 'Loot', 'Items', 'Supplies', 'Town', 'Quest', 'Stall', 'Alchemy', 'Trade', 'Wardrobe', 'Settings'].map(name => ({ name, icon: icons[name], open: () => { this.current = name; this.draw(); } }));
     // Page icons are the game's own action-bar icons; they show only in the wide and classic windows' page lists.
@@ -800,7 +808,7 @@ const UI = {
         this.number('Retries after first attempt', () => L().retries, v => L().retries = v, 0, 3),
         this.text('Always include names', () => L().include, v => L().include = v),
         this.text('Exclude names', () => L().exclude, v => L().exclude = v),
-        el('p', 'Pets collect during combat regardless of the finish-fight setting, which applies to the character only. Inventory transactions and potion priority can briefly delay pet requests. Equipment: only SoX takes Star, Moon and Sun gear and leaves plain equipment, even when Equipment or an Always include name matches it; other items follow their own switches. It needs the item catalogue, which loads automatically. Presets clear Always include names; exclusions still apply. Other items excludes the separate categories above. Ownership and bag capacity always apply. Failed pickups use a backoff.', 'muted'));
+        el('p', 'Pets collect during combat regardless of the finish-fight setting, which applies to the character only. Inventory transactions and potion priority can briefly delay pet requests. Equipment: only SoX takes Star, Moon and Sun gear and leaves plain equipment, even when Equipment or an Always include name matches it; other items follow their own switches. It needs the item catalogue, which loads automatically. When several drops are eligible, Star, Moon and Sun gear is collected first (Sun before Moon before Star) whatever the distance; without the catalogue the nearest drop goes first. Presets clear Always include names; exclusions still apply. Other items excludes the separate categories above. Ownership and bag capacity always apply. Failed pickups use a backoff.', 'muted'));
       host.append(options);
   },
   section_lootWho(host) {
@@ -988,12 +996,39 @@ const UI = {
   },
   section_questAuto(host) {
     const Q = () => Settings.profile.quest;
+    const state = el('p', null, 'muted');
+    const show = () => { state.textContent = Q().on ? 'Auto quests are on. ' + (Quest.status() || 'Looking for a quest.') : 'Auto quests are stopped. Press Start quests.'; };
+    show(); this.refreshers.push(show);
     host.append(this.group('Auto quests',
-      this.check('Do quests automatically', () => Q().on, v => Q().on = v),
+      this.row(this.button('Start quests', () => { Q().on = true; Settings.saveProfile(); this.toast('Auto quests started.', 'info', 3000); this.draw(); }),
+        this.button('Stop quests', () => { Q().on = false; Settings.saveProfile(); this.toast('Auto quests stopped.', 'info', 3000); this.draw(); })),
+      state,
       this.check('Accept quests their NPC offers', () => Q().accept, v => Q().accept = v),
       this.text('Only quests named', () => Q().include, v => Q().include = v, 'comma-separated QNO_ codenames'),
       this.text('Never quests named', () => Q().exclude, v => Q().exclude = v, 'comma-separated QNO_ codenames'),
       el('p', 'The quest markers the game itself sends route the bot: it walks to the quest NPC, takes the quest, hunts the monsters whose kills advance it and turns it in. Quests the reward window can close are rewarded without walking. Which dialogue row is which quest, and which monsters count, are learned while playing.', 'muted')));
+  },
+  // The quest list, like phBot's: tick the quests to do. The bot takes them lowest level first at the NPC named in
+  // each quest's codename. With nothing ticked it falls back to the quests the game's own markers offer.
+  section_questPick(host) {
+    const Q = () => Settings.profile.quest;
+    if (!QuestData.pending) QuestData.ready();
+    if (!QuestData.loaded) {
+      host.append(this.group('Quests to do', el('p', QuestData.failed ? 'The quest list could not be loaded. Reload the game and try again.' : 'Loading the quest list…', 'muted')));
+      return;
+    }
+    const level = World.gp?.progression?.level ?? 0, find = (this.questFind || '').toLowerCase().trim();
+    const set = (refId, on) => { const list = new Set(Q().picked || []); on ? list.add(refId) : list.delete(refId); Q().picked = [...list]; Settings.saveProfile(); };
+    const all = QuestData.list().filter(q => (this.questHigh || !level || q.level <= level) && (!find || (q.title + ' ' + q.token).toLowerCase().includes(find)));
+    const shown = all.slice(0, 80);
+    host.append(this.group('Quests to do',
+      this.text('Find a quest', () => this.questFind || '', v => { this.questFind = v; this.draw(); }, 'part of the name'),
+      this.check('Show quests above my level', () => !!this.questHigh, v => { this.questHigh = v; this.draw(); }),
+      this.row(this.button('Pick all shown', () => { const list = new Set(Q().picked || []); for (const q of shown) list.add(q.refId); Q().picked = [...list]; Settings.saveProfile(); this.draw(); }),
+        this.button('Clear picks', () => { Q().picked = []; Settings.saveProfile(); this.draw(); })),
+      el('p', (Q().picked || []).length + ' picked. ' + (all.length > shown.length ? 'Showing the first ' + shown.length + ' of ' + all.length + '; use Find to narrow the list.' : all.length + ' shown.'), 'muted'),
+      ...shown.map(q => this.check('Lv ' + q.level + ' · ' + (q.title || q.token), () => (Q().picked || []).includes(q.refId), v => set(q.refId, v))),
+      el('p', 'Picked quests are done lowest level first: the bot walks to the NPC, takes the quest, hunts what the quest counts and turns it in. Only quests whose NPC the game data names are listed. Quests too far away or above your level wait.', 'muted')));
   },
   section_questJournal(host) {
     const Q = () => Settings.profile.quest;

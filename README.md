@@ -2,7 +2,9 @@
 
 OpenSRO bot: hunting, potions, pet loot and automatic town trips, plus an optional **team layer**: your characters share what they see through your own WebSocket relay (live monster and player intel on the map, a unique tracker with respawn windows, shared drops) and coordinate (assist, synchronized town trips, deterministic resurrection, a fleet console). Upstream lean bot by 100; team edition in this fork.
 
-**[Install](https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.user.js)** with Violentmonkey (disable any other OpenSRO bot), then reload the game. It checks for updates itself.
+**[Install](https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.user.js)** with Violentmonkey or Tampermonkey (disable any other OpenSRO bot), then reload the game. It checks for updates itself.
+
+**Safari (macOS):** Violentmonkey has no Safari version. Install the free [Userscripts](https://apps.apple.com/app/userscripts/id1463298887) app (or Tampermonkey for Safari), enable it under Safari > Settings > Extensions, then open the install link above. Safari support is untested: keep the game tab visible, because Safari throttles background tabs and the bot can stall. Needs Safari 15.4 or later. iPhone and iPad are not supported, since iOS suspends the page when you leave Safari.
 
 ## Start
 
