@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.7.3
+// @version      1.8.0
 // @updateURL    https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking, walk-back and an optional team relay in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.7.3';
+const VERSION = '1.8.0';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -195,6 +195,9 @@ const DEFAULT_PROFILE = {
     // Attribute percentages: the lowest variance value (0 to 31) wanted per NATTR_ name, 0 or missing = leave it alone.
     attr: { targets: {}, limit: 100 } },
   statPoints: { enabled: false, str: 1, int: 0, reserve: 0 },
+  // Auto Quest: learned tokens bind a quest codename (QNO_...) to its refId, and learned targets
+  // name the monster types whose kills advance each refId. Both fill themselves while playing.
+  quest: { on: false, accept: true, include: '', exclude: '', skip: [], learned: {}, targets: {} },
   trade: { from: 'CH', to: 'WC', trips: 1, potions: true, goods: 0 },
   trace: { enabled: false, name: '', distance: 12, fight: true },
   mastery: { enabled: false, ids: [], gap: 0, skills: false, scope: 'rotation', reserve: 0, order: 'masteries' },
@@ -251,7 +254,7 @@ const DEFAULT_PROFILE = {
 function botProfile(input) {
   const result = deepMerge(DEFAULT_PROFILE, {});
   if (!input || typeof input !== 'object') return result;
-  for (const key of ['macro', 'potion', 'hunt', 'lure', 'pet', 'scroll', 'mall', 'wardrobe', 'party', 'team', 'alchemy', 'mastery', 'statPoints', 'trace', 'items', 'trade', 'stall']) {
+  for (const key of ['macro', 'potion', 'hunt', 'lure', 'pet', 'scroll', 'mall', 'wardrobe', 'party', 'team', 'alchemy', 'mastery', 'statPoints', 'trace', 'items', 'trade', 'stall', 'quest']) {
     if (!input[key] || typeof input[key] !== 'object') continue;
     for (const field of Object.keys(DEFAULT_PROFILE[key])) {
       if (field in input[key]) result[key][field] = deepMerge(DEFAULT_PROFILE[key][field], input[key][field]);
@@ -8024,6 +8027,368 @@ const Town = {
 };
 
 
+// Auto Quest. The game's own quest markers route every step: a marker names the quest (refId), the
+// NPC (gid, region and position) and its state (1 offered, 2 in progress, 3 ready to report). The
+// journal the server maintains (gp.quests) tells kinds and counts: a contents node with kind 0 has
+// reached its count, and u10 is the quest's kind byte, where 2 opens the reward window. NPC talks
+// run through the game's conversation state (gp.npcConversation): a kind-4 dialogue lists the quest
+// rows, the chosen row's confirmation is a kind-3 Yes/No, and every answer comes back as a kind-1
+// symbol line. A ready kind-2 quest is rewarded with the quest window's own quest-reward command
+// without walking; every other quest is accepted and turned in at its NPC. Which dialogue row
+// belongs to which quest is learned, not looked up: a row symbol carries the quest codename token
+// (QNO_...), and the first acceptance binds that token to the refId the journal gains. Monster
+// kills that advance a quest are learned the same way, and those monsters are hunted first while
+// the quest is active.
+const QUEST_REACH = 25;          // the game talks to an NPC within this reach
+const QUEST_FIND = 300;          // the marker's NPC stands within this of its marker position
+const QUEST_STEP_MS = 15000;     // selecting, the menu, a row choice and its confirmation
+const QUEST_SETTLE_MS = 2500;    // after Yes: the journal may trail the answer line a little
+const QUEST_REWARD_BACKOFF_MS = 60000;
+const QUEST_REWARD_TRIES = 2;    // after this many refusals the reward waits for its NPC instead
+const QUEST_VISIT_BACKOFF_MS = 600000;  // a failed NPC visit is not tried again for this long
+const QUEST_WALK_MS = 300000;    // the walk to the NPC owns its own caps; this is only the ceiling
+const QUEST_LEARN_MS = 8000;     // a kill within this of a journal advance names a quest target
+const QUEST_SKIP_MS = 600000;    // a dialogue row that answered with a plain line is left alone this long
+
+// The marker wire row is [u32 refId][u8 flags][u8 state][u16 region][i16 x][i16 y][i16 z][u32 npcGid];
+// the client decode hands us the bytes, so the position is reassembled here.
+function questMarkerPose(m) {
+  if (!Array.isArray(m?.tail6) || !Number.isInteger(m.word)) return null;
+  const point = i => { const v = (m.tail6[i] | 0) | ((m.tail6[i + 1] | 0) << 8); return v >= 0x8000 ? v - 0x10000 : v; };
+  return { regionId: m.word, x: point(0), y: point(2), z: point(4) };
+}
+// An SN_TALK line carries the codename plus a line suffix (quest QNO_..._1, line _01); a title row
+// (SN_CON_...) has no suffix. The same symbol always yields the same token, so binding and
+// matching stay consistent.
+function questToken(symbol) {
+  const s = String(symbol || ''), hit = /QNO_[A-Z0-9_]+/.exec(s);
+  if (!hit) return '';
+  return s.startsWith('SN_TALK_') ? hit[0].replace(/_[0-9]{1,2}$/, '') : hit[0];
+}
+
+const Quest = {
+  trip: null, message: '', progressSeq: 0, kills: [], rewardSent: null,
+  refused: new Map(),      // refId -> { count, at }: refused quest-reward commands
+  visitFail: new Map(),    // refId -> at: a failed NPC visit waits this quest out
+  rows: new Map(),         // dialogue row symbol -> skip-until timestamp
+  cfg() { return Settings.profile.quest; },
+  on() { return !!this.cfg().on; },
+  markers() { return World.gp?.questMarkers || []; },
+  marker(refId) { return this.markers().find(m => m.refId === refId) || null; },
+  journal() { return World.gp?.quests || []; },
+  record(refId) { return this.journal().find(r => r.refId === refId) || null; },
+  completed(refId) { return (World.gp?.completedQuests || []).includes(refId); },
+  token(refId) {
+    const learned = this.cfg().learned || {};
+    return Object.keys(learned).find(t => learned[t] === refId) || '';
+  },
+  label(p) { return this.token(p.refId) || 'quest #' + p.refId; },
+  // Codename include/exclude patterns, like the hunt name lists but case-sensitive: QNO_ tokens are
+  // codenames, not display names. An unknown quest is wanted: without a learned token there is
+  // nothing to match against.
+  wanted(refId) {
+    const c = this.cfg(), token = this.token(refId);
+    if (!token) return true;
+    const list = value => String(value || '').split(',').map(s => s.trim()).filter(Boolean);
+    const inc = list(c.include), exc = list(c.exclude);
+    if (inc.length && !inc.some(s => token.includes(s))) return false;
+    if (exc.some(s => token.includes(s))) return false;
+    return true;
+  },
+  blocked() {
+    if (Town.trip) return 'a town trip is running';
+    if (Restock.trip || Restock.recording || Restock.activeShop()) return 'shopping is running';
+    if (World.gp?.storage) return 'the storage is open';
+    if (Stall.run || Trade.run) return 'a town session is running';
+    if (Alchemy.run || Alchemy.pending) return 'alchemy is running';
+    if (BuffGear.run || BuffGear.recovery) return 'a buff gear swap is running';
+    if (WalkBack.active || Travel.active) return 'a walk is running';
+    if (Resurrect.trip) return 'a resurrect trip is running';
+    if (World.gp?.inventoryPending) return 'the inventory is busy';
+    if (now() - Manual.lastAt < Hunt.cfg().manualPauseS * 1000) return 'manual control is recent';
+    return '';
+  },
+  // Report an active quest before accepting a new one, and the quest window's own reward command
+  // before a walk. Delivery and talk quests report at their NPC even without a counter.
+  plan() {
+    const skip = this.cfg().skip || [];
+    const cooled = refId => { const at = this.visitFail.get(refId); return at === undefined || now() - at >= QUEST_VISIT_BACKOFF_MS; };
+    for (const r of this.journal()) {
+      if (skip.includes(r.refId) || this.completed(r.refId) || !this.wanted(r.refId)) continue;
+      const marker = this.marker(r.refId);
+      if (r.contents?.[0]?.kind !== 0 && marker?.valueA !== 3) continue;
+      const refusals = this.refused.get(r.refId);
+      if (r.u10 === 2 && (refusals?.count || 0) < QUEST_REWARD_TRIES) return { intent: 'reward', refId: r.refId, record: r, marker };
+      const npc = cooled(r.refId) ? this.npcRoute(marker) : null;
+      if (npc) return { intent: 'report', refId: r.refId, marker, npc };
+    }
+    if (!this.cfg().accept) return null;
+    for (const m of this.markers()) {
+      if (m.valueA !== 1 || this.record(m.refId) || this.completed(m.refId) || skip.includes(m.refId)) continue;
+      if (!this.wanted(m.refId) || !cooled(m.refId)) continue;
+      const npc = this.npcRoute(m);
+      if (npc) return { intent: 'accept', refId: m.refId, marker: m, npc };
+    }
+    return null;
+  },
+  // Same-region NPCs only: an adjacent region's marker position is a world-grid planar distance
+  // away, and v1 leaves cross-region quest routes to a later travel plan.
+  npcRoute(marker) {
+    const pose = marker && questMarkerPose(marker), here = World.pose();
+    if (!pose || !here || pose.regionId !== here.regionId) return null;
+    return { gid: marker.flags & 2 ? marker.optional : 0, pose };
+  },
+  // Observation runs every tick beside hunting: journal watching, the direct reward command, and
+  // starting NPC trips when nothing else owns the character.
+  observe() {
+    if (!this.on() || this.trip || !World.inWorld() || World.isDead()) return;
+    // A reward whose answer never came counts as a refusal: after two the NPC route takes over,
+    // so a wedged transaction (the worker's single quest slot never clearing) cannot stall the
+    // quest forever.
+    if (this.rewardSent && now() - this.rewardSent.at > 10000) {
+      const refId = this.rewardSent.refId;
+      this.rewardSent = null;
+      this.refused.set(refId, { count: (this.refused.get(refId)?.count || 0) + 1, at: now() });
+      Log.warn('Quest: the reward of ' + this.label({ refId }) + ' was never answered; ' +
+        ((this.refused.get(refId)?.count || 0) >= QUEST_REWARD_TRIES ? 'waiting for its NPC instead.' : 'trying again in a minute.'));
+    }
+    const p = this.plan();
+    if (!p) return;
+    if (p.intent === 'reward') { this.sendReward(p); return; }
+    if (this.blocked()) return;
+    this.begin(p);
+  },
+  // The quest window's own reward command needs no NPC: one send, then the journal answers. Only
+  // one reward is outstanding at a time, and a refusal is never retried at once.
+  sendReward(p) {
+    if (this.rewardSent) return;
+    const back = this.refused.get(p.refId);
+    if (back && now() - back.at < QUEST_REWARD_BACKOFF_MS) return;
+    if (World.gp?.questPending) return;
+    if (!Cmd.spaced('quest-reward') || !Cmd.raw({ kind: 'quest-reward', refId: p.refId }, 'Quest: claim the reward of ' + this.label(p))) return;
+    this.rewardSent = { refId: p.refId, at: now(), revision: World.gp?.revision ?? 0 };
+    this.message = 'Quest: claiming the reward of ' + this.label(p) + '.';
+    Log.info(this.message);
+  },
+  // Journal watching on every gameplay push: settle the direct reward, and learn which monsters
+  // advance which quest from the journal's own sequenced progress events.
+  watch(gp) {
+    if (this.rewardSent && gp) {
+      const refId = this.rewardSent.refId;
+      const stillThere = (gp.quests || []).some(r => r.refId === refId);
+      if (gp.questPending === refId) this.rewardSent.seenPending = true;
+      if (!stillThere || (gp.completedQuests || []).includes(refId)) {
+        this.refused.delete(refId);
+        this.rewardSent = null;
+        this.message = 'Quest: ' + this.label({ refId }) + ' completed.';
+        Log.info(this.message); UI.toast(this.message, 'info', 4000);
+      } else if ((gp.revision ?? 0) > this.rewardSent.revision && !gp.questPending &&
+          (this.rewardSent.seenPending || now() - this.rewardSent.at > 4000)) {
+        // The pending transaction was released without a journal change: the server refused. The
+        // seen-pending gate keeps a slow push from being misread as the refusal.
+        const back = this.refused.get(refId);
+        this.refused.set(refId, { count: (back?.count || 0) + 1, at: now() });
+        this.rewardSent = null;
+        this.message = 'Quest: the reward of ' + this.label({ refId }) + ' was refused' +
+          ((this.refused.get(refId)?.count || 0) >= QUEST_REWARD_TRIES ? '; waiting for its NPC instead.' : '; trying again in a minute.');
+        Log.warn(this.message);
+      }
+    }
+    for (const e of gp?.questProgress || []) {
+      if (!Number.isInteger(e.sequence) || e.sequence <= this.progressSeq) continue;
+      this.progressSeq = e.sequence;
+      const before = e.before?.objectiveValues?.[0] ?? 0, after = e.after?.objectiveValues?.[0] ?? 0;
+      if (after <= before) continue;
+      // Kills only advance a counter while hunting; a collection can also grow from a pickup, but
+      // the refObjIds learned that way are still what the quest wants more of.
+      const recent = this.kills.filter(k => now() - k.at <= QUEST_LEARN_MS).map(k => k.ref);
+      if (!recent.length) continue;
+      const targets = new Set([...((this.cfg().targets || {})[e.refId] || []), ...recent]);
+      this.cfg().targets = { ...(this.cfg().targets || {}), [e.refId]: [...targets].slice(0, 8) };
+      Settings.saveProfile();
+      Log.info('Quest: learned ' + [...targets].length + ' monster type(s) that advance ' + this.label({ refId: e.refId }) + '.');
+    }
+  },
+  // The monster types that advance an active, unskipped quest; the hunt prefers them (lean-controller.js).
+  preferred() {
+    const out = new Set(), skip = this.cfg().skip || [];
+    for (const r of this.journal()) {
+      if (skip.includes(r.refId) || this.completed(r.refId)) continue;
+      for (const ref of (this.cfg().targets || {})[r.refId] || []) out.add(ref);
+    }
+    return out;
+  },
+  npcEntity(t) {
+    if (t.npc?.gid) { const e = World.ents.get(t.npc.gid); if (e?.kind === 'npc') return e; }
+    const pose = t.npc?.pose;
+    if (!pose) return null;
+    let best = null;
+    for (const e of World.ents.values())
+      if (e.kind === 'npc' && dist2D(e, pose) <= QUEST_FIND && (!best || dist2D(e, pose) < dist2D(best, pose))) best = e;
+    return best;
+  },
+  begin(p) {
+    const pose = World.pose();
+    if (!pose || !p.npc?.pose || !Number.isFinite(dist2D(pose, p.npc.pose))) { this.message = 'Quest stopped: the quest NPC could not be reached from here.'; Log.warn(this.message); return; }
+    const wasHunting = Hunt.running;
+    if (wasHunting) Hunt.stop('visiting a quest NPC');
+    // The visit's policy snapshot: learned tokens and kill targets fill themselves during the
+    // visit, so only what you set belongs here.
+    const cfg = this.cfg(), cfgKey = JSON.stringify([cfg.on, cfg.accept, cfg.include, cfg.exclude, cfg.skip]);
+    this.trip = { ...p, phase: 'walk', at: now(), manualAt: Manual.lastAt, wasHunting, cfgKey,
+      talked: false, revision: 0, rowSymbol: '', yes: false };
+    this.message = 'Quest: ' + (p.intent === 'accept' ? 'accepting ' : 'turning in ') + this.label(p) + ' at the NPC.';
+    Log.info(this.message);
+    const t = this.trip;
+    if (dist2D(pose, p.npc.pose) <= QUEST_REACH) { t.phase = 'select'; return; }
+    if (!WalkBack.startTo(p.npc.pose, { label: 'the quest NPC', stop: QUEST_REACH,
+      onDone: () => { if (Quest.trip === t && t.phase === 'walk') { t.phase = 'select'; t.at = now(); } },
+      onFail: reason => { if (Quest.trip === t) Quest.fail(reason || 'the walk to the quest NPC gave up'); } })) this.fail('the walk to the quest NPC did not start');
+  },
+  tick() {
+    const t = this.trip;
+    if (!t) return;
+    const gp = World.gp;
+    if (!this.on() || t.cfgKey !== JSON.stringify([this.cfg().on, this.cfg().accept, this.cfg().include, this.cfg().exclude, this.cfg().skip])) return this.fail('settings changed during the quest');
+    if (!World.inWorld()) return;
+    if (World.isDead()) return this.fail('the character died');
+    if (Manual.lastAt !== t.manualAt) return this.fail('manual control');
+    if (t.phase === 'walk') {
+      // Our own walk is driven by WalkBack (its caps fail through onFail); this ceiling only ends
+      // a walk whose WalkBack was silently replaced by another start.
+      if (WalkBack.active) WalkBack.tick();
+      else if (now() - t.at > 3000) this.fail('the walk to the quest NPC was replaced');
+      else if (now() - t.at > QUEST_WALK_MS) this.fail('the walk to the quest NPC took too long');
+      return;
+    }
+    if (gp.inventoryPending) return;
+    if (t.phase !== 'close' && now() - t.at > QUEST_STEP_MS) return this.fail('the quest NPC did not answer in time');
+    if (t.phase === 'select') {
+      const npc = this.npcEntity(t);
+      if (!npc) return;                                   // the NPC spawns near its marker; the step timeout fails the trip
+      if (gp.targetPending) return;
+      if (gp.target !== npc.gid) { if (Cmd.spaced('select')) Cmd.select(npc.gid); return; }
+      if (t.intent === 'accept' && this.markers().length && !this.marker(t.refId)) return this.fail('the quest is no longer offered');
+      if (!(gp.targetCapabilities & 2)) return this.fail('the NPC cannot be talked to');
+      t.phase = 'talk'; t.at = now(); t.talked = false; t.seenRevision = gp.npcConversation?.dialogueRevision || 0;
+      return;
+    }
+    if (t.phase === 'talk') {
+      const conv = gp.npcConversation;
+      if (conv?.phase === 'ready' && conv.dialogue) {
+        if (conv.dialogue.kind === 4) { t.phase = 'choose'; t.at = now(); return; }
+        // A plain line already handled (an informational row) is asked past; a fresh one means
+        // this NPC answers talks without a quest menu.
+        if (conv.dialogueRevision !== (t.seenRevision || 0)) return this.fail('the NPC showed no quest menu');
+      }
+      // npc-talk is valid from the menu and from a closed-out answer line alike.
+      if ((conv?.phase === 'menu' || conv?.phase === 'ready') && conv.gid === gp.target && !t.talked && now() - t.at > 1200 &&
+          Cmd.raw({ kind: 'npc-talk' }, 'Quest: talk to the NPC')) t.talked = true;
+      return;
+    }
+    if (t.phase === 'choose') {
+      const conv = gp.npcConversation, dialogue = conv?.phase === 'ready' ? conv.dialogue : null;
+      if (dialogue?.kind !== 4) return;                   // still waiting for the menu (a retry talk)
+      const row = this.row(t, dialogue);
+      if (!row) return this.fail('could not tell which dialogue row is the quest');
+      if (Cmd.spaced('npc-choice') && Cmd.raw({ kind: 'npc-choice', choice: row.choice }, 'Quest: choose the quest row')) {
+        t.phase = 'confirm'; t.at = now(); t.revision = conv.dialogueRevision; t.rowSymbol = row.symbol; t.yes = false;
+      }
+      return;
+    }
+    if (t.phase === 'confirm') {
+      const conv = gp.npcConversation, revision = conv?.dialogueRevision ?? t.revision;
+      if (!t.yes) {
+        if (conv?.phase === 'ready' && revision > t.revision) {
+          if (conv.dialogue?.kind === 3) {
+            if (Cmd.spaced('npc-choice') && Cmd.raw({ kind: 'npc-choice', choice: 2 }, 'Quest: confirm')) { t.yes = true; t.at = now(); }
+          } else {
+            // The row answered with a plain line: an informational row or an NPC service. Leave
+            // that row alone for a while and ask for the menu again.
+            this.rows.set(t.rowSymbol, now() + QUEST_SKIP_MS);
+            Log.info('Quest: the dialogue row answered with a plain line; trying the next row.');
+            t.phase = 'talk'; t.at = now(); t.talked = false; t.seenRevision = conv.dialogueRevision;
+          }
+        }
+        return;
+      }
+      const record = this.record(t.refId), settled = conv?.phase === 'ready' && revision > t.revision + 1;
+      if (t.intent === 'accept' && record) return this.finish(t, true);
+      if (t.intent === 'report' && (!record || this.completed(t.refId))) return this.finish(t, true);
+      if (settled && now() - t.at > QUEST_SETTLE_MS) return this.fail('the NPC refused the quest');
+      return;
+    }
+    if (t.phase === 'close') {
+      if (!t.closed && Cmd.raw({ kind: 'npc-close' }, 'Quest: close the dialogue')) t.closed = true;
+      if (t.closed || now() - t.at > 3000) { this.trip = null; if (t.wasHunting && this.on() && World.inWorld()) Hunt.start(); }
+      return;
+    }
+  },
+  // The dialogue row for this quest. The learned token's row is exact. Without a binding only an
+  // unclaimed row may be taken - a lone unknown row is most plausibly this quest's own - and a
+  // turn-in additionally refuses to guess between several, because Yes on the wrong row acts on
+  // whatever quest that row belongs to.
+  row(t, dialogue) {
+    const rows = (dialogue.options || []).filter(o => /QNO_/.test(o.symbol) && (this.rows.get(o.symbol) || 0) < now());
+    if (!rows.length) return null;
+    const token = this.token(t.refId), learned = this.cfg().learned || {};
+    // Exact token equality: a substring match would let QNO_X_1 take QNO_X_12's row.
+    const mine = token ? rows.find(o => questToken(o.symbol) === token) : null;
+    if (mine) return mine;
+    const unbound = rows.filter(o => { const ot = questToken(o.symbol); return !ot || learned[ot] === undefined || learned[ot] === t.refId; });
+    if (!unbound.length) return null;
+    return t.intent === 'report' && unbound.length > 1 ? null : unbound[0];
+  },
+  finish(t) {
+    if (t.rowSymbol) {
+      const token = questToken(t.rowSymbol);
+      if (token) { this.cfg().learned = { ...(this.cfg().learned || {}), [token]: t.refId }; Settings.saveProfile(); }
+    }
+    this.refused.delete(t.refId);
+    this.visitFail.delete(t.refId);
+    this.message = 'Quest: ' + (t.intent === 'accept' ? 'accepted ' : '') + this.label(t) + (t.intent === 'report' ? ' completed.' : '.');
+    Log.info(this.message); UI.toast(this.message, 'info', 4000);
+    t.phase = 'close'; t.at = now(); t.closed = false;
+  },
+  fail(reason) {
+    const t = this.trip;
+    if (!t) return;
+    this.trip = null;
+    WalkBack.cancel('', false);
+    this.visitFail.set(t.refId, now());
+    if (World.gp?.npcConversation && World.gp.npcConversation.phase !== 'closed') Cmd.raw({ kind: 'npc-close' }, 'Quest: close the dialogue');
+    this.message = 'Quest stopped: ' + reason + '.';
+    Log.warn(this.message); UI.toast(this.message, 'warn', 6000);
+    // Hunting restarts even dead: the controller's death lane then runs the configured revive.
+    if (t.wasHunting && this.on() && reason !== 'manual control' && World.inWorld()) Hunt.start();
+  },
+  cancel() { this.trip = null; this.rewardSent = null; },
+  reset() { this.cancel(); this.kills = []; this.refused.clear(); this.visitFail.clear(); this.rows.clear(); this.progressSeq = 0; this.message = ''; },
+  status() { return this.trip ? this.message : ''; },
+  // The live journal for the panel: what is active, at which count, and what the bot is doing.
+  listing() {
+    return this.journal().filter(r => !this.completed(r.refId)).map(r => {
+      const node = r.contents?.[0], marker = this.marker(r.refId);
+      return { refId: r.refId, token: this.token(r.refId), progress: node?.objectiveValues?.[0] ?? null,
+        done: node?.kind === 0 || marker?.valueA === 3, skipped: (this.cfg().skip || []).includes(r.refId) };
+    });
+  },
+};
+bus.on('gameplay', gp => Quest.watch(gp));
+// A monster that despawns after our hunt engaged it is a kill to correlate with journal progress;
+// monsters other players finished never touched by us are noise, not quest targets.
+bus.on('despawn', e => {
+  if (e?.kind !== 'monster' || !e.refObjId || !Quest.on()) return;
+  if ((World.simNow() ?? 0) - (World.hitByUs.get(e.gid) ?? -Infinity) >= QUEST_LEARN_MS) return;
+  Quest.kills.push({ ref: e.refObjId, at: now() });
+  if (Quest.kills.length > 12) Quest.kills.shift();
+});
+bus.on('game-error', text => {
+  const t = Quest.trip;
+  if (t && ['talk', 'choose', 'confirm'].includes(t.phase)) Quest.fail(String(text || 'the game refused the quest dialogue'));
+});
+
+
 // Auto stall: open the character's own street stall in town and sell bag items at prices you set per item
 // (like sBot's stall). The worker contract, read from the live client: stall-name enters a local naming phase,
 // stall-create {title, greeting} opens the stall (phase 'owner'), stall-add {slot, bagSlot, quantity, price}
@@ -10119,6 +10484,7 @@ Hunt.start = function (...args) {
   if (Alchemy.run || Alchemy.pending) return UI.toast('Stop alchemy and wait for its result before hunting.', 'warn');
   if (Trade.run) return UI.toast('Stop auto trade before hunting.', 'warn');
   if (Stall.run) return UI.toast('Stop the stall session before hunting.', 'warn');
+  if (Quest.trip) return UI.toast('Wait for the quest visit to finish (or stop the bot).', 'warn');
   if (World.gp?.stall?.phase && World.gp.stall.phase !== 'none') return UI.toast('Close the stall before hunting.', 'warn');
   Lure.reset();
   return startHunting.apply(this, args);
@@ -10153,6 +10519,31 @@ Hunt.threat = function (current) {
   return best;
 };
 Hunt.chooseLoot = () => Loot.choose();
+// Quest monsters first: while a quest's kills are still counting, its learned monster types are
+// taken before distance, as long as they pass the hunt's own filters - class, area, level range,
+// name lists and anti-KS. Something already hitting the player is never displaced by a preference.
+const huntChooseTarget = Hunt.chooseTarget;
+Hunt.chooseTarget = function (...args) {
+  const target = huntChooseTarget.apply(this, args);
+  const preferred = Quest.preferred();
+  if (!preferred.size) return target;
+  const sim = World.simNow() ?? 0;
+  if (target && sim - (World.attackers.get(target.gid) ?? -Infinity) < 6000) return target;
+  const pose = World.pose(), H = this.cfg();
+  if (!pose) return target;
+  const inc = splitList(H.include), exc = splitList(H.exclude);
+  let best = null;
+  for (const e of World.ents.values()) {
+    if (!preferred.has(e.refObjId) || !isAttackableMob(e) || this.banned(this.ban, e.gid)) continue;
+    if (!this.classAllowed(e) || !this.inArea(e) || dist2D(pose, e) > H.chase) continue;
+    if (H.levelMin && (e.level ?? 0) < H.levelMin || H.levelMax && (e.level ?? 0) > H.levelMax) continue;
+    const name = (e.name || '').toLowerCase();
+    if (inc.length && !inc.some(s => name.includes(s)) || exc.some(s => name.includes(s))) continue;
+    if (H.avoidKs && sim - (World.hitByOthers.get(e.gid) ?? -Infinity) < 8000 && sim - (World.hitByUs.get(e.gid) ?? -Infinity) > 8000) continue;
+    if (!best || dist2D(pose, e) < dist2D(pose, best)) best = e;
+  }
+  return best || target;
+};
 Hunt.tick = function () {
   if (!this.running) return;
   if (!Town.cfg().enabled && Restock.tick()) { Loot.suspend(); return; }
@@ -10226,6 +10617,7 @@ function stopAll() {
   Trade.cancel();
   Stall.stop();
   BuffGear.cancel();
+  Quest.cancel();
   const townActive = !!Town.trip;
   Town.cancel();
   Resurrect.cancelTrip('', true);
@@ -10378,6 +10770,10 @@ const Controller = {
       if (!WalkBack.active && !Travel.active && !Restock.trip && !Restock.recording && !Restock.activeShop() && !World.gp.storage && Support.tick()) {
         this.mode = 'party support'; return;
       }
+      // Quest journal watching and the window's own reward command run beside everything; an NPC
+      // visit owns the character like a town trip does.
+      this.guard('Quest', () => Quest.observe());
+      if (Quest.trip) { Quest.tick(); this.mode = 'quest'; return; }
       if (WalkBack.active) { this.mode = 'returning'; WalkBack.tick(); }
       else if (Travel.active) { this.mode = 'travelling'; Travel.tick(); }
       else if (Restock.recording) this.mode = 'recording';
@@ -15025,7 +15421,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.7.3", "title": "Clearer mall roles: scrolls with the potions, merchant-first thresholds", "items": ["Keeping the 20% damage and resistance scrolls active is now set under Automatic potion use, right beside the speed scroll it mirrors; the Item mall section only refills the stock.", "The mall potion thresholds now default below the merchant restock marks, so the merchant stays the primary source and the mall only steps in when that was not enough. Raising a mall mark above the merchant one flips that item to silk-first, for wallets that prefer it — the thresholds themselves express the priority."]}, {"version": "1.7.2", "title": "Item mall: MP bags and Reverse Return Scrolls", "items": ["The mall buyer can now also refill MP potion bags and Reverse Return Scrolls (the merchant with gold stays the cheaper source for scrolls; the mall is the fallback you arm yourself). Same rules as the HP bags: per-run silk budget, one measured order at a time, live catalogue prices."]}, {"version": "1.7.1", "title": "Mall buyer: no order inside an inventory rush, self-healing block", "items": ["Live test finding: the mall order and an item-use (the battle scroll's) went out in the same second; the game worker silently refuses mall commands while an inventory transaction is open, so the order never reached the server and looked like an unconfirmed purchase. The buyer now waits for a calm inventory window before ordering.", "A blocked buyer (unconfirmed order) now probes the catalogue read-only every 10 s: only a responsive mall moves its revision, so a change proves the session is usable and buying resumes by itself; a genuinely poisoned client stays silent and the block stays (re-entering the game still works too).", "The battle-scroll auto-use was confirmed working live (buff re-applied from bag stock)."], "note": "The first real purchase is still pending live verification."}, {"version": "1.7.0", "title": "Item mall supplies, battle scrolls, reverse scroll restock", "items": ["New, off by default, under Supplies: buy HP potion bags from the Item Mall when the total HP stock runs low, bounded by a per-bot-run silk budget. One order at a time lands straight in the bag while hunting; the merchant town trips stay the primary supply, a refusal backs that item off for a minute, and an unconfirmed order blocks all mall buying until you re-enter the game (the game's own resync rule — it is never retried).", "Battle scrolls: keep a 20% damage increase and/or a 20% resistance scroll active while hunting. Uses your bag stock and re-uses a scroll whenever the 30-minute buff runs out; both can also be topped up from the mall under the same budget.", "Reverse Return Scrolls can now be refilled at the recorded merchant with gold, like the potions; a merchant without them skips them with a notice and the trip still walks back.", "The read-only mall probe stays available as `SROLean.mall`; the buyer and the scrolls are exposed as `SROLean.mallBuyer` and `SROLean.scrolls` for live inspection."], "note": "The catalogue read (mall-open, balances, 103 real offers) was verified live on the server; the buying itself (mall-buy) is verified in simulation only and has not yet spent real silk."}, {"version": "1.6.0", "title": "Attack pet assist", "items": ["New, off by default, under Combat → Hunt area: every monster the bot engages is also given to the attack pet, with the same order the game's own pet bar sends. The pet stops staying behind on an old monster while you fight a new one.", "With the call-back on (default), a pet farther than the radius (15 m) is first called back to you, then sets out to the new target from your side — whatever chases it comes along, a walking lure. Between targets the pet stays at your side. The wait gives up after a timeout (3 s) and orders the attack anyway; the order repeats every few seconds (5 s) so a lost one never leaves the pet idle.", "Only your own living attack pet is commanded; the pickup pet keeps collecting beside this, transports are untouched, and nothing is sent while a town trip, a restock, a walk-back or a resurrection owns the character, or while the bot is stopped."], "note": "Verified in simulation only (world-mirror tests); not yet exercised against the live server."}, {"version": "1.5.3", "title": "Upstream sync: support, party and alchemy", "items": ["Merges upstream 1.2.175–1.2.186: party buffs that would not stack are skipped without holding up the others, \"Attack monsters\" can be turned off so a support character never starts a fight, party members who died out of view are resurrected, town trips recover from transactions the game never answered, buffs sharing a weapon need one weapon change, the party stays together and answers applications, auto-start remembers your last Start or Stop, the bot can start again after it stops by itself (off), attribute alchemy skips a stat that ran out of stones and moves on, an Immortal stone is fused first when an Astral one needs it, and up to 9999 enhancement attempts per run are allowed.", "The team edition (relay, intel, knowledge, arbiter) is unchanged; the upstream support-character guard and the team target share keep working together, and the new retry guard runs beside the team tick."], "note": "Verified in simulation only (593+ upstream tests plus the team suite)."}, {"version": "1.5.2", "title": "Upstream sync: pet care", "items": ["Merges upstream 1.2.174: pet HP recovery kits stop draining on a wrong HP reading (catalogue-only maximum plus a flat-HP guard with a grace window), HGP recovery potions feed the attack pet and are bought in town, pet recovery kits are bought on the same trips and picked by their real (owner-scaled) heal, and a dead pet is revived with a Grass of life during a town trip.", "Adds upstream fix: each pet's maximum HP is learned from its own live HP (the highest value seen) instead of the pet catalogue, whose asset the live server removed while a stale cached copy kept serving wrong values — that copy made the bot burn kits on a full pet and then rest it while it was dying. A rested pet is now unblocked the moment its HP moves again.", "The team edition is unchanged and re-verified on the new base (590 tests)."], "note": "The observed-maximum fix is confirmed against the live session readings; the rest was verified in simulation only."}, {"version": "1.5.1", "title": "Upstream sync: combat gear, party-buff weapon swaps, ammo wear", "items": ["Merges upstream 1.2.170-1.2.173: the chosen weapons and shield stay listed once worn and move to Combat; the primary weapon is worn as combat gear and party buffs can swap weapons and return to the primary; bows and crossbows wear arrows or bolts from the bag.", "The team edition is unchanged and re-verified on the new base (579 tests)."], "note": "Re-verified in simulation only; nothing has run with real characters."}];
+const RELEASE_NOTES = [{"version": "1.8.0", "title": "Auto Quest", "items": ["New Quest page: quests are done automatically. The quest markers the game itself sends route the bot - it walks to the quest NPC, accepts the quest, and turns it in when the journal says the objective is met.", "Quests the reward window can close are rewarded with the quest window's own command, without walking back to the NPC. A refused reward waits a minute and then falls back to its NPC.", "Which dialogue row belongs to which quest, and which monster kills advance which quest, are learned while playing - no quest database is shipped. Learned monsters are hunted first while their quest counts.", "The quest list shows each active quest's count and a Skip button; codename include/exclude patterns filter which quests are taken.", "Turn-ins never guess between several unknown dialogue rows (a wrong Yes would accept another quest); such an NPC is left with a message instead.", "Everything here was tested against a simulated game state only: the quest marker, journal, and NPC dialogue contracts were read from the game's own source. The opcodes and dialogue flow have not been verified on the live server yet."]}, {"version": "1.7.3", "title": "Clearer mall roles: scrolls with the potions, merchant-first thresholds", "items": ["Keeping the 20% damage and resistance scrolls active is now set under Automatic potion use, right beside the speed scroll it mirrors; the Item mall section only refills the stock.", "The mall potion thresholds now default below the merchant restock marks, so the merchant stays the primary source and the mall only steps in when that was not enough. Raising a mall mark above the merchant one flips that item to silk-first, for wallets that prefer it — the thresholds themselves express the priority."]}, {"version": "1.7.2", "title": "Item mall: MP bags and Reverse Return Scrolls", "items": ["The mall buyer can now also refill MP potion bags and Reverse Return Scrolls (the merchant with gold stays the cheaper source for scrolls; the mall is the fallback you arm yourself). Same rules as the HP bags: per-run silk budget, one measured order at a time, live catalogue prices."]}, {"version": "1.7.1", "title": "Mall buyer: no order inside an inventory rush, self-healing block", "items": ["Live test finding: the mall order and an item-use (the battle scroll's) went out in the same second; the game worker silently refuses mall commands while an inventory transaction is open, so the order never reached the server and looked like an unconfirmed purchase. The buyer now waits for a calm inventory window before ordering.", "A blocked buyer (unconfirmed order) now probes the catalogue read-only every 10 s: only a responsive mall moves its revision, so a change proves the session is usable and buying resumes by itself; a genuinely poisoned client stays silent and the block stays (re-entering the game still works too).", "The battle-scroll auto-use was confirmed working live (buff re-applied from bag stock)."], "note": "The first real purchase is still pending live verification."}, {"version": "1.7.0", "title": "Item mall supplies, battle scrolls, reverse scroll restock", "items": ["New, off by default, under Supplies: buy HP potion bags from the Item Mall when the total HP stock runs low, bounded by a per-bot-run silk budget. One order at a time lands straight in the bag while hunting; the merchant town trips stay the primary supply, a refusal backs that item off for a minute, and an unconfirmed order blocks all mall buying until you re-enter the game (the game's own resync rule — it is never retried).", "Battle scrolls: keep a 20% damage increase and/or a 20% resistance scroll active while hunting. Uses your bag stock and re-uses a scroll whenever the 30-minute buff runs out; both can also be topped up from the mall under the same budget.", "Reverse Return Scrolls can now be refilled at the recorded merchant with gold, like the potions; a merchant without them skips them with a notice and the trip still walks back.", "The read-only mall probe stays available as `SROLean.mall`; the buyer and the scrolls are exposed as `SROLean.mallBuyer` and `SROLean.scrolls` for live inspection."], "note": "The catalogue read (mall-open, balances, 103 real offers) was verified live on the server; the buying itself (mall-buy) is verified in simulation only and has not yet spent real silk."}, {"version": "1.6.0", "title": "Attack pet assist", "items": ["New, off by default, under Combat → Hunt area: every monster the bot engages is also given to the attack pet, with the same order the game's own pet bar sends. The pet stops staying behind on an old monster while you fight a new one.", "With the call-back on (default), a pet farther than the radius (15 m) is first called back to you, then sets out to the new target from your side — whatever chases it comes along, a walking lure. Between targets the pet stays at your side. The wait gives up after a timeout (3 s) and orders the attack anyway; the order repeats every few seconds (5 s) so a lost one never leaves the pet idle.", "Only your own living attack pet is commanded; the pickup pet keeps collecting beside this, transports are untouched, and nothing is sent while a town trip, a restock, a walk-back or a resurrection owns the character, or while the bot is stopped."], "note": "Verified in simulation only (world-mirror tests); not yet exercised against the live server."}, {"version": "1.5.3", "title": "Upstream sync: support, party and alchemy", "items": ["Merges upstream 1.2.175–1.2.186: party buffs that would not stack are skipped without holding up the others, \"Attack monsters\" can be turned off so a support character never starts a fight, party members who died out of view are resurrected, town trips recover from transactions the game never answered, buffs sharing a weapon need one weapon change, the party stays together and answers applications, auto-start remembers your last Start or Stop, the bot can start again after it stops by itself (off), attribute alchemy skips a stat that ran out of stones and moves on, an Immortal stone is fused first when an Astral one needs it, and up to 9999 enhancement attempts per run are allowed.", "The team edition (relay, intel, knowledge, arbiter) is unchanged; the upstream support-character guard and the team target share keep working together, and the new retry guard runs beside the team tick."], "note": "Verified in simulation only (593+ upstream tests plus the team suite)."}, {"version": "1.5.2", "title": "Upstream sync: pet care", "items": ["Merges upstream 1.2.174: pet HP recovery kits stop draining on a wrong HP reading (catalogue-only maximum plus a flat-HP guard with a grace window), HGP recovery potions feed the attack pet and are bought in town, pet recovery kits are bought on the same trips and picked by their real (owner-scaled) heal, and a dead pet is revived with a Grass of life during a town trip.", "Adds upstream fix: each pet's maximum HP is learned from its own live HP (the highest value seen) instead of the pet catalogue, whose asset the live server removed while a stale cached copy kept serving wrong values — that copy made the bot burn kits on a full pet and then rest it while it was dying. A rested pet is now unblocked the moment its HP moves again.", "The team edition is unchanged and re-verified on the new base (590 tests)."], "note": "The observed-maximum fix is confirmed against the live session readings; the rest was verified in simulation only."}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -16655,6 +17051,8 @@ const UI = {
       this.pane.append(el('p', 'Town trips, what starts them, and arrows and bolts are on the Town page.', 'muted'));
     } else if (this.current === 'Town') {
       this.sections('townTrip', 'townWhen', 'townCycle', 'townAmmo');
+    } else if (this.current === 'Quest') {
+      this.sections('questAuto', 'questJournal');
     } else if (this.current === 'Party') {
       this.sections('partyMembers', 'partyHeal', 'partyBuffs', 'partyParty', 'partyTrace');
     } else if (this.current === 'Items') {
@@ -16682,7 +17080,7 @@ const UI = {
   },
   // ---- Classic layout: an SBot-style frame and tab order (opt-in, screens at least 900 px wide) ----
   // Each tab is a list of the page sections above (title = the heading it gets here); a tab only exists when we have
-  // the feature, so there is no Chat, Union Party, Quest or Alarms tab yet.
+  // the feature, so there is no Chat, Union Party or Alarms tab yet.
   classicTabs() {
     return [
       { name: 'Settings', icon: 'action\\icon_cha_helper', pages: ['Supplies', 'Loot', 'Town', 'Combat', 'Settings'], sections: [
@@ -16698,6 +17096,7 @@ const UI = {
         ['partyMembers', 'Current party'], ['partyParty', 'Party settings'], ['partyHeal']] },
       { name: 'Player buffing', icon: 'action\\icon_cha_party', pages: ['Party'], sections: [['partyBuffs', 'Player buffing']] },
       { name: 'Team', icon: 'action\\icon_cha_party', pages: ['Team'], sections: [['teamRelay', 'Team relay']] },
+      { name: 'Quest', icon: 'action\\icon_cha_camp', pages: ['Quest'], sections: [['questAuto', 'Auto quest settings'], ['questJournal']] },
       { name: 'Auto alchemy', icon: 'action\\icon_cha_alchemy', pages: ['Alchemy'], draw() { Alchemy.draw(); } },
       { name: 'Stall', icon: 'action\\icon_cha_shop', pages: ['Stall'], draw() { Stall.draw(); } },
       { name: 'Extra', icon: 'action\\icon_cha_helper', pages: ['Settings'], sections: [
@@ -16711,7 +17110,7 @@ const UI = {
   // The classic tab that holds a compact page (so Setup and the checklist can open the right place).
   tabFor(page, combatTab) {
     if (page === 'Combat') return combatTab === 'Hunt area' ? 'Training place' : 'Skills';
-    return { Loot: 'Settings', Supplies: 'Settings', Town: 'Items/Storage', Party: 'Party/Autores', Items: 'Items/Storage', Alchemy: 'Auto alchemy', Trade: 'Auto trade', Settings: 'Extra' }[page] || page;
+    return { Loot: 'Settings', Supplies: 'Settings', Town: 'Items/Storage', Quest: 'Quest', Party: 'Party/Autores', Items: 'Items/Storage', Alchemy: 'Auto alchemy', Trade: 'Auto trade', Settings: 'Extra' }[page] || page;
   },
   // Is this compact page (and optional Combat sub-tab) what the window shows right now, in either layout?
   is(page, tab) {
@@ -16743,10 +17142,10 @@ const UI = {
   },
   buildNav() {
     this.nav.replaceChildren();
-    const icons = { Items: 'action\\cos_cmd_inventory', Party: 'action\\icon_cha_party', Combat: 'action\\icon_cha_auto_attack', Loot: 'action\\icon_cha_autoget', Supplies: 'action\\icon_cha_recovery', Town: 'item\\etc\\mall_return_scroll',
+    const icons = { Items: 'action\\cos_cmd_inventory', Party: 'action\\icon_cha_party', Combat: 'action\\icon_cha_auto_attack', Loot: 'action\\icon_cha_autoget', Supplies: 'action\\icon_cha_recovery', Town: 'item\\etc\\mall_return_scroll', Quest: 'action\\icon_cha_camp',
       Alchemy: 'action\\icon_cha_alchemy', Trade: 'action\\icon_cha_shop', Wardrobe: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper', Setup: 'action\\icon_cha_camp' };
     const entries = this.classic ? this.classicTabs().map(t => ({ name: t.name, icon: t.icon, open: () => { this.ctab = t.name; this.draw(); } }))
-      : ['Setup', 'Map', 'Combat', 'Party', 'Team', 'Loot', 'Items', 'Supplies', 'Town', 'Stall', 'Alchemy', 'Trade', 'Wardrobe', 'Settings'].map(name => ({ name, icon: icons[name], open: () => { this.current = name; this.draw(); } }));
+      : ['Setup', 'Map', 'Combat', 'Party', 'Team', 'Loot', 'Items', 'Supplies', 'Town', 'Quest', 'Stall', 'Alchemy', 'Trade', 'Wardrobe', 'Settings'].map(name => ({ name, icon: icons[name], open: () => { this.current = name; this.draw(); } }));
     // Page icons are the game's own action-bar icons; they show only in the wide and classic windows' page lists.
     for (const entry of entries) {
       const tab = this.button(entry.name, entry.open);
@@ -17078,6 +17477,40 @@ const UI = {
         this.number('Bolts: go to town at or below', () => ammo().bolt.low, v => ammo().bolt.low = v, 0, 9999),
         this.number('Bolts: refill to', () => ammo().bolt.target, v => ammo().bolt.target = v, 1, 10000),
         el('p', 'Bought at the repair merchant after selling pet loot and before repairing. The count includes the stack in your ammunition slot and any spare stacks in the bag. A trip also starts when the count falls to the low-stock number. If the merchant does not sell it, there is no bag space or not enough gold, that item is skipped and the rest of the trip goes on. Equipping the bought ammunition is up to you.', 'muted')));
+  },
+  section_questAuto(host) {
+    const Q = () => Settings.profile.quest;
+    host.append(this.group('Auto quests',
+      this.check('Do quests automatically', () => Q().on, v => Q().on = v),
+      this.check('Accept quests their NPC offers', () => Q().accept, v => Q().accept = v),
+      this.text('Only quests named', () => Q().include, v => Q().include = v, 'comma-separated QNO_ codenames'),
+      this.text('Never quests named', () => Q().exclude, v => Q().exclude = v, 'comma-separated QNO_ codenames'),
+      el('p', 'The quest markers the game itself sends route the bot: it walks to the quest NPC, takes the quest, hunts the monsters whose kills advance it and turns it in. Quests the reward window can close are rewarded without walking. Which dialogue row is which quest, and which monsters count, are learned while playing.', 'muted')));
+  },
+  section_questJournal(host) {
+    const Q = () => Settings.profile.quest;
+    const status = el('p', Quest.status() || 'No quest visit running.', 'muted');
+    const list = el('div', null, 'members');
+    const render = () => {
+      status.textContent = Quest.status() || 'No quest visit running.';
+      const rows = Quest.listing();
+      if (!rows.length) { list.replaceChildren(el('div', 'No active quests.', 'empty')); return; }
+      list.replaceChildren(...rows.map(row => {
+        const line = el('div', null, 'member');
+        const name = el('div', null, 'member-name');
+        name.append(el('strong', row.token || 'quest #' + row.refId),
+          el('span', (row.progress !== null ? 'count ' + row.progress : 'no counter') + (row.done ? ' · ready to turn in' : '') + (row.skipped ? ' · skipped' : ''), 'muted'));
+        const button = this.button(row.skipped ? 'Unskip' : 'Skip', () => {
+          const skip = new Set(Q().skip || []);
+          skip.has(row.refId) ? skip.delete(row.refId) : skip.add(row.refId);
+          Q().skip = [...skip]; Settings.saveProfile(); render();
+        });
+        line.append(name, button); return line;
+      }));
+    };
+    render();
+    this.refreshers.push(render);
+    host.append(this.group('Quest journal', status, list));
   },
   section_partyMembers(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
@@ -18327,7 +18760,7 @@ UI.showActivityExport = function() {
 
 // The player's Start / stop (F8 and the buttons). What they choose is remembered for auto-start.
 function toggleBot() {
-  if (Alchemy.run || Alchemy.pending || Stall.run || Hunt.running || Town.trip || WalkBack.active || Travel.active || Restock.trip || Resurrect.trip || Controller.resumeAfterRevive) userStop();
+  if (Alchemy.run || Alchemy.pending || Stall.run || Hunt.running || Town.trip || Quest.trip || WalkBack.active || Travel.active || Restock.trip || Resurrect.trip || Controller.resumeAfterRevive) userStop();
   else if (Restock.recording) UI.toast('Finish or cancel route recording before starting the bot.', 'warn');
   else { Hunt.start(); if (Hunt.running) RunIntent.set(true); }
 }
@@ -18370,7 +18803,7 @@ function boot() {
     const key = name ? 'profile:' + name : 'profile:default';
     if (key !== Settings.profileKey) { Town.lastScrollPoint = null; Town.deathPoint = null; stopAll(); Settings.useCharacter(name); }
   });
-  bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); Trace.reset(); BuffGear.reset(); Team.reset(); TeamIntel.reset(); Town.lastScrollPoint = null; Town.deathPoint = null; SpeedScroll.reset(); ScrollBuff.reset(); MallBuyer.reset(); MallBuyer.unpoison(); RepairHammer.reset(); Party.reset(); Resurrect.reset(); stopAll(); Restock.cancelRecording(); Restock.unbuyable.clear(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
+  bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); Trace.reset(); BuffGear.reset(); Team.reset(); TeamIntel.reset(); Town.lastScrollPoint = null; Town.deathPoint = null; SpeedScroll.reset(); ScrollBuff.reset(); MallBuyer.reset(); MallBuyer.unpoison(); RepairHammer.reset(); Party.reset(); Resurrect.reset(); Quest.reset(); stopAll(); Restock.cancelRecording(); Restock.unbuyable.clear(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
   bus.on('phase', phase => {
     if (phase !== 'world') {
       BuffGear.interrupt('World transition interrupted buff swaps.', true);
@@ -18394,7 +18827,7 @@ function boot() {
       if (['recall-wait', 'reverse-wait'].includes(Town.trip.phase)) Town.trip.transition = true;
       else Town.fail('Unexpected world reset during town service.');
     }
-    SpeedScroll.reset(); ScrollBuff.reset(); MallBuyer.reset(); RepairHammer.reset(); Party.reset(); Resurrect.reset(); Loot.reset(); Navigation.scene = null; Wardrobe.inv = Wardrobe.baseInv = Wardrobe.av = Wardrobe.baseAv = null; Wardrobe.body = '';
+    SpeedScroll.reset(); ScrollBuff.reset(); MallBuyer.reset(); RepairHammer.reset(); Party.reset(); Resurrect.reset(); Quest.reset(); Loot.reset(); Navigation.scene = null; Wardrobe.inv = Wardrobe.baseInv = Wardrobe.av = Wardrobe.baseAv = null; Wardrobe.body = '';
   });
   bus.on('attached', ({ late }) => { if (late) UI.toast('Attached after the game started. Reload for complete character data.', 'warn'); });
   bus.on('potion-empty', kind => UI.toast('Out of ' + kind.toUpperCase() + ' potions.', 'warn'));
@@ -18413,7 +18846,7 @@ function boot() {
   }, true);
   Ticker.start(() => Controller.tick(), 100);
   setInterval(() => { Wardrobe.tick(); UI.update(); }, 500);
-  W.SROLean = { version: VERSION, stats: Stats, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, buffGear: BuffGear, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, repairHammer: RepairHammer, resurrect: Resurrect, stall: Stall, team: Team, teamIntel: TeamIntel, teamKnowledge: TeamKnowledge, teamArbiter: TeamArbiter,
+  W.SROLean = { version: VERSION, stats: Stats, updates: Updates, diagnostics: Diagnostics, reports: Reports, alchemy: Alchemy, buffGear: BuffGear, world: World, settings: Settings, hunt: Hunt, loot: Loot, speedScroll: SpeedScroll, repairHammer: RepairHammer, resurrect: Resurrect, stall: Stall, quest: Quest, team: Team, teamIntel: TeamIntel, teamKnowledge: TeamKnowledge, teamArbiter: TeamArbiter,
     restock: Restock, town: Town, walkBack: WalkBack, travel: Travel, antiStuck: AntiStuck, chase: Chase, trap: Trap, autoMastery: AutoMastery, statPoints: StatPoints, share: ProfileShare, trace: Trace, setup: Setup, reconnect: Reconnect, petPotion: PetPotion, petAttack: PetAttack, mall: MallProbe, mallBuyer: MallBuyer, scrolls: ScrollBuff, navigation: Navigation, route: Route, wardrobe: Wardrobe, wardrobeData: WdData, learned: Learned, controller: Controller, ui: UI, activity: Activity, map: LeanMap, render: RenderControl, support: Support, items: ItemRules, stop: stopAll, log: Log };
   Log.info('NIX ready. F8 starts/stops; F7 folds; F6 or the × minimises and restores; Shift+F7 hides/shows the window.');
 }
