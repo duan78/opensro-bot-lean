@@ -189,7 +189,7 @@ potions, munitions, arme cassée, durabilité (`wear.pct`), pas d'XP (`noXp`), p
 | Guild storage | 36 messages : quotas, combining, achat, verrou « accessed by [%0] » | `guildstorage_storeexcess/takegold/threshold/keepgold`, `disableguildstorage` | ❌ | P2-6 : si une guilde est utilisée ; **contrat wire à vérifier live** |
 | Tri inventaire/storage | classes `sortInventory`/`sortStorage` | — | ❌ | niche |
 | Auto-drop d'items (champ/persistent) | `drop_items[_town]`, `drop_interval`, « Dropping [%0][%1] » | `pickup:enabledrop`, `dropattack` | ✅ règle par item « drop » (pick/store/sell/keep/drop) | — |
-| Mieux équipé automatiquement | « Equip: Equipping better item », « %1 vs %2 stats » | — | ❌ | P2-11 : risque de mauvais équipement, faible intérêt si gear joué à la main |
+| Mieux équipé automatiquement | « Equip: Equipping better item », « %1 vs %2 stats » | — | 🟡→✅ **livré (PR #86, 2026-11-01)** : au warehouse en ville, sur **vraies stats** (formules tooltip du client : rolls `variance` + `+` + blues bornés), arme à l'attaque dominante du porté, remplacé stocké jamais vendu, protections (choisi/buff-sets/alchimie/Keep/tooltip incomplet) ; restent hors périmètre : sources storage/pet, avatars | — |
 | Smart Town (composer la course aux services utiles) | « Smart Town: Visiting %0 », fallback script | — (NPC par ville codés en dur) | ❌ | P1-4 : composer depuis `Town.reason()` ; surveiller la complexité de Town |
 
 ### B10. Stall & exchange
@@ -329,7 +329,7 @@ drops partagés, sync town, claims res, console de flotte), autostart, setup gui
 | P2-13 | Déconnexion « aucun mouvement serveur » | phBot « No movement confirmed… » | ★★☆☆☆ | faible | variante en action de conditions |
 | P2 | Consommation d'items d'événement | SBot AutoEvent, 171 codes `EVENT_*` | ★★☆☆☆ | moyen | dépend de ce qu'OpenSRO fait tourner comme événements |
 | P2-10 | Quêtes événement / quotidiennes horaires | phBot `quest_event`, `return_before_next_hour` | ★★★☆☆ | moyen | après P0-3 + constat de l'offre réelle d'événements |
-| P2-11 | Mieux équipé automatiquement | phBot « Equipping better item » | ★☆☆☆☆ | moyen | risque d'équip erroné ; faible intérêt si gear joué à la main |
+| P2-11 | Mieux équipé automatiquement | phBot « Equipping better item » | ★★★☆☆ livré | fait | **PR #86** : vraies stats + remplacé stocké au warehouse (spec B validée par l'utilisateur) |
 | P3-14 | Académie | phBot | ★☆☆☆☆ | moyen | existe sur OpenSRO ? |
 | P3 | Exchange joueur (timeout) | SBot | ★☆☆☆☆ | faible | besoin couvert par stall |
 

@@ -71,7 +71,7 @@ Chaque PR DOIT respecter — extraits d'AGENTS.md + leçons des dumps et des rel
 | PR-11 | Guild storage | P2 | M-L | upstream | spike live | quotas + or + verrou |
 | PR-19 | Quêtes événement/quenquentes | P2 | M | upstream | PR-01, spike | offre réelle OpenSRO | à faire |
 | PR-16 | Union party | P3 | M | upstream | spike | existe côté OpenSRO ? | à faire |
-| PR-23 | Mieux équipé automatiquement | P3 | M | upstream | — | opt-in, mode suggestion d'abord | à faire |
+| PR-23 | Mieux équipé automatiquement | P1 | M | upstream | — | vraies stats + remplacé stocké | **PR nixxane #86 (2026-11-01)** |
 
 Explorations conditionnelles (pas de PR avant vérification) : §4. Exclusions définitives : §5.
 
@@ -528,18 +528,21 @@ SBot `partyserk:autouptacc/autouptaccall/autouptinv/autouptinvmember/autoupttype
 
 ---
 
-### PR-23 — Mieux équipé automatiquement { P3 · M · upstream · dernier }
+### PR-23 — Mieux équipé automatiquement { P1 · M · upstream · **LIVRÉE : PR nixxane #86 (2026-11-01, spec B)** }
+
+> **2026-11-01 (soir)** : spécifiée avec l'utilisateur puis livrée en une PR, directement en
+> mode B (pas de v1 suggestion) : « comme phBot, mais sur les vraies stats ». Nouveau module
+> `lean-equip.js` — au warehouse pendant le trip : un équipement porté de la même famille dont
+> les **vraies stats** (formules `itemTooltipStats` du client : roll min~max dans `variance`
+> 5 bits/stat, part par `+`, blues connus bornés) battent le porté de ≥ 2 % est équipé ; le
+> remplacé part au warehouse, **jamais vendu** (garde anti-vente). Armes comparées sur l'attaque
+> dominante du porté (un build physique ne prend jamais une lame magique) ; anneaux/ boucles :
+> remplacement du plus faible des deux. Jamais touchés : primaire/secondaire/bouclier choisis,
+> buff-sets, arme d'alchimie, Keep, tooltip incomplet ou niveau requis inconnu/non atteint,
+> durabilité 0 ; refus du jeu → skip session ; ne peut jamais arrêter le trip. Tests : 668 verts.
 
 **Données** : phBot « Equip: Equipping better item [%0] », « [%0] is the better item (%1 vs %2
-stats) », sources storage/pet, avatars/job items.
-
-**Contenu (conservateur)** : opt-in explicite ; comparaison **uniquement** sur stats de
-tooltip complètes (précédent `wear()` : max inconnu → on saute, jamais de guess) ; ne jamais
-toucher primaire/secondaire/bouclier protégés ni le buff-gear ; **mode suggestion d'abord**
-(log/panneau), l'équipement automatique derrière une seconde option.
-
-**Tests** : tooltip incomplet → suggestion seulement ; item protégé jamais remplacé ;
-équip échoue → rollback message.
+stats) », sources storage/pet, avatars/job items (ces deux dernières restent hors périmètre).
 
 ---
 
@@ -591,6 +594,11 @@ World / Magic POP / taxi, invitations de masse guild/académie, tout contourneme
 
 ## 7. Statuts
 
+- 2026-11-01 (soir 2) — **auto-equip livré (spec B avec l'utilisateur)** : PR-23 →
+  **PR nixxane #86** « Town trips wear carried gear with better real stats and store the
+  replaced piece » — nouveau `lean-equip.js`, comparaison sur les formules de stats du client
+  (rolls `variance` + `+` + blues bornés), arme à l'attaque dominante du porté, remplacé
+  déposé au warehouse et jamais vendu, protections complètes, 668 tests verts, sim-only.
 - 2026-11-01 (soir) — **4 quick wins livrées, une PR chacune, vers nixxane** :
   PR-07 → **#82** (vente de l'excès de fournitures), PR-21 → **#83** (noXp → spot de
   niveau suivant), PR-14 → **#84** (buffs maintenus au walk-back, mode « Hunting and
