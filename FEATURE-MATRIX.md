@@ -116,7 +116,7 @@ potions, munitions, arme cassée, durabilité (`wear.pct`), pas d'XP (`noXp`), p
 | Heure fixe | `return_at` + `return_at_stop` | — | ❌ | **P0-3** |
 | Alignement top-of-hour (quêtes événement) | `return_before_next_hour` + `_minutes` | — | ❌ | **P0-3**, débloque les quêtes événement |
 | Retour puis déconnexion | `return_and_disconnect` + `_minutes`, « Town: Waiting %0 seconds before disconnecting » | `disconnect_time`, `disconnecttown`, `disconnectscrollback` | ❌ | **P0-3**, utile hand-over multi-persos |
-| Pas ressuscité depuis N min | `return_if_not_resd[_minutes]` | `backnores`, `backnorestime` | ❌ | utile en équipe (avec claims de résurrection) |
+| Pas ressuscité depuis N min | `return_if_not_resd[_minutes]` | `backnores`, `backnorestime` | ✅ **couvert + amélioré (PR #87, 2026-11-01)** : le bot attend **seulement si un aide vivant est à portée** (pas une minuterie brute), jamais pendant une offre ouverte, accepte les résurrections ; délai réglable `party.reviveWaitS` (défaut 20 s) | — |
 | Statut meurtrier / nom rose | `return_murder_status` | `dconpk`, `dconpink` (+ alarmes) | ❌ | fold dans conditions/protection |
 | Blocage script | `return_cant_continue_script` | — | ⛔ (pas de scripts texte) | — |
 | Énergie de vie | `return_energy_of_life` | — | ⛔ item officiel iSRO | — |

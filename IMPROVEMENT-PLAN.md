@@ -45,33 +45,48 @@ Chaque PR DOIT respecter — extraits d'AGENTS.md + leçons des dumps et des rel
 
 ---
 
-## 1. Tableau récapitulatif (ordre de traitement recommandé)
+## 1. Feuille de route réorganisée (2026-11-01, soir 3)
 
-| # | PR | Priorité | Taille | Cible | Dep | Résumé | Statut |
-|---|---|---|---|---|---|---|---|
-| PR-01 | Scheduler retour & déconnexion | P0 | M | upstream | — | `return_at`, top-of-hour, retour-puis-déconnexion | à faire |
-| PR-07 | Vendre l'excès de potions | P1 | S | upstream | — | quick win trivial | **PR nixxane #82 (2026-11-01)** |
-| PR-02 | Moteur de conditions (noyau) | P0 | L | upstream | PR-01 | règles `when → do`, vocabulaire fermé | à faire |
-| PR-03 | Presets protection | P1 | S-M | upstream | PR-02 | joueur attaquant / statut PK → stop/déconnexion | à faire |
-| PR-08 | Alarmes sonores par événement & unique | P1 | S-M | upstream | — | extension des `tones` (58 clés SBot) | à faire |
-| PR-04 | Cure des pets (états anormaux) | P1 | M | upstream | spike | audit A2 ; le perso est déjà couvert upstream | à faire (réduite) |
-| PR-05 | Achat Grass of Life | P1 | S | upstream | — | audit A1 ; `buygol` au stable-keeper | à faire (sonde vendeur d'abord) |
-| PR-06 | Zerk : conditions SBot complémentaires | P2 | S | upstream | spike | combat déjà upstream ; encerclé/esprit/potion | à faire (réduite) |
-| PR-09 | Alchimie : Proof/Awake + éléments | P1 | M | upstream | spike | reste de P1-7 | à faire |
-| PR-10 | Smart Town | P1 | M | upstream | — | composer la course aux services utiles | à faire |
-| PR-18 | Watchdog « aucun mouvement serveur » | P2 | S | upstream | PR-02 | règle + action stop/déconnexion | à faire |
-| PR-20 | Retour si non ressuscité | P2 | S-M | fork+upstream | — | `return_if_not_resd` (team claims) | à faire |
-| PR-21 | noXp → spot suivant | P2 | S | upstream | — | migration de zone de chasse | **PR nixxane #83 (2026-11-01)** |
-| PR-14 | Skills de vitesse/bruit au walkback | P2 | S | upstream | — | `wcastspeed/noise` SBot | **PR nixxane #84 (2026-11-01)** (mode buff « walk ») |
-| PR-22 | Conditions d'arrêt du lure | P2 | S | upstream | — | joueurs/PTG proches, attente au centre | **PR nixxane #85 (2026-11-01)** (joueurs 30 m + budget de pulls) |
-| PR-17 | Pet organize | P2 | S-M | upstream | — | combine + transferts pet↔sac |
-| PR-13 | Auto-use scrolls (11 types) | P2 | S-M | upstream | spike | xp/sxp/stat scrolls |
-| PR-12 | Switch d'arme CH en rotation | P2 | M | upstream | — | `skills:switch*` SBot |
-| PR-15 | Party matching : recherche/adhésion | P2 | M | fork | — | `partymatching_*` SBot |
-| PR-11 | Guild storage | P2 | M-L | upstream | spike live | quotas + or + verrou |
-| PR-19 | Quêtes événement/quenquentes | P2 | M | upstream | PR-01, spike | offre réelle OpenSRO | à faire |
-| PR-16 | Union party | P3 | M | upstream | spike | existe côté OpenSRO ? | à faire |
-| PR-23 | Mieux équipé automatiquement | P1 | M | upstream | — | vraies stats + remplacé stocké | **PR nixxane #86 (2026-11-01)** |
+> Réécrite après les livraisons du jour. L'ordre suit la **valeur ÷ risque** et les dépendances,
+> et applique partout les principes « intelligent, pas reproduction » ci-dessous — tirés de ce
+> que phBot/SBot font mal et de nos propres leçons (#86 : confirmer par identité complète).
+
+**Principes « intelligent, pas reproduction »**
+1. **Vraies données du jeu > heuristiques.** phBot compare un somme de stats (« %1 vs %2 stats »)
+   → erreurs d'équipement ; nous : formules de stats du client (#86). Même règle pour tout le reste.
+2. **Défauts intelligents > réglages multiples.** L'attente de résurrection : phBot = minuterie
+   configurable brute ; nous = attendre seulement si un aide vivant est à portée (#87), réglable.
+3. **Confirmer par identité complète, jamais par champ partiel** (clé d'item, pas refObjId).
+4. **Vocabulaire fermé > moteur de script général.** phBot empile scripts + conditions + plugins ;
+   nous : un noyau de conditions fermé (PR-02) dont chaque action délègue à un module éprouvé.
+5. **Additif, défaut off, zéro changement de comportement** sans action explicite de l'utilisateur.
+6. **Jamais la complexité native** : clientless, proxy, anti-cheat, monétisation, multiclient (§5).
+
+| Phase | PR | Taille | Verrou / dépendance | Contenu | Statut |
+|---|---|---|---|---|---|
+| **0 — livré** | PR-07 | S | — | vente de l'excès de fournitures | **#82 → 1.2.204** |
+| | PR-21 | S | — | noXp → spot de niveau suivant | **#83** |
+| | PR-14 | S | — | buffs maintenus au walk-back | **#84 → 1.2.205** |
+| | PR-22 | S | — | lure : arrêt joueurs + budget de pulls | **#85 → 1.2.206** |
+| | PR-23 | M | — | auto-equip sur vraies stats, remplacé stocké | **#86** (+fix review ffef3fe) |
+| | PR-20 (réduite) | S | — | attente de résurrection configurable (le reste existait) | **#87** |
+| **1 — fin du bas du fleuve** | PR-08 alarmes par événement/unique | S-M | aucune | dernière quick win pure (tones + détections existantes) | **prochaine** |
+| | PR-13 auto-use scrolls (11 types) | S-M | micro-sonde catalogue | lesquels existent, puis motif trivial | à faire |
+| | PR-09 alchimie proof/awake + éléments | S-M | micro-sonde items | vérifier les items, puis motif lucky/steady | à faire |
+| **2 — les deux fondations** | PR-01 scheduler retour/déconnexion | M | aucune (pure horloge) | `return_at`, top-of-hour, retour-puis-déconnexion ; débloque PR-19 et le hand-over team | à faire |
+| | PR-02 conditions (noyau fermé) | L | après PR-01 | when→do JSON ; matrice de tests = messages d'erreur phBot | à faire |
+| | PR-03 protection presets | S-M | PR-02 | joueur attaquant / PK → stop/déconnexion | à faire |
+| | PR-18 watchdog mouvement→déconnexion | S | PR-02 | règle dérivée du noyau | à faire |
+| **3 — pets & soins (audits A1/A2)** | PR-05 achat grass | S | sonde marchand live | skip-if-not-sold, priorité revive inchangée | à faire |
+| | PR-04 cure pets | M | spike états pets exposés ? | si non exposé → abandon documenté | à faire |
+| | PR-17 pet organize | S-M | aucune | combine + transferts, confirmations serveur | à faire |
+| **4 — confort moyen** | PR-10 smart town | M | aucune | filtre de plan en entrée de course (pas de branches dispersées) | à faire |
+| | PR-12 switch d'arme CH | M | aucune (primitive buff-gear) | rotation 2 armes, protégés intouchables | à faire |
+| | PR-15 matching recherche/adhésion | M | fork | pages du board, rejoin unique | à faire |
+| **5 — contrats à vérifier en live** | PR-11 guild storage | M-L | **contrat wire live** | précédent stall ; quotas + or + verrou | à faire |
+| | PR-19 quêtes événement | M | PR-01 + observation de l'offre réelle | fenêtres horaires sur le module quêtes | à faire |
+| | PR-16 union party | M | existe côté OpenSRO ? | sinon abandon | à faire |
+| | PR-06 zerk conditions SBot | S | activation hors combat confirmée ? | combat déjà couvert | à faire |
 
 Explorations conditionnelles (pas de PR avant vérification) : §4. Exclusions définitives : §5.
 
@@ -342,21 +357,18 @@ en ville ou un détenu par un détour (mouvement possédé).
 
 ---
 
-### PR-20 — Retour si non ressuscité après N minutes { P2 · S-M · fork+upstream · dep: — }
+### PR-20 — Attente de résurrection configurable { P2 · S · **LIVRÉE : PR nixxane #87 (2026-11-01)** }
+
+> **Spike conclu (2026-11-01, soir 3)** : le cœur existait déjà upstream — à la mort, avec
+> `party.acceptRes`, le bot attend avant de se réveiller en ville **si un aide vivant est à
+> portée** (vu dans les 15 dernières s), n'attend jamais pendant une offre de résurrection
+> ouverte, et accepte automatiquement les résurrections de party. Plus intelligent que la
+> minuterie brute phBot/SBot (`return_if_not_resd`, `backnores`). Seul écart : le délai était
+> codé en dur (20 s / 5 s). **Livré** : `party.reviveWaitS` (5–600 s, défaut 20 = inchangé),
+> log de mort précis, tests verts — #87.
 
 **Données** : phBot `return_if_not_resd` + `return_if_not_resd_minutes` ; SBot
 `backtown:backnores/backnorestime`.
-
-**Spike (léger)** : sémantique mort sur OpenSRO — fenêtre d'acceptation de résurrection,
-possibilité de scroll/revive en état mort, interaction avec les claims de résurrection team.
-
-**Contenu** : réglage `resurrect.waitBeforeReturn { minutes }` ; à la mort : attendre une
-résurrection (module existant + claims team), sinon basculer sur le chemin de sortie existant
-(scroll de résurrection/retour selon contrat vérifié). Fork : compter les claims team dans
-l'attente.
-
-**Tests** : rés arrivée à N-1 → pas de retour ; pas de claim → retour à N ; feature off ;
-mort en ville → jamais.
 
 ---
 
@@ -546,14 +558,21 @@ stats) », sources storage/pet, avatars/job items (ces deux dernières restent h
 
 ---
 
-## 3. Ordre de traitement et jalons
+## 3. Ordre de traitement et jalons (aligné sur la feuille de route §1)
 
-- **Jalon A (P0)** : PR-01 → PR-07 → PR-02 (le noyau conditions rend ensuite tout le reste
-  plus petit).
-- **Jalon B (P1)** : PR-03, PR-08, PR-04/05/06/09/10 (chacune précédée de son spike).
-- **Jalon C (P2)** : PR-18 → PR-20 → PR-21 → PR-14 → PR-22 → PR-17 → PR-13 → PR-12 → PR-15 →
-  PR-11 → PR-19.
-- **Jalon D (P3/conditionnel)** : PR-16, PR-23, §4.
+- **Phase 0 (livrée, 2026-11-01)** : #82, #83, #84, #85, #86 (+fix review), #87.
+- **Phase 1 — fin du bas du fleuve** : PR-08 → PR-13 → PR-09 (les deux dernières après leur
+  micro-sonde lecture seule, faisable depuis une session).
+- **Phase 2 — fondations** : PR-01 (scheduler, pure horloge, débloque PR-19 et le hand-over
+  team) → PR-02 (noyau conditions, vocabulaire fermé) → PR-03 + PR-18 (dérivés du noyau).
+- **Phase 3 — pets & soins (audits A1/A2)** : PR-05 (sonde marchand live) → PR-04 (spike états
+  pets) → PR-17.
+- **Phase 4 — confort moyen** : PR-10 (smart town en filtre de plan) → PR-12 (switch CH) →
+  PR-15 (fork).
+- **Phase 5 — contrats live** : PR-11 (guild storage, wire live) → PR-19 (après PR-01 +
+  observation de l'offre réelle) → PR-16 → PR-06.
+- Chaque PR : workflow §6 (spike → test régressif rouge → implémentation → build/tests →
+  PR ; statuts §7). Les principes « intelligent, pas reproduction » du §1 s'appliquent à tous.
 - Parallèle (hors de ce plan) : volet team multi-persos = `docs/TEAM.md` (bus → intel →
   arbiter → coordination → missions) ; les PR-01/PR-02/PR-08/PR-20 servent aussi ce volet.
 
@@ -594,6 +613,14 @@ World / Magic POP / taxi, invitations de masse guild/académie, tout contourneme
 
 ## 7. Statuts
 
+- 2026-11-01 (soir 4) — **PR-20 conclue : PR nixxane #87** « The wait for a party
+  resurrection before reviving in town is configurable » (`party.reviveWaitS` 5–600 s,
+  défaut 20 inchangé). Spike révélé que le cœur (attente si aide à portée, jamais pendant
+  une offre, acceptation auto) existait déjà upstream — plus intelligent que la minuterie
+  brute phBot/SBot. **Feuille de route §1/§3 réorganisée** en phases valeur÷risque avec les
+  principes « intelligent, pas reproduction ».
+- 2026-11-01 (soir 3) — review auto de #86 : bug réel de confirmation (refObjId seul) →
+  fix ffef3fe (clé complète + 500 ms), test de régression dédié, 669 tests.
 - 2026-11-01 (soir 2) — **auto-equip livré (spec B avec l'utilisateur)** : PR-23 →
   **PR nixxane #86** « Town trips wear carried gear with better real stats and store the
   replaced piece » — nouveau `lean-equip.js`, comparaison sur les formules de stats du client
