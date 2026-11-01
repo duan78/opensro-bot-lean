@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.8.0
+// @version      1.8.1
 // @updateURL    https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking, walk-back and an optional team relay in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.8.0';
+const VERSION = '1.8.1';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -8067,7 +8067,7 @@ function questToken(symbol) {
 }
 
 const Quest = {
-  trip: null, message: '', progressSeq: 0, kills: [], rewardSent: null,
+  trip: null, message: '', progressSeq: 0, kills: [], rewardSent: null, abandonSent: null,
   refused: new Map(),      // refId -> { count, at }: refused quest-reward commands
   visitFail: new Map(),    // refId -> at: a failed NPC visit waits this quest out
   rows: new Map(),         // dialogue row symbol -> skip-until timestamp
@@ -8124,7 +8124,9 @@ const Quest = {
     }
     if (!this.cfg().accept) return null;
     for (const m of this.markers()) {
-      if (m.valueA !== 1 || this.record(m.refId) || this.completed(m.refId) || skip.includes(m.refId)) continue;
+      // A repeatable quest offers again after completion (the server's marker is the authority on
+      // what can be accepted now), so only an active journal row or your lists keep a quest out.
+      if (m.valueA !== 1 || this.record(m.refId) || skip.includes(m.refId)) continue;
       if (!this.wanted(m.refId) || !cooled(m.refId)) continue;
       const npc = this.npcRoute(m);
       if (npc) return { intent: 'accept', refId: m.refId, marker: m, npc };
@@ -8140,8 +8142,17 @@ const Quest = {
   },
   // Observation runs every tick beside hunting: journal watching, the direct reward command, and
   // starting NPC trips when nothing else owns the character.
+  // The player's own Abandon button: one command, answered by the journal. Manual, never retried
+  // by the bot itself.
+  abandon(refId) {
+    if (this.trip || this.abandonSent || World.gp?.questPending || !this.record(refId)) return;
+    if (!Cmd.spaced('quest-abandon') || !Cmd.raw({ kind: 'quest-abandon', refId }, 'Quest: abandon ' + this.label({ refId }))) return;
+    this.abandonSent = { refId, at: now(), revision: World.gp?.revision ?? 0 };
+    Log.info('Quest: abandoning ' + this.label({ refId }) + '.');
+  },
   observe() {
     if (!this.on() || this.trip || !World.inWorld() || World.isDead()) return;
+    if (this.abandonSent && now() - this.abandonSent.at > 10000) this.abandonSent = null;
     // A reward whose answer never came counts as a refusal: after two the NPC route takes over,
     // so a wedged transaction (the worker's single quest slot never clearing) cannot stall the
     // quest forever.
@@ -8173,6 +8184,19 @@ const Quest = {
   // Journal watching on every gameplay push: settle the direct reward, and learn which monsters
   // advance which quest from the journal's own sequenced progress events.
   watch(gp) {
+    if (this.abandonSent && gp) {
+      const refId = this.abandonSent.refId;
+      if (!gp.quests?.some(r => r.refId === refId)) {
+        this.abandonSent = null;
+        this.visitFail.delete(refId); this.refused.delete(refId);
+        this.message = 'Quest: ' + this.label({ refId }) + ' abandoned.';
+        Log.info(this.message); UI.toast(this.message, 'info', 4000);
+      } else if ((gp.revision ?? 0) > this.abandonSent.revision && !gp.questPending && now() - this.abandonSent.at > 1500) {
+        // The transaction was released without a journal change: the game refused the abandon.
+        this.abandonSent = null;
+        Log.warn('Quest: the game refused to abandon ' + this.label({ refId }) + '.');
+      }
+    }
     if (this.rewardSent && gp) {
       const refId = this.rewardSent.refId;
       const stillThere = (gp.quests || []).some(r => r.refId === refId);
@@ -8362,15 +8386,18 @@ const Quest = {
     // Hunting restarts even dead: the controller's death lane then runs the configured revive.
     if (t.wasHunting && this.on() && reason !== 'manual control' && World.inWorld()) Hunt.start();
   },
-  cancel() { this.trip = null; this.rewardSent = null; },
+  cancel() { this.trip = null; this.rewardSent = null; this.abandonSent = null; },
   reset() { this.cancel(); this.kills = []; this.refused.clear(); this.visitFail.clear(); this.rows.clear(); this.progressSeq = 0; this.message = ''; },
   status() { return this.trip ? this.message : ''; },
   // The live journal for the panel: what is active, at which count, and what the bot is doing.
   listing() {
     return this.journal().filter(r => !this.completed(r.refId)).map(r => {
       const node = r.contents?.[0], marker = this.marker(r.refId);
+      const targets = new Set((this.cfg().targets || {})[r.refId] || []);
+      // A hint, not a rule: learned monsters nobody has spawned near are usually hunted elsewhere.
+      const around = !targets.size || !Hunt.running || [...World.ents.values()].some(e => targets.has(e.refObjId));
       return { refId: r.refId, token: this.token(r.refId), progress: node?.objectiveValues?.[0] ?? null,
-        done: node?.kind === 0 || marker?.valueA === 3, skipped: (this.cfg().skip || []).includes(r.refId) };
+        done: node?.kind === 0 || marker?.valueA === 3, around, skipped: (this.cfg().skip || []).includes(r.refId) };
     });
   },
 };
@@ -15421,7 +15448,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.8.0", "title": "Auto Quest", "items": ["New Quest page: quests are done automatically. The quest markers the game itself sends route the bot - it walks to the quest NPC, accepts the quest, and turns it in when the journal says the objective is met.", "Quests the reward window can close are rewarded with the quest window's own command, without walking back to the NPC. A refused reward waits a minute and then falls back to its NPC.", "Which dialogue row belongs to which quest, and which monster kills advance which quest, are learned while playing - no quest database is shipped. Learned monsters are hunted first while their quest counts.", "The quest list shows each active quest's count and a Skip button; codename include/exclude patterns filter which quests are taken.", "Turn-ins never guess between several unknown dialogue rows (a wrong Yes would accept another quest); such an NPC is left with a message instead.", "Everything here was tested against a simulated game state only: the quest marker, journal, and NPC dialogue contracts were read from the game's own source. The opcodes and dialogue flow have not been verified on the live server yet."]}, {"version": "1.7.3", "title": "Clearer mall roles: scrolls with the potions, merchant-first thresholds", "items": ["Keeping the 20% damage and resistance scrolls active is now set under Automatic potion use, right beside the speed scroll it mirrors; the Item mall section only refills the stock.", "The mall potion thresholds now default below the merchant restock marks, so the merchant stays the primary source and the mall only steps in when that was not enough. Raising a mall mark above the merchant one flips that item to silk-first, for wallets that prefer it — the thresholds themselves express the priority."]}, {"version": "1.7.2", "title": "Item mall: MP bags and Reverse Return Scrolls", "items": ["The mall buyer can now also refill MP potion bags and Reverse Return Scrolls (the merchant with gold stays the cheaper source for scrolls; the mall is the fallback you arm yourself). Same rules as the HP bags: per-run silk budget, one measured order at a time, live catalogue prices."]}, {"version": "1.7.1", "title": "Mall buyer: no order inside an inventory rush, self-healing block", "items": ["Live test finding: the mall order and an item-use (the battle scroll's) went out in the same second; the game worker silently refuses mall commands while an inventory transaction is open, so the order never reached the server and looked like an unconfirmed purchase. The buyer now waits for a calm inventory window before ordering.", "A blocked buyer (unconfirmed order) now probes the catalogue read-only every 10 s: only a responsive mall moves its revision, so a change proves the session is usable and buying resumes by itself; a genuinely poisoned client stays silent and the block stays (re-entering the game still works too).", "The battle-scroll auto-use was confirmed working live (buff re-applied from bag stock)."], "note": "The first real purchase is still pending live verification."}, {"version": "1.7.0", "title": "Item mall supplies, battle scrolls, reverse scroll restock", "items": ["New, off by default, under Supplies: buy HP potion bags from the Item Mall when the total HP stock runs low, bounded by a per-bot-run silk budget. One order at a time lands straight in the bag while hunting; the merchant town trips stay the primary supply, a refusal backs that item off for a minute, and an unconfirmed order blocks all mall buying until you re-enter the game (the game's own resync rule — it is never retried).", "Battle scrolls: keep a 20% damage increase and/or a 20% resistance scroll active while hunting. Uses your bag stock and re-uses a scroll whenever the 30-minute buff runs out; both can also be topped up from the mall under the same budget.", "Reverse Return Scrolls can now be refilled at the recorded merchant with gold, like the potions; a merchant without them skips them with a notice and the trip still walks back.", "The read-only mall probe stays available as `SROLean.mall`; the buyer and the scrolls are exposed as `SROLean.mallBuyer` and `SROLean.scrolls` for live inspection."], "note": "The catalogue read (mall-open, balances, 103 real offers) was verified live on the server; the buying itself (mall-buy) is verified in simulation only and has not yet spent real silk."}, {"version": "1.6.0", "title": "Attack pet assist", "items": ["New, off by default, under Combat → Hunt area: every monster the bot engages is also given to the attack pet, with the same order the game's own pet bar sends. The pet stops staying behind on an old monster while you fight a new one.", "With the call-back on (default), a pet farther than the radius (15 m) is first called back to you, then sets out to the new target from your side — whatever chases it comes along, a walking lure. Between targets the pet stays at your side. The wait gives up after a timeout (3 s) and orders the attack anyway; the order repeats every few seconds (5 s) so a lost one never leaves the pet idle.", "Only your own living attack pet is commanded; the pickup pet keeps collecting beside this, transports are untouched, and nothing is sent while a town trip, a restock, a walk-back or a resurrection owns the character, or while the bot is stopped."], "note": "Verified in simulation only (world-mirror tests); not yet exercised against the live server."}, {"version": "1.5.3", "title": "Upstream sync: support, party and alchemy", "items": ["Merges upstream 1.2.175–1.2.186: party buffs that would not stack are skipped without holding up the others, \"Attack monsters\" can be turned off so a support character never starts a fight, party members who died out of view are resurrected, town trips recover from transactions the game never answered, buffs sharing a weapon need one weapon change, the party stays together and answers applications, auto-start remembers your last Start or Stop, the bot can start again after it stops by itself (off), attribute alchemy skips a stat that ran out of stones and moves on, an Immortal stone is fused first when an Astral one needs it, and up to 9999 enhancement attempts per run are allowed.", "The team edition (relay, intel, knowledge, arbiter) is unchanged; the upstream support-character guard and the team target share keep working together, and the new retry guard runs beside the team tick."], "note": "Verified in simulation only (593+ upstream tests plus the team suite)."}, {"version": "1.5.2", "title": "Upstream sync: pet care", "items": ["Merges upstream 1.2.174: pet HP recovery kits stop draining on a wrong HP reading (catalogue-only maximum plus a flat-HP guard with a grace window), HGP recovery potions feed the attack pet and are bought in town, pet recovery kits are bought on the same trips and picked by their real (owner-scaled) heal, and a dead pet is revived with a Grass of life during a town trip.", "Adds upstream fix: each pet's maximum HP is learned from its own live HP (the highest value seen) instead of the pet catalogue, whose asset the live server removed while a stale cached copy kept serving wrong values — that copy made the bot burn kits on a full pet and then rest it while it was dying. A rested pet is now unblocked the moment its HP moves again.", "The team edition is unchanged and re-verified on the new base (590 tests)."], "note": "The observed-maximum fix is confirmed against the live session readings; the rest was verified in simulation only."}];
+const RELEASE_NOTES = [{"version": "1.8.1", "title": "Auto Quest, second pass", "items": ["Repeatable quests are taken again: after completing one, its NPC's new offer marker is answered like any other. The server's marker decides what can be accepted now.", "The Quest page's journal rows gain an Abandon button (with a confirm click) that sends the game's own give-up command once and settles on the journal's answer. Skipping keeps a quest out without dropping its progress.", "Journal rows also say \"targets not around\" while hunting when a quest's learned monsters have not spawned near, so a quest that needs another hunting spot is visible at a glance.", "Quest mechanics that need their own in-world actions are not automated: gathering with a quest tool (stand in its area and use the knife), and capture traps (cast the quest's trap skill on its monster, e.g. via your rotation). Accepting and turning those quests in is still automatic.", "Still simulation-tested only; the quest opcodes and the dialogue flow have not been verified on the live server yet."]}, {"version": "1.8.0", "title": "Auto Quest", "items": ["New Quest page: quests are done automatically. The quest markers the game itself sends route the bot - it walks to the quest NPC, accepts the quest, and turns it in when the journal says the objective is met.", "Quests the reward window can close are rewarded with the quest window's own command, without walking back to the NPC. A refused reward waits a minute and then falls back to its NPC.", "Which dialogue row belongs to which quest, and which monster kills advance which quest, are learned while playing - no quest database is shipped. Learned monsters are hunted first while their quest counts.", "The quest list shows each active quest's count and a Skip button; codename include/exclude patterns filter which quests are taken.", "Turn-ins never guess between several unknown dialogue rows (a wrong Yes would accept another quest); such an NPC is left with a message instead.", "Everything here was tested against a simulated game state only: the quest marker, journal, and NPC dialogue contracts were read from the game's own source. The opcodes and dialogue flow have not been verified on the live server yet."]}, {"version": "1.7.3", "title": "Clearer mall roles: scrolls with the potions, merchant-first thresholds", "items": ["Keeping the 20% damage and resistance scrolls active is now set under Automatic potion use, right beside the speed scroll it mirrors; the Item mall section only refills the stock.", "The mall potion thresholds now default below the merchant restock marks, so the merchant stays the primary source and the mall only steps in when that was not enough. Raising a mall mark above the merchant one flips that item to silk-first, for wallets that prefer it — the thresholds themselves express the priority."]}, {"version": "1.7.2", "title": "Item mall: MP bags and Reverse Return Scrolls", "items": ["The mall buyer can now also refill MP potion bags and Reverse Return Scrolls (the merchant with gold stays the cheaper source for scrolls; the mall is the fallback you arm yourself). Same rules as the HP bags: per-run silk budget, one measured order at a time, live catalogue prices."]}, {"version": "1.7.1", "title": "Mall buyer: no order inside an inventory rush, self-healing block", "items": ["Live test finding: the mall order and an item-use (the battle scroll's) went out in the same second; the game worker silently refuses mall commands while an inventory transaction is open, so the order never reached the server and looked like an unconfirmed purchase. The buyer now waits for a calm inventory window before ordering.", "A blocked buyer (unconfirmed order) now probes the catalogue read-only every 10 s: only a responsive mall moves its revision, so a change proves the session is usable and buying resumes by itself; a genuinely poisoned client stays silent and the block stays (re-entering the game still works too).", "The battle-scroll auto-use was confirmed working live (buff re-applied from bag stock)."], "note": "The first real purchase is still pending live verification."}, {"version": "1.7.0", "title": "Item mall supplies, battle scrolls, reverse scroll restock", "items": ["New, off by default, under Supplies: buy HP potion bags from the Item Mall when the total HP stock runs low, bounded by a per-bot-run silk budget. One order at a time lands straight in the bag while hunting; the merchant town trips stay the primary supply, a refusal backs that item off for a minute, and an unconfirmed order blocks all mall buying until you re-enter the game (the game's own resync rule — it is never retried).", "Battle scrolls: keep a 20% damage increase and/or a 20% resistance scroll active while hunting. Uses your bag stock and re-uses a scroll whenever the 30-minute buff runs out; both can also be topped up from the mall under the same budget.", "Reverse Return Scrolls can now be refilled at the recorded merchant with gold, like the potions; a merchant without them skips them with a notice and the trip still walks back.", "The read-only mall probe stays available as `SROLean.mall`; the buyer and the scrolls are exposed as `SROLean.mallBuyer` and `SROLean.scrolls` for live inspection."], "note": "The catalogue read (mall-open, balances, 103 real offers) was verified live on the server; the buying itself (mall-buy) is verified in simulation only and has not yet spent real silk."}, {"version": "1.6.0", "title": "Attack pet assist", "items": ["New, off by default, under Combat → Hunt area: every monster the bot engages is also given to the attack pet, with the same order the game's own pet bar sends. The pet stops staying behind on an old monster while you fight a new one.", "With the call-back on (default), a pet farther than the radius (15 m) is first called back to you, then sets out to the new target from your side — whatever chases it comes along, a walking lure. Between targets the pet stays at your side. The wait gives up after a timeout (3 s) and orders the attack anyway; the order repeats every few seconds (5 s) so a lost one never leaves the pet idle.", "Only your own living attack pet is commanded; the pickup pet keeps collecting beside this, transports are untouched, and nothing is sent while a town trip, a restock, a walk-back or a resurrection owns the character, or while the bot is stopped."], "note": "Verified in simulation only (world-mirror tests); not yet exercised against the live server."}, {"version": "1.5.3", "title": "Upstream sync: support, party and alchemy", "items": ["Merges upstream 1.2.175–1.2.186: party buffs that would not stack are skipped without holding up the others, \"Attack monsters\" can be turned off so a support character never starts a fight, party members who died out of view are resurrected, town trips recover from transactions the game never answered, buffs sharing a weapon need one weapon change, the party stays together and answers applications, auto-start remembers your last Start or Stop, the bot can start again after it stops by itself (off), attribute alchemy skips a stat that ran out of stones and moves on, an Immortal stone is fused first when an Astral one needs it, and up to 9999 enhancement attempts per run are allowed.", "The team edition (relay, intel, knowledge, arbiter) is unchanged; the upstream support-character guard and the team target share keep working together, and the new retry guard runs beside the team tick."], "note": "Verified in simulation only (593+ upstream tests plus the team suite)."}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -17491,6 +17518,7 @@ const UI = {
     const Q = () => Settings.profile.quest;
     const status = el('p', Quest.status() || 'No quest visit running.', 'muted');
     const list = el('div', null, 'members');
+    let armedAbandon = 0;
     const render = () => {
       status.textContent = Quest.status() || 'No quest visit running.';
       const rows = Quest.listing();
@@ -17499,13 +17527,23 @@ const UI = {
         const line = el('div', null, 'member');
         const name = el('div', null, 'member-name');
         name.append(el('strong', row.token || 'quest #' + row.refId),
-          el('span', (row.progress !== null ? 'count ' + row.progress : 'no counter') + (row.done ? ' · ready to turn in' : '') + (row.skipped ? ' · skipped' : ''), 'muted'));
-        const button = this.button(row.skipped ? 'Unskip' : 'Skip', () => {
-          const skip = new Set(Q().skip || []);
-          skip.has(row.refId) ? skip.delete(row.refId) : skip.add(row.refId);
-          Q().skip = [...skip]; Settings.saveProfile(); render();
+          el('span', (row.progress !== null ? 'count ' + row.progress : 'no counter') + (row.done ? ' · ready to turn in' : '') +
+            (row.around ? '' : ' · targets not around') + (row.skipped ? ' · skipped' : ''), 'muted'));
+        const skip = this.button(row.skipped ? 'Unskip' : 'Skip', () => {
+          const list = new Set(Q().skip || []);
+          list.has(row.refId) ? list.delete(row.refId) : list.add(row.refId);
+          Q().skip = [...list]; Settings.saveProfile(); render();
         });
-        line.append(name, button); return line;
+        // Abandon drops all progress: the first click only arms the button for a moment.
+        const abandon = this.button(armedAbandon === row.refId ? 'Sure?' : 'Abandon', () => {
+          if (armedAbandon !== row.refId) {
+            armedAbandon = row.refId; abandon.textContent = 'Sure?';
+            setTimeout(() => { if (armedAbandon === row.refId) { armedAbandon = 0; render(); } }, 3000);
+            return;
+          }
+          armedAbandon = 0; Quest.abandon(row.refId); render();
+        });
+        line.append(name, skip, abandon); return line;
       }));
     };
     render();

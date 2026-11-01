@@ -999,6 +999,7 @@ const UI = {
     const Q = () => Settings.profile.quest;
     const status = el('p', Quest.status() || 'No quest visit running.', 'muted');
     const list = el('div', null, 'members');
+    let armedAbandon = 0;
     const render = () => {
       status.textContent = Quest.status() || 'No quest visit running.';
       const rows = Quest.listing();
@@ -1007,13 +1008,23 @@ const UI = {
         const line = el('div', null, 'member');
         const name = el('div', null, 'member-name');
         name.append(el('strong', row.token || 'quest #' + row.refId),
-          el('span', (row.progress !== null ? 'count ' + row.progress : 'no counter') + (row.done ? ' · ready to turn in' : '') + (row.skipped ? ' · skipped' : ''), 'muted'));
-        const button = this.button(row.skipped ? 'Unskip' : 'Skip', () => {
-          const skip = new Set(Q().skip || []);
-          skip.has(row.refId) ? skip.delete(row.refId) : skip.add(row.refId);
-          Q().skip = [...skip]; Settings.saveProfile(); render();
+          el('span', (row.progress !== null ? 'count ' + row.progress : 'no counter') + (row.done ? ' · ready to turn in' : '') +
+            (row.around ? '' : ' · targets not around') + (row.skipped ? ' · skipped' : ''), 'muted'));
+        const skip = this.button(row.skipped ? 'Unskip' : 'Skip', () => {
+          const list = new Set(Q().skip || []);
+          list.has(row.refId) ? list.delete(row.refId) : list.add(row.refId);
+          Q().skip = [...list]; Settings.saveProfile(); render();
         });
-        line.append(name, button); return line;
+        // Abandon drops all progress: the first click only arms the button for a moment.
+        const abandon = this.button(armedAbandon === row.refId ? 'Sure?' : 'Abandon', () => {
+          if (armedAbandon !== row.refId) {
+            armedAbandon = row.refId; abandon.textContent = 'Sure?';
+            setTimeout(() => { if (armedAbandon === row.refId) { armedAbandon = 0; render(); } }, 3000);
+            return;
+          }
+          armedAbandon = 0; Quest.abandon(row.refId); render();
+        });
+        line.append(name, skip, abandon); return line;
       }));
     };
     render();

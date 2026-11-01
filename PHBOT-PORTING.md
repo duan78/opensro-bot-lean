@@ -39,7 +39,7 @@ Companion analysis (not in this repo): `FEATURES.md`, `RAPPORT.md` of the dump.
 
 | # | Candidate | Value | Cost | Feasibility | Preconditions / risks |
 |---|---|---|---|---|---|
-| **P0-1** | **Auto Quest (hunt/collect)** — phBot's flagship | ★★★★★ | High | Good: the OpenSRO client already ships the full contract (NPC dialogue statechart, quest journal, accept 0x71EB / reward 0x729A, markers) | Quest definitions source; verify opcodes live before trusting the checkout (stall precedent). |
+| **P0-1** | **Auto Quest (hunt/collect)** — phBot's flagship — **shipped in 1.8.0/1.8.1** (`lean-quest.js`: marker routing, journal watching, learned rows and kill targets, direct rewards, repeatables, abandon) | ★★★★★ | done | Good: the OpenSRO client already ships the full contract (NPC dialogue statechart, quest journal, reward 0x729A / give-up 0x71EB, markers) | Deliberately not automated: gathering with a quest tool, capture traps, and phBot's training-area relocation (the hunt area stays yours; the journal shows "targets not around" instead). Live opcode verification still pending. |
 | **P0-2** | Conditions engine (`when → do` rules) | ★★★★☆ | Medium | Very good: every phBot action maps to a module we already have | Keep it lean: closed action vocabulary, JSON rules, no arbitrary scripting. |
 | **P0-3** | Return scheduler: fixed time (`return_at`), top-of-hour alignment (`return_before_next_hour`), return-then-disconnect | ★★★★☆ | Low | Trivial on top of `Town.reason()` | None; prerequisite for recurring/event quests and clean multi-character session hand-over. |
 | P1-4 | Smart Town (compose the town trip from the services actually needed) | ★★★☆☆ | Medium | Good (`restock.js` + `gen-towns.py`) | Watch `Town` complexity. |

@@ -38,7 +38,7 @@ function questToken(symbol) {
 }
 
 const Quest = {
-  trip: null, message: '', progressSeq: 0, kills: [], rewardSent: null,
+  trip: null, message: '', progressSeq: 0, kills: [], rewardSent: null, abandonSent: null,
   refused: new Map(),      // refId -> { count, at }: refused quest-reward commands
   visitFail: new Map(),    // refId -> at: a failed NPC visit waits this quest out
   rows: new Map(),         // dialogue row symbol -> skip-until timestamp
@@ -95,7 +95,9 @@ const Quest = {
     }
     if (!this.cfg().accept) return null;
     for (const m of this.markers()) {
-      if (m.valueA !== 1 || this.record(m.refId) || this.completed(m.refId) || skip.includes(m.refId)) continue;
+      // A repeatable quest offers again after completion (the server's marker is the authority on
+      // what can be accepted now), so only an active journal row or your lists keep a quest out.
+      if (m.valueA !== 1 || this.record(m.refId) || skip.includes(m.refId)) continue;
       if (!this.wanted(m.refId) || !cooled(m.refId)) continue;
       const npc = this.npcRoute(m);
       if (npc) return { intent: 'accept', refId: m.refId, marker: m, npc };
@@ -111,8 +113,17 @@ const Quest = {
   },
   // Observation runs every tick beside hunting: journal watching, the direct reward command, and
   // starting NPC trips when nothing else owns the character.
+  // The player's own Abandon button: one command, answered by the journal. Manual, never retried
+  // by the bot itself.
+  abandon(refId) {
+    if (this.trip || this.abandonSent || World.gp?.questPending || !this.record(refId)) return;
+    if (!Cmd.spaced('quest-abandon') || !Cmd.raw({ kind: 'quest-abandon', refId }, 'Quest: abandon ' + this.label({ refId }))) return;
+    this.abandonSent = { refId, at: now(), revision: World.gp?.revision ?? 0 };
+    Log.info('Quest: abandoning ' + this.label({ refId }) + '.');
+  },
   observe() {
     if (!this.on() || this.trip || !World.inWorld() || World.isDead()) return;
+    if (this.abandonSent && now() - this.abandonSent.at > 10000) this.abandonSent = null;
     // A reward whose answer never came counts as a refusal: after two the NPC route takes over,
     // so a wedged transaction (the worker's single quest slot never clearing) cannot stall the
     // quest forever.
@@ -144,6 +155,19 @@ const Quest = {
   // Journal watching on every gameplay push: settle the direct reward, and learn which monsters
   // advance which quest from the journal's own sequenced progress events.
   watch(gp) {
+    if (this.abandonSent && gp) {
+      const refId = this.abandonSent.refId;
+      if (!gp.quests?.some(r => r.refId === refId)) {
+        this.abandonSent = null;
+        this.visitFail.delete(refId); this.refused.delete(refId);
+        this.message = 'Quest: ' + this.label({ refId }) + ' abandoned.';
+        Log.info(this.message); UI.toast(this.message, 'info', 4000);
+      } else if ((gp.revision ?? 0) > this.abandonSent.revision && !gp.questPending && now() - this.abandonSent.at > 1500) {
+        // The transaction was released without a journal change: the game refused the abandon.
+        this.abandonSent = null;
+        Log.warn('Quest: the game refused to abandon ' + this.label({ refId }) + '.');
+      }
+    }
     if (this.rewardSent && gp) {
       const refId = this.rewardSent.refId;
       const stillThere = (gp.quests || []).some(r => r.refId === refId);
@@ -333,15 +357,18 @@ const Quest = {
     // Hunting restarts even dead: the controller's death lane then runs the configured revive.
     if (t.wasHunting && this.on() && reason !== 'manual control' && World.inWorld()) Hunt.start();
   },
-  cancel() { this.trip = null; this.rewardSent = null; },
+  cancel() { this.trip = null; this.rewardSent = null; this.abandonSent = null; },
   reset() { this.cancel(); this.kills = []; this.refused.clear(); this.visitFail.clear(); this.rows.clear(); this.progressSeq = 0; this.message = ''; },
   status() { return this.trip ? this.message : ''; },
   // The live journal for the panel: what is active, at which count, and what the bot is doing.
   listing() {
     return this.journal().filter(r => !this.completed(r.refId)).map(r => {
       const node = r.contents?.[0], marker = this.marker(r.refId);
+      const targets = new Set((this.cfg().targets || {})[r.refId] || []);
+      // A hint, not a rule: learned monsters nobody has spawned near are usually hunted elsewhere.
+      const around = !targets.size || !Hunt.running || [...World.ents.values()].some(e => targets.has(e.refObjId));
       return { refId: r.refId, token: this.token(r.refId), progress: node?.objectiveValues?.[0] ?? null,
-        done: node?.kind === 0 || marker?.valueA === 3, skipped: (this.cfg().skip || []).includes(r.refId) };
+        done: node?.kind === 0 || marker?.valueA === 3, around, skipped: (this.cfg().skip || []).includes(r.refId) };
     });
   },
 };

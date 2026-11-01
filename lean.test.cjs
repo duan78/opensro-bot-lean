@@ -6983,8 +6983,8 @@ async function updateTests() {
   }
   await check('updates compare numeric version components and ignore malformed versions', async () => {
     const f = fixture();
-    for (const v of ['9.9.9', '1.8.1', '2.0.0']) assert.equal(f.Updates.newer(v), true);
-    for (const v of ['1.2.9', '1.2.36', '1.2.169', '1.2.173', '1.3.0', '1.4.3', '1.5.0', '1.5.1', '1.5.2', '1.5.3', '1.5.4', '1.6.0', '1.6.1', '1.7.0', '1.7.1', '1.7.2', '1.7.3', '1.7.4', '1.8.0', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
+    for (const v of ['9.9.9', '1.8.2', '2.0.0']) assert.equal(f.Updates.newer(v), true);
+    for (const v of ['1.2.9', '1.2.36', '1.2.169', '1.2.173', '1.3.0', '1.4.3', '1.5.0', '1.5.1', '1.5.2', '1.5.3', '1.5.4', '1.6.0', '1.6.1', '1.7.0', '1.7.1', '1.7.2', '1.7.3', '1.7.4', '1.8.0', '1.8.1', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
   });
   await check('updates pin metadata and user-initiated installer to the same trusted commit', async () => {
     const f = fixture(), calls = updater(f); f.UI.updateButton = {};
@@ -7969,4 +7969,27 @@ test('a running town trip keeps the quest waiting', () => {
   f.Town.trip = null;
   f.Quest.observe();
   assert.ok(f.Quest.trip, 'with town done the visit starts');
+});
+
+test('a repeatable quest is offered and accepted again after completion', () => {
+  const f = questFixture({ markers: [qMarker(512, 1)], completed: [512] });
+  f.Quest.observe();
+  assert.equal(f.Quest.trip?.intent, 'accept', 'a completed repeatable quest whose NPC offers again is taken');
+});
+
+test('the Abandon button sends the command once and settles on the journal answer', () => {
+  const f = questFixture({ quests: [qRecord(512)] });
+  f.Quest.abandon(512);
+  const sent = f.commands.filter(c => c.kind === 'quest-abandon');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].refId, 512);
+  // While the worker holds the transaction a second click sends nothing.
+  f.World.gp.questPending = 512;
+  f.Quest.abandon(512);
+  assert.equal(f.commands.filter(c => c.kind === 'quest-abandon').length, 1);
+  f.advance(1600);
+  qPush(f, { questPending: 0, quests: [] });
+  assert.match(f.Quest.message, /abandoned/);
+  f.Quest.abandon(512);
+  assert.equal(f.commands.filter(c => c.kind === 'quest-abandon').length, 1, 'an inactive quest is never abandoned');
 });
