@@ -70,9 +70,10 @@ Chaque PR DOIT respecter — extraits d'AGENTS.md + leçons des dumps et des rel
 | | PR-22 | S | — | lure : arrêt joueurs + budget de pulls | **#85 → 1.2.206** |
 | | PR-23 | M | — | auto-equip sur vraies stats, remplacé stocké | **#86** (+fix review ffef3fe) |
 | | PR-20 (réduite) | S | — | attente de résurrection configurable (le reste existait) | **#87** |
-| **1 — fin du bas du fleuve** | PR-08 alarmes par événement/unique | S-M | aucune | dernière quick win pure (tones + détections existantes) | **prochaine** |
-| | PR-13 auto-use scrolls (11 types) | S-M | micro-sonde catalogue | lesquels existent, puis motif trivial | à faire |
-| | PR-09 alchimie proof/awake + éléments | S-M | micro-sonde items | vérifier les items, puis motif lucky/steady | à faire |
+| | PR-08 alarmes (4 événements bus) | S | — | joueur proche / mort / level-up / unique en vue, défaut off | **#88** |
+| | PR-06 (réduite) zerk « encerclé » | S | — | `berserkCornered` : jauge pleine + N attaquants vivants, toute classe, aussi en lure | **#89** |
+| **1 — fin du bas du fleuve** | PR-13 auto-use scrolls (11 types) | S-M | **sonde bloquée** : `/assets/data/*.json` non servis en anonyme (404 alors que le bundle les référence) — déposer `missionPresentation.json` depuis un navigateur connecté (précédent mall-catalog-live), puis grep codenames scrolls | à faire (sonde) |
+| | PR-09 alchimie proof/awake + éléments | S-M | **même sonde** (existence des items) | à faire (sonde) |
 | **2 — les deux fondations** | PR-01 scheduler retour/déconnexion | M | aucune (pure horloge) | `return_at`, top-of-hour, retour-puis-déconnexion ; débloque PR-19 et le hand-over team | à faire |
 | | PR-02 conditions (noyau fermé) | L | après PR-01 | when→do JSON ; matrice de tests = messages d'erreur phBot | à faire |
 | | PR-03 protection presets | S-M | PR-02 | joueur attaquant / PK → stop/déconnexion | à faire |
@@ -86,7 +87,7 @@ Chaque PR DOIT respecter — extraits d'AGENTS.md + leçons des dumps et des rel
 | **5 — contrats à vérifier en live** | PR-11 guild storage | M-L | **contrat wire live** | précédent stall ; quotas + or + verrou | à faire |
 | | PR-19 quêtes événement | M | PR-01 + observation de l'offre réelle | fenêtres horaires sur le module quêtes | à faire |
 | | PR-16 union party | M | existe côté OpenSRO ? | sinon abandon | à faire |
-| | PR-06 zerk conditions SBot | S | activation hors combat confirmée ? | combat déjà couvert | à faire |
+| | PR-06 reste : esprit de groupe / potion | S | valeur faible | « encerclé » livré (#89), combat déjà couvert | optionnel |
 
 Explorations conditionnelles (pas de PR avant vérification) : §4. Exclusions définitives : §5.
 
@@ -635,3 +636,13 @@ World / Magic POP / taxi, invitations de masse guild/académie, tout contourneme
   (`potion.cure` + restock ref 58) → PR-04 réduite au cure pet ; zerk **combat** déjà
   upstream (`Combat.berserk`) → PR-06 réduite aux conditions SBot, P2.
 - Tout le reste : **à faire**. Cochées/màj ici au fur et à mesure.
+
+- 2026-11-02 — **PR-08 livrée : #88** (alarmes sonores : joueur proche / mort / level-up /
+  unique en vue — 4 switchs défaut off, hooks bus uniquement, melodies dédiées) et
+  **PR-06 réduite livrée : #89** (zerk « encerclé » : `macro.berserkCornered`, jauge pleine
+  + N attaquants vivants, toute classe, aussi pendant le lure). 667 tests verts chacune.
+  **PR-13/PR-09 sonde bloquée** : les `/assets/data/*.json` du jeu ne sont pas servis à un
+  client anonyme (404 ; le bundle déployé les référence bien) — déblocage : déposer
+  `missionPresentation.json` (et/ou itemdata) depuis un navigateur connecté au jeu,
+  précédent `mall-catalog-live-2026-10-31.json`. Aucune PR tant que l'existence des items
+  n'est pas prouvée (règle : contrat vérifié, jamais deviné).
