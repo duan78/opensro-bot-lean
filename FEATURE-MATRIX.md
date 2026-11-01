@@ -33,7 +33,7 @@ Légende état lean : ✅ couvert · 🟡 partiel (écart indiqué) · ❌ absen
 | 3 | Retour en ville (déclencheurs) | 50 clés | 16 clés | 🟡 | P0 : heure fixe + top-of-hour + déconnexion |
 | 4 | Ordonnanceur / déconnexion programmée | ✅ | ✅ | 🟡 (`every` seul) | P0 |
 | 5 | Navigation / navmesh | chiffré, inutilisable | navdata décodée | 🚀 clipper + navdata intégrée | conforme |
-| 6 | Potions / pills / zerk | potions | pills + zerk | 🟡 | pills + zerk à porter |
+| 6 | Potions / pills / zerk | potions | pills + zerk | 🟡 | pills perso ✅ (upstream) ; zerk combat ✅, conditions SBot restantes |
 | 7 | Pets | pick + attack + organize | + fellow + cheval | 🟡 | achat grass, cure pet, organize |
 | 8 | Quêtes automatiques | hunt/collect + événement | grille + job + 24 h | ✅/🟡 | scheduler événementiel manquant |
 | 9 | Conditions (when → do) | moteur complet | `emerg_*` partiel | ❌ | P0 |
@@ -136,10 +136,10 @@ potions, munitions, arme cassée, durabilité (`wear.pct`), pas d'XP (`noXp`), p
 |---|---|---|---|---|
 | Potions HP/MP + délais | autopotions | `autohp/mp` + `hpval/mpval`, `hpdelay/mpdelay` | ✅ | — |
 | Vigueurs (HP/MP grain) | ✅ | `autovigor[mp]` + `vigornumber`, `hpgrain/mpgrain` | ✅ | — |
-| Pills de purification (états anormaux perso) | — | `autoabstatepill`, `abstatepillnumber/type`, `buyabstatepills`, `abnormalnumber/type` | ❌ (le loot connaît `ITEM_ETC_CURE_` → groupe « pill », rien ne les **utilise**) | **P1** : vérifier les états anormaux + pills dans le client OpenSRO, puis auto-use (audit pet A2 même chantier) |
+| Pills de purification (états anormaux perso) | — | `autoabstatepill`, `abstatepillnumber/type`, `buyabstatepills`, `abnormalnumber/type` | ✅ **déjà upstream** (corrigé 2026-11-01 : `potion.cure` on par défaut + restock de la Special Universal Pill small ref 58) | reste : cure des **pets** (A2, voir B6) |
 | Drugs (anti-debuff lourds) | — | `usedrugs`, `drugnumber/type`, `buydrugs` | ❌ | même chantier que pills |
 | État anormal du transport | — | `autoabnormalstate_transport` | ❌ | niche trade |
-| Auto-Zerk sous conditions | — | `partyserk` : `zerkcond`, `zerkcornered[vals]`, `zerkspirit[_exclusive]`, `zerkpotion` | ❌ | **P1** (nouveau candidat SBot) : action « utiliser Zerk » candidate au moteur de conditions |
+| Auto-Zerk sous conditions | — | `partyserk` : `zerkcond`, `zerkcornered[vals]`, `zerkspirit[_exclusive]`, `zerkpotion` | 🟡 **combat couvert upstream** (corrigé 2026-11-01 : `Combat.berserk`, jauge pleine + classes de monstres cochées, mode strong) | restent les conditions SBot « encerclé / esprit de groupe / potion » |
 | S'asseoir si HP/MP bas | — | `sithp`, `sitmp` | ❌ | niche |
 
 ### B6. Pets
@@ -315,7 +315,7 @@ drops partagés, sync town, claims res, console de flotte), autostart, setup gui
 | **P0-2** | Moteur de conditions (when → do, vocabulaire fermé) | phBot 46 messages d'actions + `EVENT_*` ; y absorber P1-8 (protection) et `emerg_*` SBot | ★★★★☆ | moyen | tous les domaines d'action existent déjà en modules ; tests = messages d'erreur phBot |
 | **P1** | Pills/purification perso + pet (cure) | SBot `autoabstatepill`, `abstatepill*`, `attpetautoabnormal` | ★★★☆☆ | moyen | **préalable** : vérifier états anormaux + items CURE dans le client OpenSRO (audit A2) |
 | **P1** | Achat de Grass of Life | SBot `buygol`, `goltype/number` | ★★★☆☆ | faible | stable-keeper ; motif skip-if-not-sold existant (audit A1) |
-| **P1** | Auto-Zerk sous conditions | SBot `zerkcond/cornered/spirit/potion` | ★★★☆☆ | faible | action candidate de P0-2 ; à vérifier côté effect/confirmations |
+| **P1** | Zerk : conditions SBot complémentaires (encerclé/esprit/potion) | SBot `zerkcond/cornered/spirit/potion` | ★★☆☆☆ | faible | le combat (jauge + classes) est déjà upstream ; ne portent que les variantes SBot |
 | **P1-9** | Vendre l'excès de potions | phBot `sell_excess_potions` | ★★☆☆☆ | faible | trivial |
 | **P1** | Alarmes sonores par événement et par unique | SBot `alarms` 32 + `uniques` 26 clés | ★★★☆☆ | faible | tons existants ; brancher sur team intel/tracker |
 | **P1-7'** | Alchimie : Proof/Awake + éléments→pierres | phBot | ★★☆☆☆ | faible-moyen | vérifier les items dans les données du jeu d'abord |

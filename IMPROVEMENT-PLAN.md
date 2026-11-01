@@ -47,31 +47,31 @@ Chaque PR DOIT respecter — extraits d'AGENTS.md + leçons des dumps et des rel
 
 ## 1. Tableau récapitulatif (ordre de traitement recommandé)
 
-| # | PR | Priorité | Taille | Cible | Dep | Résumé |
-|---|---|---|---|---|---|---|
-| PR-01 | Scheduler retour & déconnexion | P0 | M | upstream | — | `return_at`, top-of-hour, retour-puis-déconnexion |
-| PR-07 | Vendre l'excès de potions | P1 | S | upstream | — | quick win trivial |
-| PR-02 | Moteur de conditions (noyau) | P0 | L | upstream | PR-01 | règles `when → do`, vocabulaire fermé |
-| PR-03 | Presets protection | P1 | S-M | upstream | PR-02 | joueur attaquant / statut PK → stop/déconnexion |
-| PR-08 | Alarmes sonores par événement & unique | P1 | S-M | upstream | — | extension des `tones` (58 clés SBot) |
-| PR-04 | Pills de purification (perso + pet) | P1 | M | upstream | spike | audits A2 ; états anormaux auto-soignés |
-| PR-05 | Achat Grass of Life | P1 | S | upstream | — | audit A1 ; `buygol` au stable-keeper |
-| PR-06 | Auto-Zerk sous conditions | P1 | S-M | upstream | spike | `zerkcond/cornered/spirit` SBot |
-| PR-09 | Alchimie : Proof/Awake + éléments | P1 | M | upstream | spike | reste de P1-7 |
-| PR-10 | Smart Town | P1 | M | upstream | — | composer la course aux services utiles |
-| PR-18 | Watchdog « aucun mouvement serveur » | P2 | S | upstream | PR-02 | règle + action stop/déconnexion |
-| PR-20 | Retour si non ressuscité | P2 | S-M | fork+upstream | — | `return_if_not_resd` (team claims) |
-| PR-21 | noXp → spot suivant | P2 | S | upstream | — | migration de zone de chasse |
-| PR-14 | Skills de vitesse/bruit au walkback | P2 | S | upstream | — | `wcastspeed/noise` SBot |
-| PR-22 | Conditions d'arrêt du lure | P2 | S | upstream | — | joueurs/PTG proches, attente au centre |
+| # | PR | Priorité | Taille | Cible | Dep | Résumé | Statut |
+|---|---|---|---|---|---|---|---|
+| PR-01 | Scheduler retour & déconnexion | P0 | M | upstream | — | `return_at`, top-of-hour, retour-puis-déconnexion | à faire |
+| PR-07 | Vendre l'excès de potions | P1 | S | upstream | — | quick win trivial | **PR nixxane #82 (2026-11-01)** |
+| PR-02 | Moteur de conditions (noyau) | P0 | L | upstream | PR-01 | règles `when → do`, vocabulaire fermé | à faire |
+| PR-03 | Presets protection | P1 | S-M | upstream | PR-02 | joueur attaquant / statut PK → stop/déconnexion | à faire |
+| PR-08 | Alarmes sonores par événement & unique | P1 | S-M | upstream | — | extension des `tones` (58 clés SBot) | à faire |
+| PR-04 | Cure des pets (états anormaux) | P1 | M | upstream | spike | audit A2 ; le perso est déjà couvert upstream | à faire (réduite) |
+| PR-05 | Achat Grass of Life | P1 | S | upstream | — | audit A1 ; `buygol` au stable-keeper | à faire (sonde vendeur d'abord) |
+| PR-06 | Zerk : conditions SBot complémentaires | P2 | S | upstream | spike | combat déjà upstream ; encerclé/esprit/potion | à faire (réduite) |
+| PR-09 | Alchimie : Proof/Awake + éléments | P1 | M | upstream | spike | reste de P1-7 | à faire |
+| PR-10 | Smart Town | P1 | M | upstream | — | composer la course aux services utiles | à faire |
+| PR-18 | Watchdog « aucun mouvement serveur » | P2 | S | upstream | PR-02 | règle + action stop/déconnexion | à faire |
+| PR-20 | Retour si non ressuscité | P2 | S-M | fork+upstream | — | `return_if_not_resd` (team claims) | à faire |
+| PR-21 | noXp → spot suivant | P2 | S | upstream | — | migration de zone de chasse | **PR nixxane #83 (2026-11-01)** |
+| PR-14 | Skills de vitesse/bruit au walkback | P2 | S | upstream | — | `wcastspeed/noise` SBot | **PR nixxane #84 (2026-11-01)** (mode buff « walk ») |
+| PR-22 | Conditions d'arrêt du lure | P2 | S | upstream | — | joueurs/PTG proches, attente au centre | **PR nixxane #85 (2026-11-01)** (joueurs 30 m + budget de pulls) |
 | PR-17 | Pet organize | P2 | S-M | upstream | — | combine + transferts pet↔sac |
 | PR-13 | Auto-use scrolls (11 types) | P2 | S-M | upstream | spike | xp/sxp/stat scrolls |
 | PR-12 | Switch d'arme CH en rotation | P2 | M | upstream | — | `skills:switch*` SBot |
 | PR-15 | Party matching : recherche/adhésion | P2 | M | fork | — | `partymatching_*` SBot |
 | PR-11 | Guild storage | P2 | M-L | upstream | spike live | quotas + or + verrou |
-| PR-19 | Quêtes événement/quenquentes | P2 | M | upstream | PR-01, spike | offre réelle OpenSRO |
-| PR-16 | Union party | P3 | M | upstream | spike | existe côté OpenSRO ? |
-| PR-23 | Mieux équipé automatiquement | P3 | M | upstream | — | opt-in, mode suggestion d'abord |
+| PR-19 | Quêtes événement/quenquentes | P2 | M | upstream | PR-01, spike | offre réelle OpenSRO | à faire |
+| PR-16 | Union party | P3 | M | upstream | spike | existe côté OpenSRO ? | à faire |
+| PR-23 | Mieux équipé automatiquement | P3 | M | upstream | — | opt-in, mode suggestion d'abord | à faire |
 
 Explorations conditionnelles (pas de PR avant vérification) : §4. Exclusions définitives : §5.
 
@@ -219,27 +219,26 @@ Pas de fichiers sons (WebAudio uniquement, pas de dépendance CDN).
 
 ---
 
-### PR-04 — Pills de purification, personnage + pets { P1 · M · upstream · dep: spike }
+### PR-04 — Cure des pets (états anormaux) { P1 · M · upstream · dep: spike }
 
-**Données** : SBot `autopot:autoabstatepill`, `autoabnormaltype/number`,
-`shop:buyabstatepills/getabstatepills/abstatepillnumber/abnormalnumber`,
-`autoabnormalstate_transport` (niche, hors scope v1) ; `attpetautoabnormal` (pet d'attaque).
-phBot : rien (rien observé). lean : `lean-items.js` groupe déjà `ITEM_ETC_CURE_*` → « pill »
-(pour le loot uniquement).
+> **Corrigé 2026-11-01** : la moitié « personnage » de cette PR existe **déjà upstream**
+> (`potion.cure` activé par défaut + restock de la Special Universal Pill small, ref 58 —
+> vu en traitant les quick wins). La PR est réduite au cure des **pets**.
 
-**Spike (lecture seule, bloquant)** : dans `../opensro` + bundles déployés — comment les états
-anormaux apparaissent sur l'enregistrement personnage et pet (champ/bitmask ?), quelle pill
-soigne quel état, cooldown/animation, est-ce que les pets portent des états. Si les états ne
-sont pas exposés au client web → **PR abandonnée** (le dire explicitement dans ce fichier).
+**Données** : SBot `attpetautoabnormal` (pet d'attaque) ; `autoabnormalstate_transport`
+(niche, hors scope v1). lean : `lean-items.js` groupe déjà `ITEM_ETC_CURE_*` → « pill »
+(pour le loot) et le personnage s'auto-soigne déjà.
 
-**Contenu** : réglages `potion.cure { on, keep }` + `pet.cure { on }` ; utiliser la pill quand
-un état anormal est observé ; confirmation = l'état disparaît de l'état du monde (jamais le
-dispatch) ; limite de tentatives + backoff ; restock achète des pills jusqu'à `keep`
-(seenMax/skip-if-not-sold).
+**Spike (lecture seule, bloquant)** : dans `../opensro` + bundles déployés — les pets
+portent-ils des états anormaux visibles côté client, et quelle item les soigne. Si non
+exposé → **PR abandonnée** (le dire explicitement dans ce fichier).
 
-**Tests** : pas d'état → rien ; état sans pill → message + (option) raison de retour ;
-état persistant après 2 pills → stop + tone (pas de burn en boucle) ; canal pet indépendant
-du combat ; migration additive.
+**Contenu** : réglage `pet.cure { on }` ; utiliser la pill/cure pet quand un état anormal
+est observé sur le pet d'attaque ; confirmation = l'état disparaît (jamais le dispatch) ;
+limite de tentatives + backoff.
+
+**Tests** : pas d'état → rien ; état sans item → message ; état persistant après 2 usages →
+stop + tone (pas de burn en boucle) ; canal pet indépendant du combat ; migration additive.
 
 **Réf. audit** : pet-management-audit A2.
 
@@ -264,18 +263,21 @@ gain d'item ; n'interrompt pas les autres étapes.
 
 ---
 
-### PR-06 — Auto-Zerk sous conditions { P1 · S-M · upstream · dep: spike }
+### PR-06 — Zerk : conditions SBot complémentaires { P2 · S · upstream · dep: spike }
+
+> **Corrigé 2026-11-01** : le zerk **en combat** existe déjà upstream (`Combat.berserk` :
+> jauge pleine + classes de monstres cochées, mode strong). Ne restent que les variantes
+> SBot hors combat — priorité abaissée à P2.
 
 **Données** : SBot `partyserk` : `zerkcond` (condition d'emploi), `zerkcornered` +
 `zerkcorneredval` (encerclé par ≥ N monstres), `zerkspirit` + `zerkspirit_exclusive`
 (réserver l'esprit de groupe), `zerkpotion`.
 
-**Spike (bloquant)** : jauge de zerk visible dans l'état du monde (source du jeu) ; commande
-d'activation + confirmation d'effet. Sinon abandon.
+**Spike (bloquant)** : commande d'activation hors combat + confirmation d'effet. Sinon abandon.
 
-**Contenu** : réglage `hunt.zerk { mode: off|full|attacked|cornered, cornerMobs, spiritKeep }` ;
-déclenchement quand jauge pleine + condition ; confirmation d'effet ; jamais pendant course
-en ville/détour (respect de l'ownership du mouvement) ; cooldown.
+**Contenu** : réglage `hunt.zerk { mode: off|attacked|cornered, cornerMobs, spiritKeep }` ;
+déclenchement quand jauge pleine + condition, **hors** ciblage normal ; confirmation
+d'effet ; jamais pendant course en ville/détour ; cooldown.
 
 **Tests** : jauge absente → no-op ; comptage « encerclé » (ennemis à portée) ; mode spirit
 keep (ne pas consommer si réservé groupe) ; reset lifecycle.
@@ -589,4 +591,12 @@ World / Magic POP / taxi, invitations de masse guild/académie, tout contourneme
 
 ## 7. Statuts
 
-Toutes les PR : **à faire** (2026-11-01). Cochées/màj ici au fur et à mesure.
+- 2026-11-01 (soir) — **4 quick wins livrées, une PR chacune, vers nixxane** :
+  PR-07 → **#82** (vente de l'excès de fournitures), PR-21 → **#83** (noXp → spot de
+  niveau suivant), PR-14 → **#84** (buffs maintenus au walk-back, mode « Hunting and
+  walk-back »), PR-22 → **#85** (lure : arrêt joueurs à 30 m + budget de pulls).
+  Toutes : défaut off/inchangé, tests d'intégration verts (667), sim-only.
+- Corrections d'état après vérification code : pills cure **personnage** déjà upstream
+  (`potion.cure` + restock ref 58) → PR-04 réduite au cure pet ; zerk **combat** déjà
+  upstream (`Combat.berserk`) → PR-06 réduite aux conditions SBot, P2.
+- Tout le reste : **à faire**. Cochées/màj ici au fur et à mesure.
