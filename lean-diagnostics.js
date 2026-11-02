@@ -1,6 +1,6 @@
 // Explicit report fields only: never export raw logs, profiles or game snapshots.
 const Diagnostics = {
-  history: [], errors: [], last: '', started: false,
+  history: [], errors: [], stops: [], last: '', started: false,
   number(value) { return Number.isFinite(value) ? value : null; },
   errorCode(message) {
     const text = String(message || '');
@@ -15,6 +15,13 @@ const Diagnostics = {
       [/scroll|return|travel/i, 'travel-error'],
     ]) if (pattern.test(text)) return code;
     return 'unclassified-error';
+  },
+  // Why the bot stopped by itself, in the bot's own fixed wording (no names or places), newest last. A stopped bot shows only
+  // "Bot stopped.", so without this a report cannot say what ended the run.
+  noteStop(source, reason) {
+    const text = String(reason || '').slice(0, 160);
+    this.stops.push({ at: now(), source, reason: text || 'no reason given' });
+    if (this.stops.length > 8) this.stops.shift();
   },
   start() {
     if (this.started) return;
@@ -166,7 +173,7 @@ const Diagnostics = {
     const gp = World.gp, c = Settings.profile, pet = Loot.pet(), social = gp?.social, matching = gp?.partyMatching;
     return {
       action: this.main(), partyStatus: this.party(), teamStatus: Team.diag(),
-      teamDetail: Settings.profile.team?.enabled ? TeamIntel.rows().length + ' shared entities, ' + TeamIntel.edges.size + ' combat edges, ' + TeamKnowledge.uniques.size + ' tracked uniques, ' + TeamKnowledge.players.size + ' known players' : '', petStatus: this.pet(), townStatus: this.town(), townDetail: this.townDetail(), townReason: this.townReason(),
+      teamDetail: Settings.profile.team?.enabled ? TeamIntel.rows().length + ' shared entities, ' + TeamIntel.edges.size + ' combat edges, ' + TeamKnowledge.uniques.size + ' tracked uniques, ' + TeamKnowledge.players.size + ' known players' : '', petStatus: this.pet(), townStatus: this.town(), townDetail: this.townDetail(), townReason: this.townReason(), sellStarStatus: String(SellStar.message || '').slice(0, 200),
       navigationReady: !!Navigation.scene, navigationError: String(Navigation.error || '').slice(0, 80),
       buffGearStatus: BuffGear.cfg().buffSwap ? String(BuffGear.status()).slice(0, 600) : '', buffGearActive: !!BuffGear.run, buffGearRestoring: !!BuffGear.run?.restoring, buffGearMovePending: !!BuffGear.run?.pending, buffGearRecovery: !!BuffGear.recovery,
       alchemyActive: !!Alchemy.run, alchemyPending: !!Alchemy.pending, alchemyAttempts: this.number(Alchemy.result?.attempts),
@@ -223,7 +230,7 @@ const Diagnostics = {
     const current = this.sample(), relative = entries => entries.map(({ at, ...entry }) => ({ secondsAgo: Math.max(0, Math.round((now() - at) / 1000)), ...entry }));
     return JSON.stringify({ app: 'nixxane bot', version: VERSION,
       privacy: 'Names, chat, account details, locations and raw logs are omitted. Error categories replace original messages.',
-      current, recentStates: relative(this.history), recentErrors: relative(this.errors) }, null, 2);
+      playerStopped: RunIntent.stopped(), current, recentStates: relative(this.history), recentErrors: relative(this.errors), recentStops: relative(this.stops) }, null, 2);
   },
   async copy() {
     const text = this.report();
@@ -233,3 +240,10 @@ const Diagnostics = {
     } catch { UI.showDiagnostics(text); }
   },
 };
+// Every stop the bot makes by itself passes Retry.note (hunting, walk back, travel, world change). A town trip that fails
+// before hunting has started again (after a revival) never reaches it, so that one is noted here.
+{
+  const note = Retry.note, failTown = Town.fail;
+  Retry.note = function (reason) { if (reason) Diagnostics.noteStop('stop', reason); return note.apply(this, arguments); };
+  Town.fail = function (reason) { const running = Hunt.running; if (!running) Diagnostics.noteStop('town', reason); return failTown.apply(this, arguments); };
+}
