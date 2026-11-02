@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {AutoStart, RenderControl, Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, Trade, WalkBack, Navigation, ClipRoute, Route, RouteCheck, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, Travel, Quest, QuestData, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, RepairHammer, Stall, SellStar, Team, TeamIntel, TeamKnowledge, TeamArbiter, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, Lure, stopAll, toggleBot, userStop, RunIntent, Retry, PetAttack, MallProbe, MallBuyer, LevelSpot, ScrollBuff, boot, Ticker, Sound, LeanMap};\n})();';
+  'globalThis.bot = {AutoStart, RenderControl, Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Hook, Cmd, Hunt, Loot, Restock, Trade, WalkBack, Navigation, ClipRoute, Route, RouteCheck, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, Travel, Quest, QuestData, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, RepairHammer, Stall, SellStar, Team, TeamIntel, TeamKnowledge, TeamArbiter, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, Lure, Equip, stopAll, toggleBot, userStop, RunIntent, Retry, PetAttack, MallProbe, MallBuyer, LevelSpot, ScrollBuff, boot, Ticker, Sound, LeanMap};\n})();';
 function fixture(document) {
   let time = 100000;
   const storage = new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -262,6 +262,7 @@ test('seal of Sun, Moon and Star gear is collected before nearer ordinary drops'
   f.Items.data.set(900, { name: 'Plain sword', icon: '', code: 'ITEM_CH_SWORD_01' });
   f.Items.data.set(901, { name: 'Star sword', icon: '', code: 'ITEM_CH_SWORD_01_A_RARE' });
   f.Items.data.set(903, { name: 'Sun sword', icon: '', code: 'ITEM_CH_SWORD_01_C_RARE' });
+  f.Items.filesLoaded = true;
   const gear = (gid, ref, x) => { const e = f.drop(gid, 44); e.refObjId = ref; e.x = x; return e; };
   const potion = f.drop(20, 2284), plain = gear(21, 900, 210), starNear = gear(22, 901, 220), starFar = gear(23, 901, 260), sun = gear(24, 903, 280);
   assert.equal(f.Loot.allowed(plain), true, 'plain gear stays eligible, only ranked lower');
@@ -277,10 +278,11 @@ test('the pickup pet also takes seal gear first; without the catalogue the neare
   const f = fixture(), P = f.Settings.profile.hunt.pickup;
   pickupPet(f); P.equipment = true;
   f.Items.data.set(903, { name: 'Sun sword', icon: '', code: 'ITEM_CH_SWORD_01_C_RARE' });
+  f.Items.filesLoaded = true;
   const elixir = f.drop(20, 3436);
   const sun = f.drop(21, 44); sun.refObjId = 903; sun.x = 280;
   assert.equal(f.Loot.choose('pet').gid, 21, 'seal gear before the nearer elixir');
-  f.Items.data.clear();
+  f.Items.data.clear(); f.Items.filesLoaded = false;
   assert.equal(f.Loot.choose('pet').gid, 20, 'nearest-first again while the catalogue is empty');
 });
 test('pet yields to actual potion dispatch and pending inventory then collects without interrupting combat', () => {
@@ -461,6 +463,14 @@ test('every supported town has a trade merchant in the town table, and the trade
   assert.equal(f.Settings.profile.trade.from, 'CH'); assert.equal(f.Settings.profile.trade.trips, 1);
   const g = f.botProfile({ trade: { from: 'KT', to: 'EU', trips: 3, potions: false, extra: 1 } });
   assert.equal(g.trade.from, 'KT'); assert.equal(g.trade.trips, 3); assert.equal(g.trade.potions, false); assert.equal('extra' in g.trade, false);
+});
+test('the alert-sound switches persist like every other profile section, and unknown fields are dropped', () => {
+  const f = fixture();
+  const saved = f.botProfile({ sounds: { player: true, died: true, levelUp: false, unique: false, mystery: 1 } });
+  assert.deepEqual([saved.sounds.player, saved.sounds.died, saved.sounds.levelUp, saved.sounds.unique], [true, true, false, false]);
+  assert.equal('mystery' in saved.sounds, false, 'unknown fields are dropped');
+  const fresh = f.botProfile({}).sounds;
+  assert.deepEqual([fresh.player, fresh.died, fresh.levelUp, fresh.unique], [false, false, false, false]);
 });
 test('auto pot keeps drinking while an auto trade runs, from the Controller loop', () => {
   const t = tradeFixture(), f = t.f;
@@ -905,6 +915,50 @@ test('item codenames give race, gender, degree, type and the filters', () => {
   assert.deepEqual(ids({ race: 'EU', kind: 'Protector' }), [500]);
   assert.deepEqual(ids({ query: 'potion' }), [8]);
   f.ItemRules.set([502], { act: 'sell' }); assert.deepEqual(ids({ custom: true }), [502], 'custom: only items with a rule');
+});
+test('items seen on the wire fill the catalogue when the files are not served', () => {
+  const f = fixture(), gp = f.World.gp;
+  const potion = { slot: 3, refObjId: 8, quantity: 5, name: 'HP recovery potion (X-large)', icon: 'item\\etc\\hp_potion_05.ddj',
+    tooltip: { fields: {}, descriptionSymbol: 'SN_ITEM_ETC_HP_POTION_05_TT_DESC' } };
+  const star = { slot: 4, refObjId: 12041, quantity: 1, name: 'Scorpio Blaze Diadem',
+    tooltip: { fields: {}, descriptionSymbol: 'SN_ITEM_EU_CLOTHES_13_CA_A_RARE_TT_DESC' } };
+  f.World.applyGameplay({ ...gp, inventory: [potion, star] });
+  assert.equal(f.Items.name(8), 'HP recovery potion (X-large)', 'the server name is used');
+  assert.equal(f.Items.iconDdj(8), 'item\\etc\\hp_potion_05.ddj', 'and its icon path');
+  assert.equal(f.ItemRules.info(8).group, 'potion', 'the tooltip key gives the codename the filters read');
+  assert.equal(f.ItemRules.info(12041).sox, 1, 'an _A_RARE tooltip key is Star');
+  // A merchant offer carries only a name; it is still worth caching.
+  f.advance(3000);
+  f.World.applyGameplay({ ...f.World.gp, shop: { npc: 7, offers: [{ refObjId: 57, name: 'Universal Pill (large)', price: '150' }] } });
+  assert.equal(f.Items.name(57), 'Universal Pill (large)', 'shop offers are cached by name');
+  // A name-only sighting never erases what a full row already taught (no row flipping while a shop is open).
+  assert.equal(f.Items.wireLearn([{ refObjId: 8, name: 'HP recovery potion (X-large)' }]), false, 'a sparse row changes nothing once a rich one is cached');
+  assert.equal(f.Items.wireRows.get(8).code, 'ITEM_ETC_HP_POTION_05', 'the codename is kept');
+  assert.equal(f.Items.iconDdj(8), 'item\\etc\\hp_potion_05.ddj', 'the icon is kept');
+  assert.equal(f.ItemRules.info(8).group, 'potion', 'so the codename filters keep working');
+  // Unchanged rows are not rewritten, and what one session saw the next one keeps.
+  assert.equal(f.Items.wireLearn([potion]), false, 'the same row again changes nothing');
+  f.Items.wireRows.clear(); f.Items.data.clear(); f.Items.wireLoaded = false;
+  f.Items.wireLoad();
+  assert.equal(f.Items.name(8), 'HP recovery potion (X-large)', 'rows reload from the store with the files still unserved');
+});
+test('wire rows never stop the file catalogue from loading, and the server rows still win', async () => {
+  const f = fixture();
+  const potion = { slot: 3, refObjId: 8, quantity: 5, name: 'HP recovery potion (X-large)', icon: 'item\\etc\\hp_potion_05.ddj',
+    tooltip: { fields: {}, descriptionSymbol: 'SN_ITEM_ETC_HP_POTION_05_TT_DESC' } };
+  f.World.applyGameplay({ ...f.World.gp, inventory: [potion] });
+  assert.ok(f.Items.data.size > 0, 'wire rows fill the catalogue within seconds');
+  assert.equal(f.Items.filesLoaded, false, 'that alone does not count as the file catalogue');
+  f.Icons.request = async (path, op) => op === 'json'
+    ? (path.endsWith('missionPresentation.json')
+      ? { itemsByRefObjId: { 8: { codename: 'ITEM_ETC_HP_POTION_05' }, 4040: { codename: 'ITEM_CH_W_13A_A_RARE' } } }
+      : { entries: {} })
+    : new Blob();
+  await f.Items.ready();
+  assert.equal(f.Items.filesLoaded, true, 'the file catalogue still loads when the files are served');
+  assert.equal(f.Items.data.get(4040).code, 'ITEM_CH_W_13A_A_RARE', 'and the list carries the full catalogue');
+  assert.equal(f.Items.name(8), 'HP recovery potion (X-large)', 'the server row wins over the file row');
+  assert.equal(f.Items.iconDdj(8), 'item\\etc\\hp_potion_05.ddj', 'including its icon');
 });
 test('stop and manual control prevent further automation', () => {
   const f = fixture(); f.Hunt.start(); f.drop(); f.Hunt.tick(); f.Hunt.stop();
@@ -2566,6 +2620,31 @@ test('Attack monsters off also keeps luring from starting fights', () => {
   f.Settings.profile.hunt.attack = false; idleFor(f, 1000); assert.equal(lured, 0);
   f.Settings.profile.hunt.attack = true; idleFor(f, 300); assert.ok(lured > 0);
 });
+test('alert chimes: a player near, death, a level up and a unique in view, each behind its own switch', () => {
+  const f = fixture(); f.Sound.init();
+  const played = []; f.Sound.play = kind => { played.push(kind); return true; };
+  const S = f.Settings.profile.sounds;
+  assert.deepEqual([S.player, S.died, S.levelUp, S.unique], [false, false, false, false], 'all off by default');
+  f.bus.emit('alert', 'player', { gid: 9 }); assert.deepEqual(played, [], 'off means silent');
+  S.player = true; f.bus.emit('alert', 'player', { gid: 9 }); assert.deepEqual(played, ['player']);
+  f.bus.emit('death', { gid: f.World.localGid() }); assert.deepEqual(played, ['player'], 'the death chime is off');
+  S.died = true; f.bus.emit('death', { gid: f.World.localGid() }); assert.deepEqual(played, ['player', 'died']);
+  f.bus.emit('death', { gid: 42 }); assert.equal(played.length, 2, 'another entity dying stays silent');
+  S.unique = true;
+  f.bus.emit('spawn', { gid: 60, kind: 'monster', rarity: 3 }); assert.deepEqual(played, ['player', 'died', 'unique']);
+  f.bus.emit('spawn', { gid: 61, kind: 'monster', rarity: 0 }); assert.equal(played.length, 3, 'ordinary monsters stay silent');
+  f.bus.emit('spawn', { gid: 62, kind: 'player', rarity: 3 }); assert.equal(played.length, 3, 'only monsters count');
+  S.levelUp = true;
+  f.World.gp.progression = { ...(f.World.gp.progression || {}), level: 10 };
+  f.bus.emit('gameplay'); f.bus.emit('gameplay'); assert.equal(played.length, 3, 'the first snapshot only learns the level');
+  f.World.gp.progression = { ...(f.World.gp.progression || {}), level: 11 };
+  f.bus.emit('gameplay'); assert.deepEqual(played, ['player', 'died', 'unique', 'levelUp']);
+  f.bus.emit('profile');
+  f.World.gp.progression = { ...(f.World.gp.progression || {}), level: 20 };
+  f.bus.emit('gameplay'); assert.equal(played.length, 4, 'a character switch does not chime on the level jump');
+  assert.equal(f.Sound.anyOn(), true);
+});
+
 test('the lure can stop when other players come near, and after a chosen number of pulls', () => {
   const f = fixture(); f.Hunt.start();
   const c = f.Settings.profile.lure;
@@ -2632,6 +2711,7 @@ test('SoX-only filters equipment to Star, Moon and Sun gear and leaves other cat
   f.Items.data.set(901, { name: 'Star', icon: '', code: 'ITEM_CH_SWORD_01_A_RARE' });
   f.Items.data.set(902, { name: 'Moon', icon: '', code: 'ITEM_CH_SWORD_01_B_RARE_HONOR' });
   f.Items.data.set(903, { name: 'Sun', icon: '', code: 'ITEM_CH_SWORD_01_C_LEGEND' });
+  f.Items.filesLoaded = true;
   assert.equal(f.Loot.allowed(plain), true); assert.equal(f.Loot.allowed(potion), true); assert.equal(f.Loot.allowed(gold), true);
   P.soxOnly = true;
   assert.deepEqual([plain, star, moon, sun, potion, gold].map(e => f.Loot.allowed(e)), [false, true, true, true, true, true]);
@@ -3965,6 +4045,16 @@ test('with Accept resurrection on and a helper in view the bot waits before revi
   assert.equal(rebirths(t.f), 1, 'a dead helper cannot resurrect us');
   t = deathFixture('revive'); t.f.Settings.profile.party.acceptRes = false; t.die(); t.offer(); t.f.advance(6000); t.f.Controller.tick(); assert.equal(rebirths(t.f), 0, 'an open resurrection offer is never answered by reviving');
 });
+test('the wait for a party resurrection before reviving in town is configurable', () => {
+  const rebirths = f => f.commands.filter(c => c.kind === 'rebirth').length;
+  let t = deathFixture('revive'); t.f.Settings.profile.party.reviveWaitS = 120; t.die();
+  assert.match(t.f.Party.waitNote(), /waiting 120 s/);
+  t.f.advance(21000); t.f.Controller.tick(); assert.equal(rebirths(t.f), 0, 'past the default 20 s the configured window is still open');
+  t.f.advance(100000); t.f.Controller.tick(); assert.equal(rebirths(t.f), 1, 'at the configured wait the bot revives itself');
+  t = deathFixture('revive'); t.f.Settings.profile.party.reviveWaitS = 120; t.f.World.ents.delete(77); t.die();
+  assert.match(t.f.Party.waitNote(), /no party member in view/);
+  t.f.advance(6000); t.f.Controller.tick(); assert.equal(rebirths(t.f), 1, 'nobody around: the short 5 s wait is untouched');
+});
 test('auto mastery is off by default, ignores dead characters and pending training, and backs off after a refusal', () => {
   assert.equal(fixture().Settings.profile.mastery.enabled, false);
   let f = masteryFixture(); f.Settings.profile.mastery.enabled = false; f.Controller.tick(); assert.deepEqual(trains(f), []);
@@ -4846,6 +4936,62 @@ test('town trips start for a broken weapon, worn gear, no XP and a timer, each w
   f.Town.cancel(); assert.equal(f.Town.reason(), '', 'so the next one is a full interval away');
   f.Hunt.stop(); f.Town.watch(); assert.deepEqual([f.Town.lastXpAt, f.Town.cycleFrom], [0, 0], 'the clocks only run while hunting');
 });
+
+test('no XP can move hunting to the next level spot instead of going to town', () => {
+  const f = townFixture(), c = f.Town.cfg(), gp = f.World.gp;
+  f.pet.inventory = []; gp.inventory.find(i => i.refObjId === 15).quantity = 500;
+  gp.progression = { ...(gp.progression || {}), level: 30, experience: '100' };
+  const here = { ...f.Settings.profile.hunt.center };
+  f.Settings.profile.hunt.radius = 20000;
+  f.Settings.profile.hunt.center = { regionId: 1, x: 5000, y: 0, z: 5000 };
+  assert.equal(f.LevelSpot.add(20), '');
+  f.Settings.profile.hunt.center = { regionId: 1, x: 9000, y: 0, z: 9000 };
+  assert.equal(f.LevelSpot.add(40), '');
+  f.Settings.profile.hunt.center = { ...here };
+  c.noXp.on = true; c.noXp.minutes = 10; c.noXp.action = 'nextSpot';
+  f.Town.watch();
+  f.advance(10 * 60000); f.Town.watch();
+  assert.equal(f.Town.reason(), 'no XP for 10 minutes');
+  f.Town.tick();
+  assert.equal(f.Town.trip, null, 'no town trip: hunting moves instead');
+  assert.equal(f.Settings.profile.hunt.center.x, 9000, 'the spot from level 40 is used next');
+  const restarted = f.Town.lastXpAt;
+  assert.ok(restarted > 0, 'the no-XP window restarts for the new spot');
+  // The level rule alone must not pull the spot back while the character is below the held level.
+  f.Settings.profile.hunt.levelSpots.on = true;
+  f.advance(4000);
+  assert.equal(f.LevelSpot.tick(), false);
+  assert.equal(f.Settings.profile.hunt.center.x, 9000, 'the held spot stays');
+  // Once the character's level reaches the held spot's gate, the hold ends and the level rule moves on.
+  f.Settings.profile.hunt.center = { regionId: 1, x: 5000, y: 0, z: 5000 };
+  assert.equal(f.LevelSpot.add(60), '', 'the level 60 spot is saved elsewhere');
+  f.Settings.profile.hunt.center = { regionId: 1, x: 9000, y: 0, z: 9000 };
+  gp.progression = { ...(gp.progression || {}), level: 61 };
+  f.advance(4000);
+  assert.equal(f.LevelSpot.tick(), true, 'the level rule takes over past the gate');
+  assert.equal(f.Settings.profile.hunt.center.x, 5000, 'hunting moves to the level 60 spot');
+  assert.equal(f.LevelSpot.heldLevel, 0, 'the hold is cleared, not pinned until reload');
+  f.Town.watch(); // the level jump reads as progress: start the no-XP window from here
+  // Still no XP at the new spot and no higher entry: town is the fallback.
+  f.advance(10 * 60000); f.Town.watch(); assert.equal(f.Town.reason(), 'no XP for 10 minutes');
+  f.Town.tick(); assert.ok(f.Town.trip, 'the level list ran out: the trip starts');
+  f.Town.cancel(); f.Hunt.stop();
+  // A potions-low reason still goes to town even with the switch on.
+  const low = townFixture(); const lc = low.Town.cfg();
+  low.pet.inventory = []; low.World.gp.inventory.find(i => i.refObjId === 15).quantity = 1;
+  low.World.gp.progression = { ...(low.World.gp.progression || {}), level: 30, experience: '100' };
+  lc.noXp.on = true; lc.noXp.minutes = 10; lc.noXp.action = 'nextSpot';
+  low.Town.watch(); low.advance(10 * 60000); low.Town.watch();
+  assert.equal(low.Town.reason(), 'potions running low', 'a supply reason outranks the spot move');
+  low.Town.tick(); assert.ok(low.Town.trip, 'the town trip starts anyway');
+  // Off by default the behaviour is unchanged: no XP starts a town trip.
+  const plain = townFixture(); const pc = plain.Town.cfg();
+  plain.pet.inventory = []; plain.World.gp.inventory.find(i => i.refObjId === 15).quantity = 500;
+  plain.World.gp.progression = { ...(plain.World.gp.progression || {}), level: 30, experience: '100' };
+  pc.noXp.on = true; pc.noXp.minutes = 10;
+  plain.Town.watch(); plain.advance(10 * 60000); plain.Town.watch();
+  plain.Town.tick(); assert.ok(plain.Town.trip, 'the default action is still a town trip');
+});
 test('a town trip says why it started, in the log, the status line and the diagnostics', () => {
   const f = townFixture(); f.Town.reason = () => 'gear durability low (Iron Sword at 12%)';
   f.Town.begin();
@@ -4999,6 +5145,170 @@ test('town keeps sealed equipment and unknown rarity while allowing plus and blu
     assert.equal(f.Town.sellable(item), false, JSON.stringify(item));
     assert.equal(f.Town.eligible(item), false);
   }
+});
+
+test('the town trip wears carried armour with better real stats and stores the replaced piece', () => {
+  const f = townFixture(), gp = f.World.gp;
+  f.pet.inventory = [];
+  f.Settings.profile.items.autoEquip = true;
+  gp.progression = { ...(gp.progression || {}), level: 30, experience: '100' };
+  const fields = (pdHi, mdHi) => ({ canRepair: 1, canSell: 1, reqLevelType1: 1, requiredLevel: 30,
+    varianceFloatMin1c8: 10, varianceFloatMax1cc: pdHi, varianceFloatPerPlus1d0: 0,
+    varianceFloatMin1f4: 8, varianceFloatMax1f8: mdHi, varianceFloatPerPlus1fc: 0 });
+  const rolls = String((31n << 15n) | (31n << 20n)); // perfect defence rolls (stat indexes 3 and 4)
+  const piece = (slot, ref, pd, md) => ({ slot, refObjId: ref, typeFlags: 44 | (2 << 7), quantity: 1, plus: 0, magic: [], variance: rolls, tooltip: { fields: fields(pd, md) } });
+  gp.inventory.push(piece(2, 800, 20, 16), piece(16, 801, 30, 24), piece(17, 802, 12, 10));
+  f.Town.begin(); f.Town.enter('store'); gp.storage = { npc: 60, phase: 'open', capacity: 30, items: [] }; gp.target = 60;
+  const stored = [];
+  for (let n = 0; n < 12 && f.Town.trip?.phase === 'store'; n++) {
+    f.advance(1000); f.Town.store();
+    const c = f.commands.at(-1);
+    if (c?.kind === 'inventory-move' && c.source === 16) {
+      const candidate = gp.inventory.find(i => i.slot === 16), worn = gp.inventory.find(i => i.slot === 2);
+      candidate.slot = 2; worn.slot = 16; // the game swaps the two slots
+    } else if (c?.kind === 'storage-move' && f.Town.trip?.pending?.kind === 'store') {
+      const i = gp.inventory.find(x => x.slot === c.move.source);
+      stored.push(i.refObjId); gp.storage.items.push({ ...i, slot: c.move.destination });
+      gp.inventory = gp.inventory.filter(x => x.slot !== c.move.source);
+    }
+    f.advance(600); f.Town.store();
+  }
+  assert.equal(f.commands.filter(c => c.kind === 'inventory-move').length, 1, 'only the clearly better piece is worn');
+  assert.equal(gp.inventory.find(i => i.slot === 2)?.refObjId, 801, 'the better piece is worn');
+  assert.deepEqual(stored, [800], 'the replaced piece is deposited');
+  assert.ok(gp.inventory.some(i => i.refObjId === 802), 'the worse piece stays in the bag');
+  assert.equal(f.Equip.replaced({ ...gp.storage.items[0] }), true, 'the replaced piece is marked never-sell');
+  assert.equal(f.Town.sellable({ ...gp.storage.items[0], tooltip: { fields: { canSell: 1 } } }), false, 'not even with bag selling on');
+  assert.equal(f.Town.trip.phase, 'close-storage');
+  const off = townFixture(); off.Settings.profile.items.autoEquip = false; off.pet.inventory = [];
+  off.World.gp.inventory.push(piece(16, 801, 30, 24));
+  off.Town.begin(); off.Town.enter('store'); off.World.gp.storage = { npc: 60, phase: 'open', capacity: 30, items: [] }; off.World.gp.target = 60;
+  off.Town.store();
+  assert.equal(off.commands.some(c => c.kind === 'inventory-move'), false, 'off by default nothing is worn');
+});
+
+test('no equip move is sent while a warehouse deposit is still unconfirmed', () => {
+  const f = townFixture(), gp = f.World.gp;
+  f.pet.inventory = [];
+  f.Settings.profile.items.autoEquip = true;
+  gp.progression = { ...(gp.progression || {}), level: 30, experience: '100' };
+  const fields = (pdHi, mdHi) => ({ canRepair: 1, canSell: 1, reqLevelType1: 1, requiredLevel: 30,
+    varianceFloatMin1c8: 10, varianceFloatMax1cc: pdHi, varianceFloatPerPlus1d0: 0,
+    varianceFloatMin1f4: 8, varianceFloatMax1f8: mdHi, varianceFloatPerPlus1fc: 0 });
+  const rolls = String((31n << 15n) | (31n << 20n));
+  const piece = (slot, ref, pd, md, family = 2) => ({ slot, refObjId: ref, typeFlags: 44 | (family << 7), quantity: 1, plus: 0, magic: [], variance: rolls, tooltip: { fields: fields(pd, md) } });
+  gp.inventory.push(piece(2, 800, 20, 16), piece(16, 801, 30, 24), piece(17, 803, 40, 30),
+    piece(3, 810, 20, 16, 9), piece(18, 811, 30, 24, 9));
+  f.Town.begin(); f.Town.enter('store'); gp.storage = { npc: 60, phase: 'open', capacity: 30, items: [] }; gp.target = 60;
+  const moves = () => f.commands.filter(c => c.kind === 'inventory-move').length;
+  const apply = c => { const a = gp.inventory.find(i => i.slot === c.source), b = gp.inventory.find(i => i.slot === c.destination); a.slot = c.destination; b.slot = c.source; };
+  f.Town.store(); assert.equal(moves(), 1, 'the best piece is worn first');
+  apply(f.commands.find(c => c.kind === 'inventory-move'));
+  f.advance(1000); f.Town.store(); assert.equal(f.Town.trip.pending, null, 'the swap is confirmed');
+  // The second family would swap now, but a busy game inventory admits no new move.
+  gp.inventoryPending = true; f.advance(600); f.Town.store();
+  assert.equal(moves(), 1, 'a busy game inventory blocks the next swap');
+  gp.inventoryPending = false; f.advance(1000); f.Town.store();
+  assert.equal(moves(), 2, 'the second family swaps once the inventory settles');
+  apply(f.commands.filter(c => c.kind === 'inventory-move')[1]);
+  f.advance(1000); f.Town.store(); assert.equal(f.Town.trip.pending, null, 'the second swap is confirmed');
+  // A warehouse deposit still in flight owns the trip: a further swap candidate waits for it.
+  f.Town.trip.pending = { kind: 'store', source: 99, destination: 5, ref: 800, quantity: 1, at: f.Town.trip.started };
+  gp.inventory.push(piece(19, 812, 60, 50, 9));
+  f.advance(600); f.Town.store();
+  assert.equal(moves(), 2, 'the unconfirmed deposit blocks the next swap');
+  assert.equal(f.Town.trip.pending?.kind, 'store', 'the deposit pending is untouched');
+});
+
+test('a same-item swap with a better roll is confirmed by the slot key, never by the item number', () => {
+  const f = townFixture(), gp = f.World.gp;
+  f.pet.inventory = [];
+  f.Settings.profile.items.autoEquip = true;
+  gp.progression = { ...(gp.progression || {}), level: 30, experience: '100' };
+  const fields = { canRepair: 1, reqLevelType1: 1, requiredLevel: 30,
+    varianceFloatMin1c8: 10, varianceFloatMax1cc: 30, varianceFloatPerPlus1d0: 0,
+    varianceFloatMin1f4: 8, varianceFloatMax1f8: 24, varianceFloatPerPlus1fc: 0 };
+  // Same base item in the slot and the bag: only the roll differs, so refObjId alone cannot tell them apart.
+  const piece = (slot, rolls) => ({ slot, refObjId: 800, typeFlags: 44 | (2 << 7), quantity: 1, plus: 0, magic: [], variance: String(rolls), tooltip: { fields } });
+  const worn = piece(2, 0n), better = piece(16, (31n << 15n) | (31n << 20n));
+  gp.inventory.push(worn, better);
+  f.Town.begin(); f.Town.enter('store'); gp.storage = { npc: 60, phase: 'open', capacity: 30, items: [] }; gp.target = 60;
+  f.Town.store();
+  assert.equal(f.commands.at(-1).kind, 'inventory-move');
+  const moves = () => f.commands.filter(c => c.kind === 'inventory-move').length;
+  f.advance(100); f.Town.store();
+  assert.equal(f.Town.trip.pending?.kind, 'equip', 'within the 500 ms trust window nothing is confirmed');
+  assert.equal(moves(), 1, 'and nothing is sent again');
+  f.advance(1000); f.Town.store();
+  assert.equal(f.Town.trip.pending?.kind, 'equip', 'the game has not acted: the worn slot still holds the old key');
+  assert.equal(moves(), 1, 'no repeat move that could swap the pieces back');
+  better.slot = 2; worn.slot = 16; // the game performs the swap
+  f.advance(1000); f.Town.store();
+  assert.equal(f.Town.trip.pending, null, 'confirmed now that the slot holds the new key');
+  assert.equal(f.Town.trip.equippedOut.length, 1, 'exactly one replaced piece');
+  assert.equal(f.Town.trip.equippedOut[0], f.BuffGear.key(worn), 'the low-rolled piece is the replaced one');
+  for (let n = 0; n < 6 && f.Town.trip?.phase === 'store'; n++) {
+    f.advance(1000); f.Town.store();
+    const c = f.commands.at(-1);
+    if (c?.kind === 'storage-move' && f.Town.trip?.pending?.kind === 'store') {
+      const i = gp.inventory.find(x => x.slot === c.move.source);
+      gp.storage.items.push({ ...i, slot: c.move.destination });
+      gp.inventory = gp.inventory.filter(x => x.slot !== c.move.source);
+    }
+    f.advance(600); f.Town.store();
+  }
+  assert.equal(moves(), 1, 'exactly one move for the whole swap');
+  assert.equal(gp.inventory.find(i => i.slot === 2)?.variance, better.variance, 'the better roll stays worn');
+  assert.equal(gp.storage.items.length, 1, 'the low-rolled copy is stored');
+});
+
+test('weapon swaps follow the worn weapon\'s dominant attack and respect the chosen weapons', () => {
+  const weaponFields = (paHi, maHi) => ({ canRepair: 1, reqLevelType1: 1, requiredLevel: 30,
+    varianceIntMin240: 10, varianceIntMax244: paHi, varianceIntMin248: 12, varianceIntMax24c: paHi + 4, varianceFloatPerPlus250: 0,
+    varianceIntMin254: 5, varianceIntMax258: maHi, varianceIntMin25c: 5, varianceIntMax260: maHi + 2, varianceFloatPerPlus264: 0 });
+  const rolls = String((31n << 20n) | (31n << 25n)); // perfect attack rolls (stat indexes 4 and 5)
+  const weapon = (slot, ref, pa, ma) => ({ slot, refObjId: ref, typeFlags: 44 | (6 << 7), quantity: 1, plus: 0, magic: [], variance: rolls, tooltip: { fields: weaponFields(pa, ma) } });
+  const drive = fixtureIn => {
+    const f = fixtureIn, gp = f.World.gp;
+    f.pet.inventory = [];
+    f.Settings.profile.items.autoEquip = true;
+    gp.progression = { ...(gp.progression || {}), level: 30, experience: '100' };
+    f.Town.begin(); f.Town.enter('store'); gp.storage = { npc: 60, phase: 'open', capacity: 30, items: [] }; gp.target = 60;
+    for (let n = 0; n < 6 && f.Town.trip?.phase === 'store'; n++) {
+      f.advance(1000); f.Town.store();
+      const c = f.commands.at(-1);
+      if (c?.kind === 'inventory-move') {
+        const candidate = gp.inventory.find(i => i.slot === c.source), worn = gp.inventory.find(i => i.slot === c.destination);
+        candidate.slot = c.destination; worn.slot = c.source;
+      }
+      f.advance(600); f.Town.store();
+    }
+    return f;
+  };
+  // A physical worn weapon: a magical blade with far better MA but worse PA never swaps in.
+  let f = townFixture();
+  const gp0 = f.World.gp;
+  gp0.inventory = gp0.inventory.filter(i => i.slot !== 6);
+  gp0.inventory.push(weapon(6, 900, 20, 8), weapon(16, 901, 12, 40));
+  f = drive(f);
+  assert.equal(f.commands.some(c => c.kind === 'inventory-move'), false, 'a physical build keeps the physical weapon');
+  // A strictly better physical blade does swap in — while the worn one is not the chosen primary weapon.
+  f = drive(townFixture());
+  const gp1 = f.World.gp;
+  gp1.inventory = gp1.inventory.filter(i => i.slot !== 6);
+  const worn1 = weapon(6, 900, 20, 8); gp1.inventory.push(worn1, weapon(16, 902, 30, 10));
+  f = drive(f);
+  assert.deepEqual(f.commands.filter(c => c.kind === 'inventory-move').map(c => c.source), [16], 'the better physical weapon is worn');
+  assert.equal(f.World.gp.inventory.find(i => i.slot === 6)?.refObjId, 902);
+  // The chosen primary weapon is protected: nothing swaps.
+  f = drive(townFixture());
+  const gp2 = f.World.gp;
+  gp2.inventory = gp2.inventory.filter(i => i.slot !== 6);
+  const worn2 = weapon(6, 900, 20, 8);
+  gp2.inventory.push(worn2, weapon(16, 902, 30, 10));
+  f.Settings.profile.items.gear.primaryWeapon = f.BuffGear.key(worn2);
+  f = drive(f);
+  assert.equal(f.commands.some(c => c.kind === 'inventory-move'), false, 'the chosen primary weapon is never replaced');
 });
 
 test('town deposits Star, Moon and Sun gear from the character bag and the pet, and nothing else', () => {
@@ -8416,9 +8726,20 @@ test("Don't pick up Star gear skips only Star equipment and is off by default", 
   f.Items.data.set(901, { name: 'Star', icon: '', code: 'ITEM_CH_SWORD_01_A_RARE' });
   f.Items.data.set(902, { name: 'Moon', icon: '', code: 'ITEM_CH_SWORD_01_B_RARE_HONOR' });
   f.Items.data.set(903, { name: 'Sun', icon: '', code: 'ITEM_CH_SWORD_01_C_LEGEND' });
+  f.Items.filesLoaded = true;
   assert.equal(P.skipStar, false); assert.deepEqual([star, moon, sun, plain, potion].map(e => f.Loot.allowed(e)), [true, true, true, true, true]);
   P.skipStar = true;
   assert.deepEqual([star, moon, sun, plain, potion].map(e => f.Loot.allowed(e)), [false, true, true, true, true]);
   assert.equal(f.Loot.filterWhy(star), 'star');
   P.soxOnly = true; assert.deepEqual([star, moon, sun, plain].map(e => f.Loot.allowed(e)), [false, true, true, false], 'with SoX only: Moon and Sun');
+});
+test('skipStar waits for an equipment drop the catalogue has never seen', () => {
+  const f = fixture(), P = f.Settings.profile.hunt.pickup;
+  f.Items.filesMissing = true; P.skipStar = true;
+  const unseen = f.drop(41, 44); unseen.refObjId = 901;
+  assert.equal(f.Loot.allowed(unseen), false, 'with the files unserved and no wire row, it is not guessed');
+  f.Items.data.set(901, { name: 'Star sword', icon: '', code: 'ITEM_CH_SWORD_01_A_RARE' });
+  assert.equal(f.Loot.allowed(unseen), false, 'once the wire teaches it and it is Star, still skipped');
+  f.Items.data.set(901, { name: 'Plain sword', icon: '', code: 'ITEM_CH_SWORD_01' });
+  assert.equal(f.Loot.allowed(unseen), true, 'a seen plain sword is picked up');
 });

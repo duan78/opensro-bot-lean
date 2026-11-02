@@ -43,6 +43,8 @@ Under **Town → Scroll town cycle**, enable the cycle, set up your recall town 
 
 The **Items** page lists every item in the game with sBot-style filters under **Filter items** (group, race, gender, type, SoX (Star / Moon / Sun), degree, search, only items with a rule). Per item choose **Pick** always/never and one action: **Store** (warehouse on town trips), **Sell** (pet loot at the repair merchant), **Keep**, or **Drop** (thrown away from your bag or the pet while hunting, never picked up again). Click a cell, right-click a row, or use the bulk buttons for everything shown (second click confirms). Rules come first; other items follow the Loot switches. Your own bag is never sold, and supplies the town trip needs are never stored from it.
 
+The catalogue normally loads from the game's data files. When the site does not serve them, the list fills instead from what the server itself shows: names, icons and codenames of worn, bagged, stored, sold and dropped items are cached as they are seen, kept across sessions, and used the same way — including Star / Moon / Sun detection from the item's codename.
+
 **Combat → Buffs & imbue → Weapons and shield** sets your **Primary weapon**, **Secondary weapon** and **Shield**, picked from what you wear or carry. A choice stays when you wear the item, when it is in the warehouse or the pet, and when alchemy changes its plus or stones. Chosen gear is never sold, stored, dropped, moved to the pet or offered in your stall, whatever its item rule or stall price. **Balance free slots with the pickup pet** is under **Loot → Bag and pet space**.
 
 While hunting, the primary weapon is the combat weapon. When something else is worn (after a reconnect or a manual change), the bot puts it back on, with the chosen shield when it is one-handed; a bow wears arrows and a crossbow bolts: the worn stack when it fits, otherwise the biggest stack in your bag, and the next one when a stack runs out. A secondary bow or crossbow gets its ammunition the same way. Under each buff, **Keep <skill> up** chooses **While hunting** (the default) or **Hunting and walk-back**: a walk-back buff is also kept up while the bot walks back to the hunting spot or between towns — speed or stealth skills stay on for the whole trip. Under each buff, **Gear for <skill>** can be **Primary weapon**, **Secondary weapon** or **Shield (with a one-handed weapon)**: the bot wears it, casts the buff, then goes back to the primary weapon. Automatic buff swaps try the secondary weapon first, then the primary. A primary weapon or shield the game will not equip is not tried again until you pick it again, and the gear worn before goes back on; any other refused move waits five minutes. Hunting goes on either way. Without a primary weapon chosen, whatever is worn stays the combat gear.
@@ -50,6 +52,15 @@ While hunting, the primary weapon is the combat weapon. When something else is w
 ## Berserk
 
 Under **Combat → Berserk when the gauge is full, on**, tick the monster kinds berserk is spent on (only Giants by default; it fires once the gauge is full, so the gauge waits for a ticked kind). **Also berserk when this many monsters attack at once** (0 = off) fires a full gauge whatever the monsters' kind once that many living monsters attack at the same time — the defensive panic button of a luring tank or an over-pulled spot; it also works while luring, where no target kind is ever consulted.
+
+## Wearing better gear
+
+**Loot → Bag and pet space → Wear better gear**: with **On town trips, wear carried gear with better stats; store the replaced piece** on (off by default), the town trip — while the warehouse is open — wears a carried equipment piece whose real stats beat the worn one in the same slot, and deposits the piece it replaces in the warehouse (it is never sold, even if bag selling is on).
+
+- Real stats means what the tooltip shows: each stat rolls inside its own min~max range (the roll quality, the "+x %"), plus adds its share, and known blues (build stats, hit ratio, HP) add a bounded nudge — so a well-rolled ordinary piece can beat a low-rolled Seal one.
+- Weapons are compared on the dominant attack of the worn weapon, so a physical build never swaps to a magical blade. Armour and shields compare physical + magical defence; accessories compare their reinforcement. A swap needs a 2 % edge, so near-ties never churn.
+- Rings and earrings have two slots: a better piece replaces the weaker of the two worn ones.
+- Never touched: the chosen primary/secondary weapon and shield, buff-set gear, the alchemy item, items with a Keep rule, pieces whose tooltip is incomplete or whose level requirement is unknown or unmet, and zero-durability pieces. A swap the game refuses is skipped for the session; nothing here can stop the town trip.
 
 ## Vigor and pet potions
 
@@ -97,7 +108,7 @@ The **Town** page shows the trip as a row of pictures (return scroll, warehouse,
 - **Return when pickup pet is nearly full**, with **Pet free slots ≤**.
 - **Weapon is broken**: the equipped weapon is at 0 durability. On by default.
 - **Gear is worn**: the most worn repairable item you are wearing is below **Gear durability below (%)** of its own maximum (15% by default). The trip repairs it. Off by default.
-- **No XP for a while**: no experience for **No XP for (minutes)** (10 by default). Off by default.
+- **No XP for a while**: no experience for **No XP for (minutes)** (10 by default). Off by default. **When there is no XP** chooses what happens: **Return to town** (the default, unchanged), or **Move to the next level spot** — hunting moves to the next entry of the level-spot list (the one saved for a higher level) and the no-XP clock restarts for the new spot; when the list has no higher spot left, the town trip happens as usual. Any other return reason (supplies, bag, durability…) still goes to town.
 - **On a timer**: every **Every (minutes)** (60 by default). Off by default.
 
 The XP and timer clocks run only while hunting and restart with every trip, so a long trip never starts the next one. All of these need the town cycle on.
@@ -291,7 +302,7 @@ When the pickup pet is ready but collects nothing, the status line says why, cou
 
 ## Waiting for a party resurrection
 
-With **Accept resurrection from party members** on, the bot waits 20 seconds after dying before it revives itself whenever a living party member is in view (seen in the last 15 seconds counts), so the member has time to resurrect it. Without a helper in view it revives after 5 seconds. The Activity log says which when the character dies, and an open resurrection offer is always answered first.
+With **Accept resurrection from party members** on, the bot waits **Wait for a party resurrection (s)** (20 seconds by default) after dying before it revives itself whenever a living party member is in view (seen in the last 15 seconds counts), so the member has time to resurrect it. Without a helper in view it revives after 5 seconds. The Activity log says which when the character dies, and an open resurrection offer is always answered first.
 
 ## A character that cannot move
 
@@ -320,6 +331,10 @@ Under **Settings → Anti-stuck**, the bot watches for progress while hunting: a
 ## SoX alerts
 
 When the bot confirms a pickup of Star, Moon or Sun equipment, it shows the item name and tier and plays a short chime. Turn it off with **Chime and notice when a SoX item is picked up** in **Loot**; **Test SoX chime** previews the sound. The count also appears under Session stats. It needs the item catalogue, which loads automatically when hunting starts, and it only announces bot pickups.
+
+## Alert sounds
+
+Under **Loot → Alert sounds**, each switch turns on a short chime, all off by default: **another player comes near** (the same detection the player alert uses), **the character dies**, **a level up**, and **a unique monster coming into view**. A click anywhere in the game unlocks the sound after the browser blocked it; the pet and SoX chime buttons preview the sound.
 
 ## Session stats
 
