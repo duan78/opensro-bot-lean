@@ -1273,7 +1273,6 @@ const UI = {
       ProfileShare.draw(host);
   },
   section_settingsAssistant(host) {
-    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
     const status = el('p', '', 'muted'); status.setAttribute('role', 'status');
     const answer = el('textarea'); answer.readOnly = true; answer.rows = 10; answer.setAttribute('aria-label', 'Assistant answer');
     const endpoint = el('input'); endpoint.type = 'text'; endpoint.value = Settings.profile.assistant.endpoint; endpoint.placeholder = 'http://127.0.0.1:1234';
@@ -1286,14 +1285,20 @@ const UI = {
     question.setAttribute('aria-label', 'Assistant question');
     const ask = () => { void Assistant.query(question.value.trim() || 'How is my session going?', status, answer); };
     question.addEventListener('keydown', e => { if (e.key === 'Enter') ask(); });
+    const screen = () => { void Assistant.screen(question.value.trim() || 'What does my screen show, and is anything wrong?', status, answer); };
+    const journalNote = el('p', '', 'muted');
+    const drawJournal = () => { const n = Settings.profile.assistant.journal?.entries?.length || 0; journalNote.textContent = n ? 'Journal: ' + n + ' lessons from past sessions (used when answering).' : 'No journal yet — press Learn from this session after a hunt.'; };
+    drawJournal();
     const test = this.button('Test connection', () => { void Assistant.test(status, test); });
+    const learn = this.button('Learn from this session', () => { void Assistant.learn(status, answer).then(drawJournal); });
     host.append(this.group('Assistant (local)',
-      el('p', 'Point this at your own OpenAI-compatible server (for example LM Studio on this machine), then ask about the running session. Only the redacted snapshot the bug report uses is sent — no names, chat or locations. Leave the model empty to use the first one the server lists. A failure just shows a message; the bot never waits on it.', 'muted'),
+      el('p', 'Point this at an OpenAI-compatible server on this machine or your local network (for example LM Studio), then ask about the running session. Public internet addresses are refused. Only the redacted snapshot the bug report uses is sent — no names, chat or locations — plus one frame of the game when you ask about your screen. A failure just shows a message; the bot never waits on it.', 'muted'),
       this.field('Assistant endpoint', endpoint),
       this.field('Model', model),
-      this.row(test, this.button('Explain my session', () => Assistant.explain(status, answer))),
+      this.row(test, learn),
+      this.row(this.button('Explain my session', () => Assistant.explain(status, answer)), this.button('Ask about my screen', screen)),
       this.row(question, this.button('Ask', ask)),
-      answer, status));
+      answer, journalNote, status));
   },
   section_settingsReports(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();

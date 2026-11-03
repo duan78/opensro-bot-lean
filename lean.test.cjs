@@ -8990,3 +8990,79 @@ test('assistant query degrades to a plain message and never blocks the bot', asy
   await f.Assistant.query('question', status, output);
   assert.match(status.textContent, /endpoint/);
 });
+
+// ---- Assistant (local): network policy, journal learning, screen vision ----
+test('assistant endpoint accepts this machine and the local network, refuses public hosts', async () => {
+  const f = fixture();
+  assert.equal(f.Assistant.base('http://192.168.0.33:1234/'), 'http://192.168.0.33:1234', 'the local network may serve the assistant');
+  assert.equal(f.Assistant.base('http://10.0.0.5:1234'), 'http://10.0.0.5:1234');
+  assert.equal(f.Assistant.base('mypc.local:1234'), 'http://mypc.local:1234');
+  assert.equal(f.Assistant.base('http://172.32.0.1:1234'), '', 'just outside the private ranges');
+  assert.equal(f.Assistant.base('https://api.openai.com'), '', 'public hosts are refused');
+  let called = false;
+  f.Assistant.fetchImpl = async () => { called = true; throw new TypeError('x'); };
+  assert.match((await f.Assistant.probe('http://8.8.8.8:1234')).error, /local network/);
+  assert.equal(called, false, 'a public address is refused before any request is made');
+});
+test('assistant learns a journal from a measured session and feeds it to later questions', async () => {
+  const f = fixture();
+  f.Settings.profile.assistant.endpoint = 'http://127.0.0.1:1234';
+  f.Settings.profile.assistant.model = 'model-x';
+  f.Stats.session.ms = 90 * 60000; f.Stats.session.kills = 400; f.Stats.session.deaths = 2;
+  const reply = JSON.stringify({ version: 1, entries: [{ fact: 'Giants kill this character; exclude them', evidence: '2 deaths / 90 min vs giants' }] });
+  let seen = null;
+  f.Assistant.fetchImpl = async (url, opts) => {
+    seen = JSON.parse(opts.body);
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: reply }, finish_reason: 'stop' }] }) };
+  };
+  const status = { textContent: '' }, output = { textContent: '' };
+  await f.Assistant.learn(status, output);
+  assert.equal(seen.response_format.json_schema.name, 'reply');
+  assert.ok(seen.messages[1].content.includes('"kills":400'), 'the measured summary rides along');
+  assert.equal(f.Settings.profile.assistant.journal.entries.length, 1);
+  assert.match(status.textContent, /1 lessons/);
+  const snap = JSON.parse(JSON.stringify(f.Assistant.snapshot()));
+  assert.equal(snap.journal.length, 1, 'the snapshot carries the journal to the next question');
+  // The second learning pass receives the previous journal so it can rewrite it.
+  await f.Assistant.learn(status, output);
+  assert.ok(seen.messages[1].content.includes('Giants kill this character'), 'the previous journal is passed for a rewrite, not lost');
+});
+test('assistant keeps the old journal when the answer is unusable or the session too short', async () => {
+  const f = fixture();
+  f.Settings.profile.assistant.endpoint = 'http://127.0.0.1:1234';
+  f.Settings.profile.assistant.model = 'model-x';
+  f.Settings.profile.assistant.journal = { version: 1, entries: [{ fact: 'kept', evidence: 'kept' }] };
+  f.Stats.session.ms = 60 * 60000;
+  f.Assistant.fetchImpl = async () => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'not json' }, finish_reason: 'stop' }] }) });
+  const status = { textContent: '' }, output = { textContent: '' };
+  await f.Assistant.learn(status, output);
+  assert.match(status.textContent, /not a valid journal|no usable lessons/);
+  assert.equal(f.Settings.profile.assistant.journal.entries[0].fact, 'kept', 'an invalid answer never replaces the journal');
+  f.Stats.session.ms = 60000;
+  status.textContent = '';
+  await f.Assistant.learn(status, output);
+  assert.match(status.textContent, /too short/);
+});
+test('assistant screen questions send one game frame to the same local model', async () => {
+  const f = fixture();
+  f.Settings.profile.assistant.endpoint = 'http://127.0.0.1:1234';
+  f.Settings.profile.assistant.model = 'model-x';
+  let seen = null;
+  f.Assistant.fetchImpl = async (url, opts) => {
+    seen = JSON.parse(opts.body);
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'You are in town.' }, finish_reason: 'stop' }] }) };
+  };
+  f.Assistant.captureFrame = () => 'data:image/jpeg;base64,' + 'A'.repeat(5000);
+  const status = { textContent: '' }, output = { textContent: '' };
+  await f.Assistant.screen('What do you see?', status, output);
+  assert.equal(output.textContent, 'You are in town.');
+  assert.equal(seen.reasoning_effort, 'none', 'screen reading does not burn thinking tokens');
+  const parts = seen.messages[1].content;
+  assert.equal(parts[1].type, 'image_url');
+  assert.match(parts[1].image_url.url, /^data:image\/jpeg;base64,/);
+  f.Assistant.captureFrame = () => '';
+  status.textContent = ''; output.textContent = '';
+  await f.Assistant.screen('What do you see?', status, output);
+  assert.match(status.textContent, /No game frame/);
+  assert.equal(f.commands.length, 0);
+});
