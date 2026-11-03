@@ -32,7 +32,7 @@ const Stats = {
     this.sample(); this.render();
   },
   huntStart() { this.sample(); this.loadLevels(); if (Hunt.cfg().pickup.soxSound) Loot.ensureCatalogue(); },
-  huntStop() { this.sample(); },
+  huntStop() { this.sample(); if (Settings.profile.assistant?.autoJournal) Assistant.learnQuiet(); },
   count(kind) {
     if (kind in this.values) this.values[kind]++;
   },

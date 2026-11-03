@@ -1291,12 +1291,27 @@ const UI = {
     drawJournal();
     const test = this.button('Test connection', () => { void Assistant.test(status, test); });
     const learn = this.button('Learn from this session', () => { void Assistant.learn(status, answer).then(drawJournal); });
+    // Suggested adjustments: rendered from Assistant.lastSuggestions, applied one by one, undo restores all.
+    const suggestBox = el('div');
+    const drawSuggestions = () => {
+      suggestBox.replaceChildren();
+      const list = Assistant.lastSuggestions || [];
+      for (let i = 0; i < list.length; i++) {
+        const text = Assistant.describe(i);
+        if (!text) continue;
+        suggestBox.append(this.row(el('span', text), this.button('Apply', () => { Assistant.apply(i, status); drawSuggestions(); })), el('p', list[i].reason, 'muted'));
+      }
+      if (Assistant.appliedBackup) suggestBox.append(this.button('Undo applied', () => { Assistant.undoAll(status); drawSuggestions(); }));
+    };
+    const suggest = this.button('Suggest settings', () => { void Assistant.suggest(status).then(drawSuggestions); });
     host.append(this.group('Assistant (local)',
       el('p', 'Point this at an OpenAI-compatible server on this machine or your local network (for example LM Studio), then ask about the running session. Public internet addresses are refused. Only the redacted snapshot the bug report uses is sent — no names, chat or locations — plus one frame of the game when you ask about your screen. A failure just shows a message; the bot never waits on it.', 'muted'),
       this.field('Assistant endpoint', endpoint),
       this.field('Model', model),
       this.row(test, learn),
       this.row(this.button('Explain my session', () => Assistant.explain(status, answer)), this.button('Ask about my screen', screen)),
+      this.row(suggest, this.check('Learn when hunting stops', () => Settings.profile.assistant.autoJournal, v => { Settings.profile.assistant.autoJournal = v; })),
+      suggestBox,
       this.row(question, this.button('Ask', ask)),
       answer, journalNote, status));
   },

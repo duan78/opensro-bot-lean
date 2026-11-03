@@ -9066,3 +9066,69 @@ test('assistant screen questions send one game frame to the same local model', a
   assert.match(status.textContent, /No game frame/);
   assert.equal(f.commands.length, 0);
 });
+
+// ---- Assistant suggest settings (closed vocabulary, clamped, undoable) ----
+test('assistant suggests only whitelisted clamped actions and applies them reversibly', async () => {
+  const f = fixture();
+  f.Settings.profile.assistant.endpoint = 'http://127.0.0.1:1234';
+  f.Settings.profile.assistant.model = 'model-x';
+  f.Settings.profile.assistant.journal = { version: 1, entries: [{ fact: 'Giants kill this character', evidence: '3 deaths/h vs giants' }] };
+  f.Stats.session.ms = 60 * 60000; f.Stats.session.deaths = 3;
+  const reply = JSON.stringify({ suggestions: [
+    { action: 'set-radius', value: 9999, reason: 'Deaths 3/h: shrink the area (journal: giants)' },
+    { action: 'toggle-class', value: 0, name: 'giant', reason: 'Giants kill this character (journal)' },
+    { action: 'sell-everything', value: 1, reason: 'not in the whitelist' },
+  ] });
+  let seen = null;
+  f.Assistant.fetchImpl = async (url, opts) => {
+    seen = JSON.parse(opts.body);
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: reply }, finish_reason: 'stop' }] }) };
+  };
+  const status = { textContent: '' };
+  const list = await f.Assistant.suggest(status);
+  assert.equal(seen.messages[1].content.includes('Giants kill this character'), true, 'the journal grounds the suggestions');
+  assert.equal(list.length, 2, 'an out-of-vocabulary action is dropped');
+  assert.equal(f.Assistant.describe(0), 'Hunt radius: 400 → 300', 'the target is clamped for display');
+  const radiusBefore = f.Settings.profile.hunt.radius, giantBefore = f.Settings.profile.hunt.classes.giant;
+  f.Assistant.apply(0, status);
+  assert.equal(f.Settings.profile.hunt.radius, 300, 'an extreme suggestion is clamped on apply');
+  f.Assistant.apply(1, status);
+  assert.equal(f.Settings.profile.hunt.classes.giant, false);
+  f.Assistant.undoAll(status);
+  assert.equal(f.Settings.profile.hunt.radius, radiusBefore, 'undo restores the radius');
+  assert.equal(f.Settings.profile.hunt.classes.giant, giantBefore, 'undo restores the class switch');
+  assert.equal(f.commands.length, 0, 'applying a suggestion never sends game commands');
+});
+test('assistant suggest clamps every action into its safe band', async () => {
+  const f = fixture();
+  f.Settings.profile.assistant.endpoint = 'http://127.0.0.1:1234';
+  f.Settings.profile.assistant.model = 'model-x';
+  f.Assistant.fetchImpl = async () => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify({ suggestions: [
+    { action: 'set-hp-pct', value: 0, reason: 'x' }, { action: 'set-mp-pct', value: 250, reason: 'x' }, { action: 'set-vigor-hp-pct', value: -5, reason: 'x' },
+  ] }) }, finish_reason: 'stop' }] }) });
+  const status = { textContent: '' };
+  const list = await f.Assistant.suggest(status);
+  assert.equal(list.length, 3);
+  f.Assistant.apply(0, status); f.Assistant.apply(1, status); f.Assistant.apply(2, status);
+  assert.equal(f.Settings.profile.potion.hp.pct, 1, '0 clamps up to the minimum');
+  assert.equal(f.Settings.profile.potion.mp.pct, 99, '250 clamps down to the maximum');
+  assert.equal(f.Settings.profile.potion.vigor.hpPct, 1);
+});
+test('assistant journal learning hooks into hunt stop when enabled', async () => {
+  const f = fixture();
+  f.Settings.profile.assistant.endpoint = 'http://127.0.0.1:1234';
+  f.Settings.profile.assistant.model = 'model-x';
+  f.Settings.profile.assistant.autoJournal = true;
+  f.Stats.session.ms = 30 * 60000;
+  let asked = 0;
+  f.Assistant.fetchImpl = async () => { asked++; return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify({ version: 1, entries: [{ fact: 'a', evidence: 'b' }] }) }, finish_reason: 'stop' }] }) }; };
+  f.Stats.huntStop();
+  await new Promise(r => setImmediate(r));
+  assert.equal(asked, 1, 'stopping the hunt learns when the switch is on');
+  assert.equal(f.Settings.profile.assistant.journal.entries.length, 1);
+  f.Settings.profile.assistant.autoJournal = false;
+  asked = 0;
+  f.Stats.huntStop();
+  await new Promise(r => setImmediate(r));
+  assert.equal(asked, 0, 'and stays silent when it is off');
+});
