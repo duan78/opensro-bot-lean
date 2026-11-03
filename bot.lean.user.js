@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.8.6
+// @version      1.8.7
 // @updateURL    https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking, walk-back and an optional team relay in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.8.6';
+const VERSION = '1.8.7';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -9487,18 +9487,11 @@ const BuffGear = {
   },
   restore(auto = false) {
     const gp = World.gp;
-<<<<<<< HEAD
-    if (this.run || !this.recovery || !World.inWorld() || World.isDead() || gp?.inventoryPending || World.isCasting() ||
-        gp?.returnScroll || gp?.storage || Restock.activeShop() || gp?.exchange?.open || gp?.exchange?.requesting || gp?.stall?.phase && gp.stall.phase !== 'none') return;
-    // The automatic restore waits out travel instead of saying so every tick; only a manual one explains itself.
-    if (!auto && Hunt.running || Town.trip || WalkBack.active || Restock.trip || Alchemy.run || Alchemy.pending) {
-=======
     const windowOpen = !!(gp?.returnScroll || gp?.storage || Restock.activeShop() || gp?.exchange?.open || gp?.exchange?.requesting || gp?.stall?.phase && gp.stall.phase !== 'none');
     if (this.run || !this.recovery || !World.inWorld() || World.isDead() || gp?.inventoryPending || World.isCasting()) return;
     // The automatic restore waits out travel and open game windows instead of saying so every tick; only a manual one explains itself.
     if (windowOpen || !auto && Hunt.running || Town.trip || WalkBack.active || Restock.trip || Alchemy.run || Alchemy.pending) {
       if (windowOpen && !auto) return UI.toast('Close the open trade, stall or shop before restoring gear.', 'warn');
->>>>>>> origin/main
       if (auto) return;
       return UI.toast('Stop hunting and travel before restoring gear.', 'warn');
     }
@@ -16083,7 +16076,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.8.6", "title": "Local audit fixes: quest data, buff-gear recovery, privacy", "items": ["The quest catalogue can load again: questData.json and npcpos.json were missing from the asset worker's allowlist, so the picked-quests list always said the data could not be loaded. A failed load now also waits ten minutes before trying again instead of retrying ten times a second.", "A death or world change in the middle of a buff weapon swap no longer strands the bot: hunting restarts on its own after the walk back while the combat gear restores itself, instead of sitting idle at the spot. The automatic restore also stays quiet during the town trip instead of repeating its warning ten times a second, and waits out open trades and stalls instead of failing one tick later.", "A revive command the server never answers is asked again every ten seconds; before, the bot could stay dead forever.", "A unique converge (team edition) can no longer write one character's hunting spot into another character's profile: the saved spot goes back before the profile changes, and a stale converge is dropped.", "The learned small-town potion tier is cleared when the character or profile changes, so one character's potion refuels do not drive another's.", "Privacy: the character's name no longer reaches uploaded bug reports through the reconnect message, and a relay connection error never carries the room key.", "The \"pet bag is full\" warning no longer depends on the chime being on; Max every skill stops its fast loop when the game world is left; the panel keeps updating when one status line breaks; a setting change made just before closing the page is still saved; the report rate-limit wait survives a page reload."], "note": "All changes were verified with the offline test suite only (719 tests), not in a live game."}, {"version": "1.8.5", "title": "Fork synced with upstream 1.2.223", "items": ["Pet loot on town trips sells again: the server refuses sales straight from the pet's bag, so the bot now moves each sellable pet item to a free slot in your bag first (and the full bag itself is sold before the pet loot).", "Town trips no longer hang before the return scroll: a game that never settles gets a one-minute cap and a clean stop instead of waiting forever; an unexplained triple refusal now says the game itself may be refusing the scroll.", "Town trips no longer stop at the smith after a supply skipped on purpose (merchant does not sell it, or gold ran short).", "New hunt option \"Spare engaged giant/party below % HP (0 = off)\" for the \"Normal & champion only\" avoidance mode: a giant or party monster another player is fighting is skipped once its health is at or below the cutoff (default 50, set 0 to turn off)."], "note": "The upstream features come from upstream releases 1.2.219-1.2.223; this sync was checked with the offline test suite only."}, {"version": "1.8.4", "title": "Fork synced with upstream 1.2.218", "items": ["On a town trip, better gear you carry is worn and the piece it replaces is stored in the warehouse (off by default, Loot > Wear better gear).", "A spot with no XP can move hunting to the next level spot instead of returning to town.", "The wait for a party resurrection before reviving in town is configurable.", "Alert chimes: a player near, your own death, a level up and a unique in view (each off by default).", "Item names, icons and codenames are cached from the server wire when the game data files are not served, so item rules and Star checks work there; Don't pick up Star gear waits for an item the catalogue has never seen."], "note": "The upstream features come from upstream releases; this sync was checked with the offline test suite only."}, {"version": "1.8.3", "title": "Fork synced with upstream 1.2.213", "items": ["Town trips sell picked-up supplies above the refill amount, and all Star gear can be sold from the warehouse with one click (with an option to not pick up Star gear at all).", "Berserk can also fire when enough monsters attack at once, whatever their kind.", "The lure can stop when other players come near, or after a chosen number of pulls.", "Self buffs are kept up while walking back to the hunting spot.", "Anti-stuck recovery can go through town, party joining can wait for Start, and bug reports say why the bot stopped.", "Also carries 1.8.2 (the anti-KS monster scope), now merged upstream as 1.2.213."], "note": "The upstream features come from upstream releases; this sync was checked with the offline test suite only."}, {"version": "1.8.2", "title": "Avoid other players' targets, now by monster kind", "items": ["New \"Avoided monsters\" choice in Combat > Hunt area: All monsters (as before) or Normal & champion only.", "With Normal & champion only, a high-damage character still attacks party, giant, elite, titan and unique monsters another player is already fighting.", "The \"another player is fighting it\" skip count in the panel follows the same choice."], "note": "Tested in the offline test suite only; not yet verified on a live server."}, {"version": "1.8.1", "title": "Auto Quest, second pass", "items": ["Repeatable quests are taken again: after completing one, its NPC's new offer marker is answered like any other. The server's marker decides what can be accepted now.", "The Quest page's journal rows gain an Abandon button (with a confirm click) that sends the game's own give-up command once and settles on the journal's answer. Skipping keeps a quest out without dropping its progress.", "Journal rows also say \"targets not around\" while hunting when a quest's learned monsters have not spawned near, so a quest that needs another hunting spot is visible at a glance.", "Quest mechanics that need their own in-world actions are not automated: gathering with a quest tool (stand in its area and use the knife), and capture traps (cast the quest's trap skill on its monster, e.g. via your rotation). Accepting and turning those quests in is still automatic.", "Still simulation-tested only; the quest opcodes and the dialogue flow have not been verified on the live server yet."]}, {"version": "1.8.0", "title": "Auto Quest", "items": ["New Quest page: quests are done automatically. The quest markers the game itself sends route the bot - it walks to the quest NPC, accepts the quest, and turns it in when the journal says the objective is met.", "Quests the reward window can close are rewarded with the quest window's own command, without walking back to the NPC. A refused reward waits a minute and then falls back to its NPC.", "Which dialogue row belongs to which quest, and which monster kills advance which quest, are learned while playing - no quest database is shipped. Learned monsters are hunted first while their quest counts.", "The quest list shows each active quest's count and a Skip button; codename include/exclude patterns filter which quests are taken.", "Turn-ins never guess between several unknown dialogue rows (a wrong Yes would accept another quest); such an NPC is left with a message instead.", "Everything here was tested against a simulated game state only: the quest marker, journal, and NPC dialogue contracts were read from the game's own source. The opcodes and dialogue flow have not been verified on the live server yet."]}, {"version": "1.7.3", "title": "Clearer mall roles: scrolls with the potions, merchant-first thresholds", "items": ["Keeping the 20% damage and resistance scrolls active is now set under Automatic potion use, right beside the speed scroll it mirrors; the Item mall section only refills the stock.", "The mall potion thresholds now default below the merchant restock marks, so the merchant stays the primary source and the mall only steps in when that was not enough. Raising a mall mark above the merchant one flips that item to silk-first, for wallets that prefer it — the thresholds themselves express the priority."]}];
+const RELEASE_NOTES = [{"version": "1.8.7", "title": "Fork synced with upstream 1.2.224", "items": ["This sync brings our own audit fixes back home as upstream release 1.2.224 (PR #96), plus two small polish items from its review: a manual Restore combat gear click now explains itself when a trade, stall or shop window is open, and a broken panel status line logs its error at most every 5 s instead of on every update.", "The fork already shipped these fixes as 1.8.6; this release realigns the fork with upstream (no behaviour change beyond the two polish items)."], "note": "Checked with the offline test suite only."}, {"version": "1.8.6", "title": "Local audit fixes: quest data, buff-gear recovery, privacy", "items": ["The quest catalogue can load again: questData.json and npcpos.json were missing from the asset worker's allowlist, so the picked-quests list always said the data could not be loaded. A failed load now also waits ten minutes before trying again instead of retrying ten times a second.", "A death or world change in the middle of a buff weapon swap no longer strands the bot: hunting restarts on its own after the walk back while the combat gear restores itself, instead of sitting idle at the spot. The automatic restore also stays quiet during the town trip instead of repeating its warning ten times a second, and waits out open trades and stalls instead of failing one tick later.", "A revive command the server never answers is asked again every ten seconds; before, the bot could stay dead forever.", "A unique converge (team edition) can no longer write one character's hunting spot into another character's profile: the saved spot goes back before the profile changes, and a stale converge is dropped.", "The learned small-town potion tier is cleared when the character or profile changes, so one character's potion refuels do not drive another's.", "Privacy: the character's name no longer reaches uploaded bug reports through the reconnect message, and a relay connection error never carries the room key.", "The \"pet bag is full\" warning no longer depends on the chime being on; Max every skill stops its fast loop when the game world is left; the panel keeps updating when one status line breaks; a setting change made just before closing the page is still saved; the report rate-limit wait survives a page reload."], "note": "All changes were verified with the offline test suite only (719 tests), not in a live game."}, {"version": "1.8.5", "title": "Fork synced with upstream 1.2.223", "items": ["Pet loot on town trips sells again: the server refuses sales straight from the pet's bag, so the bot now moves each sellable pet item to a free slot in your bag first (and the full bag itself is sold before the pet loot).", "Town trips no longer hang before the return scroll: a game that never settles gets a one-minute cap and a clean stop instead of waiting forever; an unexplained triple refusal now says the game itself may be refusing the scroll.", "Town trips no longer stop at the smith after a supply skipped on purpose (merchant does not sell it, or gold ran short).", "New hunt option \"Spare engaged giant/party below % HP (0 = off)\" for the \"Normal & champion only\" avoidance mode: a giant or party monster another player is fighting is skipped once its health is at or below the cutoff (default 50, set 0 to turn off)."], "note": "The upstream features come from upstream releases 1.2.219-1.2.223; this sync was checked with the offline test suite only."}, {"version": "1.8.4", "title": "Fork synced with upstream 1.2.218", "items": ["On a town trip, better gear you carry is worn and the piece it replaces is stored in the warehouse (off by default, Loot > Wear better gear).", "A spot with no XP can move hunting to the next level spot instead of returning to town.", "The wait for a party resurrection before reviving in town is configurable.", "Alert chimes: a player near, your own death, a level up and a unique in view (each off by default).", "Item names, icons and codenames are cached from the server wire when the game data files are not served, so item rules and Star checks work there; Don't pick up Star gear waits for an item the catalogue has never seen."], "note": "The upstream features come from upstream releases; this sync was checked with the offline test suite only."}, {"version": "1.8.3", "title": "Fork synced with upstream 1.2.213", "items": ["Town trips sell picked-up supplies above the refill amount, and all Star gear can be sold from the warehouse with one click (with an option to not pick up Star gear at all).", "Berserk can also fire when enough monsters attack at once, whatever their kind.", "The lure can stop when other players come near, or after a chosen number of pulls.", "Self buffs are kept up while walking back to the hunting spot.", "Anti-stuck recovery can go through town, party joining can wait for Start, and bug reports say why the bot stopped.", "Also carries 1.8.2 (the anti-KS monster scope), now merged upstream as 1.2.213."], "note": "The upstream features come from upstream releases; this sync was checked with the offline test suite only."}, {"version": "1.8.2", "title": "Avoid other players' targets, now by monster kind", "items": ["New \"Avoided monsters\" choice in Combat > Hunt area: All monsters (as before) or Normal & champion only.", "With Normal & champion only, a high-damage character still attacks party, giant, elite, titan and unique monsters another player is already fighting.", "The \"another player is fighting it\" skip count in the panel follows the same choice."], "note": "Tested in the offline test suite only; not yet verified on a live server."}, {"version": "1.8.1", "title": "Auto Quest, second pass", "items": ["Repeatable quests are taken again: after completing one, its NPC's new offer marker is answered like any other. The server's marker decides what can be accepted now.", "The Quest page's journal rows gain an Abandon button (with a confirm click) that sends the game's own give-up command once and settles on the journal's answer. Skipping keeps a quest out without dropping its progress.", "Journal rows also say \"targets not around\" while hunting when a quest's learned monsters have not spawned near, so a quest that needs another hunting spot is visible at a glance.", "Quest mechanics that need their own in-world actions are not automated: gathering with a quest tool (stand in its area and use the knife), and capture traps (cast the quest's trap skill on its monster, e.g. via your rotation). Accepting and turning those quests in is still automatic.", "Still simulation-tested only; the quest opcodes and the dialogue flow have not been verified on the live server yet."]}, {"version": "1.8.0", "title": "Auto Quest", "items": ["New Quest page: quests are done automatically. The quest markers the game itself sends route the bot - it walks to the quest NPC, accepts the quest, and turns it in when the journal says the objective is met.", "Quests the reward window can close are rewarded with the quest window's own command, without walking back to the NPC. A refused reward waits a minute and then falls back to its NPC.", "Which dialogue row belongs to which quest, and which monster kills advance which quest, are learned while playing - no quest database is shipped. Learned monsters are hunted first while their quest counts.", "The quest list shows each active quest's count and a Skip button; codename include/exclude patterns filter which quests are taken.", "Turn-ins never guess between several unknown dialogue rows (a wrong Yes would accept another quest); such an NPC is left with a message instead.", "Everything here was tested against a simulated game state only: the quest marker, journal, and NPC dialogue contracts were read from the game's own source. The opcodes and dialogue flow have not been verified on the live server yet."]}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -17948,8 +17941,6 @@ const UI = {
       Trade.draw();
     } else if (this.current === 'Stall') {
       Stall.draw();
-    } else if (this.current === 'Team') {
-      this.sections('teamRelay', 'teamWorld');
     } else if (this.current === 'Wardrobe') {
       LeanWardrobe.draw(this.pane);
     } else {
@@ -17976,7 +17967,6 @@ const UI = {
       { name: 'Party/Autores', icon: 'action\\icon_cha_party', pages: ['Party'], sections: [
         ['partyMembers', 'Current party'], ['partyParty', 'Party settings'], ['partyHeal']] },
       { name: 'Player buffing', icon: 'action\\icon_cha_party', pages: ['Party'], sections: [['partyBuffs', 'Player buffing']] },
-      { name: 'Team', icon: 'action\\icon_cha_party', pages: ['Team'], sections: [['teamRelay', 'Team relay']] },
       { name: 'Quest', icon: 'action\\icon_cha_camp', pages: ['Quest'], sections: [['questAuto', 'Auto quest settings'], ['questPick', 'Quests to do'], ['questJournal']] },
       { name: 'Auto alchemy', icon: 'action\\icon_cha_alchemy', pages: ['Alchemy'], draw() { Alchemy.draw(); } },
       { name: 'Stall', icon: 'action\\icon_cha_shop', pages: ['Stall'], draw() { Stall.draw(); } },
@@ -18026,7 +18016,7 @@ const UI = {
     const icons = { Items: 'action\\cos_cmd_inventory', Party: 'action\\icon_cha_party', Combat: 'action\\icon_cha_auto_attack', Loot: 'action\\icon_cha_autoget', Supplies: 'action\\icon_cha_recovery', Town: 'item\\etc\\mall_return_scroll', Quest: 'action\\icon_cha_camp',
       Alchemy: 'action\\icon_cha_alchemy', Trade: 'action\\icon_cha_shop', Wardrobe: 'action\\icon_cha_shop', Stall: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper', Setup: 'action\\icon_cha_camp' };
     const entries = this.classic ? this.classicTabs().map(t => ({ name: t.name, icon: t.icon, open: () => { this.ctab = t.name; this.draw(); } }))
-      : ['Setup', 'Map', 'Combat', 'Party', 'Team', 'Loot', 'Items', 'Supplies', 'Town', 'Quest', 'Stall', 'Alchemy', 'Trade', 'Wardrobe', 'Settings'].map(name => ({ name, icon: icons[name], open: () => { this.current = name; this.draw(); } }));
+      : ['Setup', 'Map', 'Combat', 'Party', 'Loot', 'Items', 'Supplies', 'Town', 'Quest', 'Stall', 'Alchemy', 'Trade', 'Wardrobe', 'Settings'].map(name => ({ name, icon: icons[name], open: () => { this.current = name; this.draw(); } }));
     // Page icons are the game's own action-bar icons; they show only in the wide and classic windows' page lists.
     for (const entry of entries) {
       const tab = this.button(entry.name, entry.open);
@@ -18573,43 +18563,6 @@ const UI = {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       Trace.draw(host);
   },
-  section_teamRelay(host) {
-    const team = () => Settings.profile.team;
-    this.teamNote = el('p', '', 'muted');
-    this.teamPeers = el('div');
-    host.append(this.group('Team relay',
-      this.check('Connect to a team relay', () => team().enabled, v => { team().enabled = v; Team.reset(); this.draw(); }),
-      this.text('Relay address (wss://…)', () => team().url, v => { team().url = v; Team.tick(); }),
-      this.text('Room key', () => team().token, v => { team().token = v; Team.tick(); }),
-      this.select('This character\'s role', [['none', 'No role'], ['tank', 'Tank'], ['healer', 'Healer'], ['support', 'Support'], ['dps', 'Damage'], ['scout', 'Scout']], () => team().role, v => team().role = v),
-      this.check('Assist: fight what a teammate fights', () => team().assist, v => team().assist = v),
-      this.check('Recall to town together', () => team().townSync, v => team().townSync = v),
-      this.check('Go to a unique that appears (the saved spot comes back)', () => team().converge, v => team().converge = v),
-      this.teamNote,
-      el('p', 'A private channel between your own characters over a WebSocket relay you control. Characters that enter the same room key see each other\'s presence here; nothing is sent to anyone else, and the bot never depends on it: with the relay off or unreachable everything else works exactly as before. The address must start with wss://. Assist joins the fight a teammate (or party member) is already in; town sync starts your town trip when a teammate starts theirs. The room\'s console page on the relay can stop everyone or call a group town trip.', 'muted')));
-    const share = this.group('Sharing');
-    share.append(this.check('Also share with every room on this relay', () => team().share.public, v => team().share.public = v),
-      this.check('Shared: interesting monsters (champion and up)', () => team().share.monsters, v => team().share.monsters = v),
-      this.check('Shared: other players seen', () => team().share.players, v => team().share.players = v),
-      this.check('Shared: unique appearances', () => team().share.uniques, v => team().share.uniques = v),
-      el('p', 'The room key holders always see everything above. The public pool (every room on your relay) only ever receives what these boxes allow, and never your own position, build or inventory. Unique announcements from the game\'s server are shared as events; your own sightings carry positions.', 'muted'));
-    host.append(share);
-    const peers = this.group('Connected characters');
-    peers.append(this.teamPeers, el('p', 'Each character announces itself every 5 seconds and is dropped from this list after 15 seconds of silence.', 'muted'));
-    host.append(peers);
-  },
-  section_teamWorld(host) {
-    this.teamUniques = el('div');
-    this.teamPlayers = el('div');
-    this.teamDrops = el('div');
-    const uniques = this.group('Unique tracker');
-    uniques.append(this.teamUniques, el('p', 'Built from the game\'s own server-wide announcements, shared sightings and kills. The respawn timer restarts at death (3-6 h depending on the unique). Hunt here moves your saved hunting spot to the last known position.', 'muted'));
-    const players = this.group('Players seen by the team');
-    players.append(this.teamPlayers, el('p', 'Every player the team sees, newest first. A player who attacks a teammate outside a party is marked hostile.', 'muted'));
-    const drops = this.group('Team drops');
-    drops.append(this.teamDrops);
-    host.append(uniques, players, drops);
-  },
   section_settingsStats(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       Stats.draw(host);
@@ -18840,28 +18793,6 @@ const UI = {
       if (Settings.profile.party.autoRes) notes.push(Resurrect.message);
       this.partyNote.textContent = notes.join(' ');
     }
-    if (this.is('Team') && this.teamNote) {
-      this.teamNote.textContent = Team.status();
-      const rows = Team.peerRows();
-      this.teamPeers.replaceChildren(...(rows.length ? rows.map(text => el('div', text)) : [el('div', 'No other character in the room yet.', 'muted')]));
-      if (this.teamUniques) {
-        const uniqueRows = TeamKnowledge.uniqueRows();
-        this.teamUniques.replaceChildren(...(uniqueRows.length ? uniqueRows.map((text, i) => {
-          const name = [...TeamKnowledge.uniques.values()].sort((a, b) => (b.at || 0) - (a.at || 0))[i]?.name;
-          const row = el('div', text);
-          if (name) row.append(this.button('Hunt here', () => TeamArbiter.huntAtUnique(name)));
-          return row;
-        }) : [el('div', 'No unique recorded yet; they appear when the server announces one or someone sees one.', 'muted')]));
-      }
-      if (this.teamPlayers) {
-        const playerRows = TeamKnowledge.playerRows();
-        this.teamPlayers.replaceChildren(...(playerRows.length ? playerRows.map(text => el('div', text)) : [el('div', 'No other player seen yet.', 'muted')]));
-      }
-      if (this.teamDrops) {
-        const dropRows = TeamKnowledge.dropRows();
-        this.teamDrops.replaceChildren(...(dropRows.length ? dropRows.map(text => el('div', text)) : [el('div', 'Nothing picked up yet.', 'muted')]));
-      }
-    }
     if (!this.status) return;
     if (this.is('Supplies') && this.petPotionNote) { this.petPotionNote.textContent = this.petPotionNote.title = PetPotion.message; }
     if (this.is('Combat') && this.petAttackNote) { this.petAttackNote.textContent = this.petAttackNote.title = PetAttack.status(); }
@@ -18880,17 +18811,10 @@ const UI = {
     const distance = center ? dist2D(World.pose(), center) : Infinity;
     this.status.textContent = `${World.charName || 'No character'} · ${World.inWorld() ? Controller.mode : World.phase}\nHP ${Math.round(me.hpPct)}% · MP ${Math.round(me.mpPct)}% · Potions ${Potion.count('hp')}/${Potion.count('mp')} · Pickups ${Stats.values.loot}\nHunting spot: ${Number.isFinite(distance) ? Math.round(distance / 10) + ' m away' : center ? 'another region' : 'not saved'}${Restock.recording ? '\nRecording route: ' + Restock.draft.route.length + ' points' : ''}`;
 
-<<<<<<< HEAD
-    // One throwing refresher must not stall every later one on each update; a repeat error is logged once.
-    this.refreshers.forEach(refresh => {
-      try { refresh(); }
-      catch (e) { if (this.refreshError !== e?.message) { this.refreshError = e?.message; Log.error('Panel update failed: ' + (e?.message || e)); } }
-=======
     // One throwing refresher must not stall every later one on each update; the error is logged at most every 5 s.
     this.refreshers.forEach(refresh => {
       try { refresh(); }
       catch (e) { if (now() - (this.refreshErrorAt || -Infinity) > 5000) { this.refreshErrorAt = now(); Log.error('Panel update failed: ' + (e?.message || e)); } }
->>>>>>> origin/main
     });
     for (const slot of this.pane.querySelectorAll('.slot[data-skill]')) {
       const id = Number(slot.dataset.skill), left = World.cooldownLeft(id), total = World.skill(id)?.cooldownMs || 0;
@@ -19757,11 +19681,7 @@ function boot() {
     const key = name ? 'profile:' + name : 'profile:default';
     if (key !== Settings.profileKey) { Town.lastScrollPoint = null; Town.deathPoint = null; TeamArbiter.characterSwitch(); stopAll(); Settings.useCharacter(name); }
   });
-<<<<<<< HEAD
   bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); Trace.reset(); BuffGear.reset(); Equip.reset(); Team.reset(); TeamIntel.reset(); TeamArbiter.converge = null; Town.lastScrollPoint = null; Town.deathPoint = null; Town.tier = {}; SpeedScroll.reset(); ScrollBuff.reset(); MallBuyer.reset(); MallBuyer.unpoison(); RepairHammer.reset(); Party.reset(); Resurrect.reset(); Quest.reset(); stopAll(); Restock.cancelRecording(); Restock.unbuyable.clear(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
-=======
-  bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); Trace.reset(); BuffGear.reset(); Equip.reset(); Town.lastScrollPoint = null; Town.deathPoint = null; Town.tier = {}; SpeedScroll.reset(); ScrollBuff.reset(); MallBuyer.reset(); MallBuyer.unpoison(); RepairHammer.reset(); Party.reset(); Resurrect.reset(); Quest.reset(); stopAll(); Restock.cancelRecording(); Restock.unbuyable.clear(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
->>>>>>> origin/main
   bus.on('phase', phase => {
     if (phase !== 'world') {
       BuffGear.interrupt('World transition interrupted buff swaps.', true);
