@@ -9487,10 +9487,18 @@ const BuffGear = {
   },
   restore(auto = false) {
     const gp = World.gp;
+<<<<<<< HEAD
     if (this.run || !this.recovery || !World.inWorld() || World.isDead() || gp?.inventoryPending || World.isCasting() ||
         gp?.returnScroll || gp?.storage || Restock.activeShop() || gp?.exchange?.open || gp?.exchange?.requesting || gp?.stall?.phase && gp.stall.phase !== 'none') return;
     // The automatic restore waits out travel instead of saying so every tick; only a manual one explains itself.
     if (!auto && Hunt.running || Town.trip || WalkBack.active || Restock.trip || Alchemy.run || Alchemy.pending) {
+=======
+    const windowOpen = !!(gp?.returnScroll || gp?.storage || Restock.activeShop() || gp?.exchange?.open || gp?.exchange?.requesting || gp?.stall?.phase && gp.stall.phase !== 'none');
+    if (this.run || !this.recovery || !World.inWorld() || World.isDead() || gp?.inventoryPending || World.isCasting()) return;
+    // The automatic restore waits out travel and open game windows instead of saying so every tick; only a manual one explains itself.
+    if (windowOpen || !auto && Hunt.running || Town.trip || WalkBack.active || Restock.trip || Alchemy.run || Alchemy.pending) {
+      if (windowOpen && !auto) return UI.toast('Close the open trade, stall or shop before restoring gear.', 'warn');
+>>>>>>> origin/main
       if (auto) return;
       return UI.toast('Stop hunting and travel before restoring gear.', 'warn');
     }
@@ -18872,10 +18880,17 @@ const UI = {
     const distance = center ? dist2D(World.pose(), center) : Infinity;
     this.status.textContent = `${World.charName || 'No character'} · ${World.inWorld() ? Controller.mode : World.phase}\nHP ${Math.round(me.hpPct)}% · MP ${Math.round(me.mpPct)}% · Potions ${Potion.count('hp')}/${Potion.count('mp')} · Pickups ${Stats.values.loot}\nHunting spot: ${Number.isFinite(distance) ? Math.round(distance / 10) + ' m away' : center ? 'another region' : 'not saved'}${Restock.recording ? '\nRecording route: ' + Restock.draft.route.length + ' points' : ''}`;
 
+<<<<<<< HEAD
     // One throwing refresher must not stall every later one on each update; a repeat error is logged once.
     this.refreshers.forEach(refresh => {
       try { refresh(); }
       catch (e) { if (this.refreshError !== e?.message) { this.refreshError = e?.message; Log.error('Panel update failed: ' + (e?.message || e)); } }
+=======
+    // One throwing refresher must not stall every later one on each update; the error is logged at most every 5 s.
+    this.refreshers.forEach(refresh => {
+      try { refresh(); }
+      catch (e) { if (now() - (this.refreshErrorAt || -Infinity) > 5000) { this.refreshErrorAt = now(); Log.error('Panel update failed: ' + (e?.message || e)); } }
+>>>>>>> origin/main
     });
     for (const slot of this.pane.querySelectorAll('.slot[data-skill]')) {
       const id = Number(slot.dataset.skill), left = World.cooldownLeft(id), total = World.skill(id)?.cooldownMs || 0;
@@ -19742,7 +19757,11 @@ function boot() {
     const key = name ? 'profile:' + name : 'profile:default';
     if (key !== Settings.profileKey) { Town.lastScrollPoint = null; Town.deathPoint = null; TeamArbiter.characterSwitch(); stopAll(); Settings.useCharacter(name); }
   });
+<<<<<<< HEAD
   bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); Trace.reset(); BuffGear.reset(); Equip.reset(); Team.reset(); TeamIntel.reset(); TeamArbiter.converge = null; Town.lastScrollPoint = null; Town.deathPoint = null; Town.tier = {}; SpeedScroll.reset(); ScrollBuff.reset(); MallBuyer.reset(); MallBuyer.unpoison(); RepairHammer.reset(); Party.reset(); Resurrect.reset(); Quest.reset(); stopAll(); Restock.cancelRecording(); Restock.unbuyable.clear(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
+=======
+  bus.on('profile', () => { PetPotion.reset(); AutoMastery.reset(); StatPoints.reset(); Trace.reset(); BuffGear.reset(); Equip.reset(); Town.lastScrollPoint = null; Town.deathPoint = null; Town.tier = {}; SpeedScroll.reset(); ScrollBuff.reset(); MallBuyer.reset(); MallBuyer.unpoison(); RepairHammer.reset(); Party.reset(); Resurrect.reset(); Quest.reset(); stopAll(); Restock.cancelRecording(); Restock.unbuyable.clear(); Loot.reset(); Wardrobe.applyNow(); UI.draw(); });
+>>>>>>> origin/main
   bus.on('phase', phase => {
     if (phase !== 'world') {
       BuffGear.interrupt('World transition interrupted buff swaps.', true);

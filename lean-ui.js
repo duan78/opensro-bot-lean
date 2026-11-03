@@ -586,8 +586,6 @@ const UI = {
       Trade.draw();
     } else if (this.current === 'Stall') {
       Stall.draw();
-    } else if (this.current === 'Team') {
-      this.sections('teamRelay', 'teamWorld');
     } else if (this.current === 'Wardrobe') {
       LeanWardrobe.draw(this.pane);
     } else {
@@ -614,7 +612,6 @@ const UI = {
       { name: 'Party/Autores', icon: 'action\\icon_cha_party', pages: ['Party'], sections: [
         ['partyMembers', 'Current party'], ['partyParty', 'Party settings'], ['partyHeal']] },
       { name: 'Player buffing', icon: 'action\\icon_cha_party', pages: ['Party'], sections: [['partyBuffs', 'Player buffing']] },
-      { name: 'Team', icon: 'action\\icon_cha_party', pages: ['Team'], sections: [['teamRelay', 'Team relay']] },
       { name: 'Quest', icon: 'action\\icon_cha_camp', pages: ['Quest'], sections: [['questAuto', 'Auto quest settings'], ['questPick', 'Quests to do'], ['questJournal']] },
       { name: 'Auto alchemy', icon: 'action\\icon_cha_alchemy', pages: ['Alchemy'], draw() { Alchemy.draw(); } },
       { name: 'Stall', icon: 'action\\icon_cha_shop', pages: ['Stall'], draw() { Stall.draw(); } },
@@ -664,7 +661,7 @@ const UI = {
     const icons = { Items: 'action\\cos_cmd_inventory', Party: 'action\\icon_cha_party', Combat: 'action\\icon_cha_auto_attack', Loot: 'action\\icon_cha_autoget', Supplies: 'action\\icon_cha_recovery', Town: 'item\\etc\\mall_return_scroll', Quest: 'action\\icon_cha_camp',
       Alchemy: 'action\\icon_cha_alchemy', Trade: 'action\\icon_cha_shop', Wardrobe: 'action\\icon_cha_shop', Stall: 'action\\icon_cha_shop', Settings: 'action\\icon_cha_helper', Setup: 'action\\icon_cha_camp' };
     const entries = this.classic ? this.classicTabs().map(t => ({ name: t.name, icon: t.icon, open: () => { this.ctab = t.name; this.draw(); } }))
-      : ['Setup', 'Map', 'Combat', 'Party', 'Team', 'Loot', 'Items', 'Supplies', 'Town', 'Quest', 'Stall', 'Alchemy', 'Trade', 'Wardrobe', 'Settings'].map(name => ({ name, icon: icons[name], open: () => { this.current = name; this.draw(); } }));
+      : ['Setup', 'Map', 'Combat', 'Party', 'Loot', 'Items', 'Supplies', 'Town', 'Quest', 'Stall', 'Alchemy', 'Trade', 'Wardrobe', 'Settings'].map(name => ({ name, icon: icons[name], open: () => { this.current = name; this.draw(); } }));
     // Page icons are the game's own action-bar icons; they show only in the wide and classic windows' page lists.
     for (const entry of entries) {
       const tab = this.button(entry.name, entry.open);
@@ -1211,43 +1208,6 @@ const UI = {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       Trace.draw(host);
   },
-  section_teamRelay(host) {
-    const team = () => Settings.profile.team;
-    this.teamNote = el('p', '', 'muted');
-    this.teamPeers = el('div');
-    host.append(this.group('Team relay',
-      this.check('Connect to a team relay', () => team().enabled, v => { team().enabled = v; Team.reset(); this.draw(); }),
-      this.text('Relay address (wss://…)', () => team().url, v => { team().url = v; Team.tick(); }),
-      this.text('Room key', () => team().token, v => { team().token = v; Team.tick(); }),
-      this.select('This character\'s role', [['none', 'No role'], ['tank', 'Tank'], ['healer', 'Healer'], ['support', 'Support'], ['dps', 'Damage'], ['scout', 'Scout']], () => team().role, v => team().role = v),
-      this.check('Assist: fight what a teammate fights', () => team().assist, v => team().assist = v),
-      this.check('Recall to town together', () => team().townSync, v => team().townSync = v),
-      this.check('Go to a unique that appears (the saved spot comes back)', () => team().converge, v => team().converge = v),
-      this.teamNote,
-      el('p', 'A private channel between your own characters over a WebSocket relay you control. Characters that enter the same room key see each other\'s presence here; nothing is sent to anyone else, and the bot never depends on it: with the relay off or unreachable everything else works exactly as before. The address must start with wss://. Assist joins the fight a teammate (or party member) is already in; town sync starts your town trip when a teammate starts theirs. The room\'s console page on the relay can stop everyone or call a group town trip.', 'muted')));
-    const share = this.group('Sharing');
-    share.append(this.check('Also share with every room on this relay', () => team().share.public, v => team().share.public = v),
-      this.check('Shared: interesting monsters (champion and up)', () => team().share.monsters, v => team().share.monsters = v),
-      this.check('Shared: other players seen', () => team().share.players, v => team().share.players = v),
-      this.check('Shared: unique appearances', () => team().share.uniques, v => team().share.uniques = v),
-      el('p', 'The room key holders always see everything above. The public pool (every room on your relay) only ever receives what these boxes allow, and never your own position, build or inventory. Unique announcements from the game\'s server are shared as events; your own sightings carry positions.', 'muted'));
-    host.append(share);
-    const peers = this.group('Connected characters');
-    peers.append(this.teamPeers, el('p', 'Each character announces itself every 5 seconds and is dropped from this list after 15 seconds of silence.', 'muted'));
-    host.append(peers);
-  },
-  section_teamWorld(host) {
-    this.teamUniques = el('div');
-    this.teamPlayers = el('div');
-    this.teamDrops = el('div');
-    const uniques = this.group('Unique tracker');
-    uniques.append(this.teamUniques, el('p', 'Built from the game\'s own server-wide announcements, shared sightings and kills. The respawn timer restarts at death (3-6 h depending on the unique). Hunt here moves your saved hunting spot to the last known position.', 'muted'));
-    const players = this.group('Players seen by the team');
-    players.append(this.teamPlayers, el('p', 'Every player the team sees, newest first. A player who attacks a teammate outside a party is marked hostile.', 'muted'));
-    const drops = this.group('Team drops');
-    drops.append(this.teamDrops);
-    host.append(uniques, players, drops);
-  },
   section_settingsStats(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       Stats.draw(host);
@@ -1478,28 +1438,6 @@ const UI = {
       if (Settings.profile.party.autoRes) notes.push(Resurrect.message);
       this.partyNote.textContent = notes.join(' ');
     }
-    if (this.is('Team') && this.teamNote) {
-      this.teamNote.textContent = Team.status();
-      const rows = Team.peerRows();
-      this.teamPeers.replaceChildren(...(rows.length ? rows.map(text => el('div', text)) : [el('div', 'No other character in the room yet.', 'muted')]));
-      if (this.teamUniques) {
-        const uniqueRows = TeamKnowledge.uniqueRows();
-        this.teamUniques.replaceChildren(...(uniqueRows.length ? uniqueRows.map((text, i) => {
-          const name = [...TeamKnowledge.uniques.values()].sort((a, b) => (b.at || 0) - (a.at || 0))[i]?.name;
-          const row = el('div', text);
-          if (name) row.append(this.button('Hunt here', () => TeamArbiter.huntAtUnique(name)));
-          return row;
-        }) : [el('div', 'No unique recorded yet; they appear when the server announces one or someone sees one.', 'muted')]));
-      }
-      if (this.teamPlayers) {
-        const playerRows = TeamKnowledge.playerRows();
-        this.teamPlayers.replaceChildren(...(playerRows.length ? playerRows.map(text => el('div', text)) : [el('div', 'No other player seen yet.', 'muted')]));
-      }
-      if (this.teamDrops) {
-        const dropRows = TeamKnowledge.dropRows();
-        this.teamDrops.replaceChildren(...(dropRows.length ? dropRows.map(text => el('div', text)) : [el('div', 'Nothing picked up yet.', 'muted')]));
-      }
-    }
     if (!this.status) return;
     if (this.is('Supplies') && this.petPotionNote) { this.petPotionNote.textContent = this.petPotionNote.title = PetPotion.message; }
     if (this.is('Combat') && this.petAttackNote) { this.petAttackNote.textContent = this.petAttackNote.title = PetAttack.status(); }
@@ -1518,10 +1456,10 @@ const UI = {
     const distance = center ? dist2D(World.pose(), center) : Infinity;
     this.status.textContent = `${World.charName || 'No character'} · ${World.inWorld() ? Controller.mode : World.phase}\nHP ${Math.round(me.hpPct)}% · MP ${Math.round(me.mpPct)}% · Potions ${Potion.count('hp')}/${Potion.count('mp')} · Pickups ${Stats.values.loot}\nHunting spot: ${Number.isFinite(distance) ? Math.round(distance / 10) + ' m away' : center ? 'another region' : 'not saved'}${Restock.recording ? '\nRecording route: ' + Restock.draft.route.length + ' points' : ''}`;
 
-    // One throwing refresher must not stall every later one on each update; a repeat error is logged once.
+    // One throwing refresher must not stall every later one on each update; the error is logged at most every 5 s.
     this.refreshers.forEach(refresh => {
       try { refresh(); }
-      catch (e) { if (this.refreshError !== e?.message) { this.refreshError = e?.message; Log.error('Panel update failed: ' + (e?.message || e)); } }
+      catch (e) { if (now() - (this.refreshErrorAt || -Infinity) > 5000) { this.refreshErrorAt = now(); Log.error('Panel update failed: ' + (e?.message || e)); } }
     });
     for (const slot of this.pane.querySelectorAll('.slot[data-skill]')) {
       const id = Number(slot.dataset.skill), left = World.cooldownLeft(id), total = World.skill(id)?.cooldownMs || 0;

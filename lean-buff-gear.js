@@ -167,10 +167,11 @@ const BuffGear = {
   },
   restore(auto = false) {
     const gp = World.gp;
-    if (this.run || !this.recovery || !World.inWorld() || World.isDead() || gp?.inventoryPending || World.isCasting() ||
-        gp?.returnScroll || gp?.storage || Restock.activeShop() || gp?.exchange?.open || gp?.exchange?.requesting || gp?.stall?.phase && gp.stall.phase !== 'none') return;
-    // The automatic restore waits out travel instead of saying so every tick; only a manual one explains itself.
-    if (!auto && Hunt.running || Town.trip || WalkBack.active || Restock.trip || Alchemy.run || Alchemy.pending) {
+    const windowOpen = !!(gp?.returnScroll || gp?.storage || Restock.activeShop() || gp?.exchange?.open || gp?.exchange?.requesting || gp?.stall?.phase && gp.stall.phase !== 'none');
+    if (this.run || !this.recovery || !World.inWorld() || World.isDead() || gp?.inventoryPending || World.isCasting()) return;
+    // The automatic restore waits out travel and open game windows instead of saying so every tick; only a manual one explains itself.
+    if (windowOpen || !auto && Hunt.running || Town.trip || WalkBack.active || Restock.trip || Alchemy.run || Alchemy.pending) {
+      if (windowOpen && !auto) return UI.toast('Close the open trade, stall or shop before restoring gear.', 'warn');
       if (auto) return;
       return UI.toast('Stop hunting and travel before restoring gear.', 'warn');
     }
