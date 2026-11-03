@@ -55,7 +55,7 @@ const TeamArbiter = {
     if (!pos || !Number.isInteger(pos.regionId)) return;
     const H = Settings.profile.hunt;
     if (!Hunt.running || !H.center || Town.trip || !World.inWorld() || World.isDead()) return;
-    this.converge = { name: ev.name, prev: { ...H.center }, at: now() };
+    this.converge = { name: ev.name, prev: { ...H.center }, at: now(), profileKey: Settings.profileKey };
     H.center = { regionId: pos.regionId, x: Math.round(pos.x), y: H.center.y || 0, z: Math.round(pos.z) };
     Settings.saveProfile(); bus.emit('center');
     UI.toast('Going to ' + ev.name + "'s position; the saved spot comes back after.", 'warn', 6000);
@@ -64,10 +64,14 @@ const TeamArbiter = {
     const c = this.converge;
     if (!c) return;
     this.converge = null;
+    // Never write a spot into a profile the converge did not start from (character or profile switched meanwhile).
+    if (c.profileKey && c.profileKey !== Settings.profileKey) return;
     Settings.profile.hunt.center = c.prev;
     Settings.saveProfile(); bus.emit('center');
     if (message) UI.toast(message, 'info', 5000);
   },
+  // Character switch: the spot held for a converge goes back into the profile being left, before the new one loads.
+  characterSwitch() { if (this.converge) this.restoreSpot(); },
   tick() {
     if (this.converge && now() - this.converge.at > 20 * 60000) this.restoreSpot('Unique hunt timed out; back to the saved hunting spot.');
   },

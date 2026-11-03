@@ -45,7 +45,10 @@ const Team = {
     const address = url + (url.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(token);
     let s = null;
     try { s = new W.WebSocket(address); } catch (e) {
-      this.message = 'Relay address refused: ' + (e?.message || e).slice?.(0, 100);
+      // The address carries the room key and browser errors quote it in full, so the key never reaches a message
+      // that can be copied into a bug report.
+      const text = String((e && e.message) || e).replace(/([?&])key=[^&\s'"]+/g, '$1key=***');
+      this.message = 'Relay address refused: ' + text.slice(0, 100);
       this.scheduleRetry();
       return;
     }

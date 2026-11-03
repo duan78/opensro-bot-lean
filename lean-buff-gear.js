@@ -166,8 +166,14 @@ const BuffGear = {
     if (this.autoRestore && this.recovery && !this.run) this.restore(true);
   },
   restore(auto = false) {
-    if (this.run || !this.recovery || !World.inWorld() || World.isDead() || World.gp?.inventoryPending || World.isCasting()) return;
-    if (!auto && Hunt.running || Town.trip || WalkBack.active || Restock.trip || Alchemy.run || Alchemy.pending) return UI.toast('Stop hunting and travel before restoring gear.', 'warn');
+    const gp = World.gp;
+    if (this.run || !this.recovery || !World.inWorld() || World.isDead() || gp?.inventoryPending || World.isCasting() ||
+        gp?.returnScroll || gp?.storage || Restock.activeShop() || gp?.exchange?.open || gp?.exchange?.requesting || gp?.stall?.phase && gp.stall.phase !== 'none') return;
+    // The automatic restore waits out travel instead of saying so every tick; only a manual one explains itself.
+    if (!auto && Hunt.running || Town.trip || WalkBack.active || Restock.trip || Alchemy.run || Alchemy.pending) {
+      if (auto) return;
+      return UI.toast('Stop hunting and travel before restoring gear.', 'warn');
+    }
     this.run = this.create(this.recovery, []); this.run.restoring = true; this.recovery = null; this.autoRestore = false;
   },
   create(home, queue) {

@@ -1518,7 +1518,11 @@ const UI = {
     const distance = center ? dist2D(World.pose(), center) : Infinity;
     this.status.textContent = `${World.charName || 'No character'} · ${World.inWorld() ? Controller.mode : World.phase}\nHP ${Math.round(me.hpPct)}% · MP ${Math.round(me.mpPct)}% · Potions ${Potion.count('hp')}/${Potion.count('mp')} · Pickups ${Stats.values.loot}\nHunting spot: ${Number.isFinite(distance) ? Math.round(distance / 10) + ' m away' : center ? 'another region' : 'not saved'}${Restock.recording ? '\nRecording route: ' + Restock.draft.route.length + ' points' : ''}`;
 
-    this.refreshers.forEach(refresh => refresh());
+    // One throwing refresher must not stall every later one on each update; a repeat error is logged once.
+    this.refreshers.forEach(refresh => {
+      try { refresh(); }
+      catch (e) { if (this.refreshError !== e?.message) { this.refreshError = e?.message; Log.error('Panel update failed: ' + (e?.message || e)); } }
+    });
     for (const slot of this.pane.querySelectorAll('.slot[data-skill]')) {
       const id = Number(slot.dataset.skill), left = World.cooldownLeft(id), total = World.skill(id)?.cooldownMs || 0;
       slot.querySelector('.cd').style.setProperty('--p', total && left > 0 ? Math.min(100, left / total * 100) + '%' : '0%');
