@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         nixxane bot
 // @namespace    https://opensro.online/
-// @version      1.8.4
+// @version      1.8.5
 // @updateURL    https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.meta.js
 // @downloadURL  https://raw.githubusercontent.com/duan78/opensro-bot-lean/main/bot.lean.user.js
 // @description  Combat, reliable looting, potions, restocking, walk-back and an optional team relay in one compact panel.
@@ -22,7 +22,7 @@ if (W.__SRO_ASISTAN__ || W.__SRO_LEAN__) {
   console.warn('[NIX] Another SRO assistant is active. Disable it and reload to use NIX.');
   return;
 }
-const VERSION = '1.8.4';
+const VERSION = '1.8.5';
 const APP = { version: VERSION };
 Object.defineProperty(W, '__SRO_LEAN__', { value: APP });
 Object.defineProperty(W, '__SRO_ASISTAN__', { value: APP });
@@ -240,7 +240,7 @@ const DEFAULT_PROFILE = {
     levelSpots: { on: false, list: [] },
     center: null, radius: 400, chase: 700, returnToCenter: true, travel: true, attack: true,
     classes: { normal: true, champion: true, giant: true, party: false, elite: false, unique: false, titan: false },
-    levelMin: 0, levelMax: 0, include: '', exclude: '', priority: 'attackers', avoidKs: true, avoidKsScope: 'all',
+    levelMin: 0, levelMax: 0, include: '', exclude: '', priority: 'attackers', avoidKs: true, avoidKsScope: 'all', avoidKsBelow: 50,
     targetTimeoutS: 25,
     pickup: { enabled: true, soxOnly: false, skipStar: false, gold: true, potions: true, equipment: true, elixirs: true, powders: true, magicStones: true, attrStones: true, alchemy: true, others: true,
       collector: 'character', by: {}, petFullSound: true, soxSound: true, include: '', exclude: '', radius: 300, afterKillOnly: true, retries: 2 },
@@ -277,6 +277,9 @@ function botProfile(input) {
   if (!['reverse', 'walk'].includes(result.potion.restock.town.returnBy)) result.potion.restock.town.returnBy = 'reverse';
   // The anti-KS scope only has the two meanings; anything else is the old full behavior.
   if (result.hunt.avoidKsScope !== 'minor') result.hunt.avoidKsScope = 'all';
+  // The finish-steal cutoff stops at 50: above it the kill can still be won, so avoiding is pointless.
+  if (!Number.isFinite(result.hunt.avoidKsBelow) || result.hunt.avoidKsBelow < 0) result.hunt.avoidKsBelow = 0;
+  if (result.hunt.avoidKsBelow > 50) result.hunt.avoidKsBelow = 50;
   // New categories inherit the old Other items switch, preserving existing selection.
   const pickup = input.hunt?.pickup;
   for (const key of ['elixirs', 'powders', 'alchemy']) {
@@ -1777,7 +1780,15 @@ const Hunt = {
     if (!H.avoidKs) return false;
     if (H.avoidKsScope === 'minor') {
       const cls = monsterClass(e);
-      if (cls !== 'normal' && cls !== 'champion') return false;
+      if (cls !== 'normal' && cls !== 'champion') {
+        // Big monsters stay fair game while the kill can still be won: below the HP cutoff the drop
+        // already belongs to the other fighter (damage majority is out of reach), so the DPS goes
+        // to a fresh target instead. Unknown HP never blocks a choice.
+        const below = H.avoidKsBelow ?? 0;
+        if (!(below > 0) || (cls !== 'giant' && cls !== 'party')) return false;
+        const pct = World.hpPctOf(e);
+        if (pct === null || pct > below) return false;
+      }
     }
     return sim - (World.hitByOthers.get(e.gid) ?? -Infinity) < 8000 && sim - (World.hitByUs.get(e.gid) ?? -Infinity) > 8000;
   },
@@ -7223,7 +7234,7 @@ const Town = {
       this.message = 'Scroll not confirmed; waiting for fresh, settled game state.'; return true;
     }
     if (t.scrollAttempts >= 3) {
-      this.fail('Return request was not accepted after three attempts. ' + (gp.error || 'Check game travel restrictions.')); return true;
+      this.fail('Return request was not accepted after three attempts. ' + (gp.error || 'The game itself may be refusing this scroll — try using it by hand.')); return true;
     }
     const next = t.phase === 'recall-wait' ? 'recall' : 'reverse';
     this.enter(next); t.scrollRequest = null;
@@ -7583,6 +7594,8 @@ const Town = {
     const order = this.trip?.order || this.order(false), role = phase.replace(/^close-/, ''), next = order[order.indexOf(role) + 1] || 'gate';
     return next === 'gate' && !this.reverses() ? 'leave' : 'walk-' + next;
   },
+  // A supply the merchant does not sell, or the gold did not cover, was skipped on purpose and is not a reason to stop.
+  supplyShort(t) { return t.supplies.some(s => !t.buySkipped?.includes(s.refObjId) && Restock.count(s.refObjId) < s.target); },
   // Walk back instead of reversing: the trip ends here and WalkBack, which resumes hunting on arrival, takes over.
   // A trapped-character recovery trip stops in town instead, as it does before a reverse (lean-trap.js).
   leave() {
@@ -7593,7 +7606,7 @@ const Town = {
       return;
     }
     if (gp.inventoryPending || World.isCasting()) return;
-    if (t.supplies.some(s => Restock.count(s.refObjId) < s.target) || this.damaged().length || !t.revival && !this.scroll(0x09ec)) return this.fail('Final supply, repair or travel-scroll check failed.');
+    if (this.supplyShort(t) || this.damaged().length || !t.revival && !this.scroll(0x09ec)) return this.fail('Final supply, repair or travel-scroll check failed.');
     if (World.freeBagSlots() <= 1) return this.fail('Returned to town; free at least two character bag slots before hunting again.');
     if (!Hunt.cfg().center) return this.fail('No saved hunting spot to walk back to.');
     this.trip = null; Hunt.targetGid = Hunt.lootGid = 0; this.restartClocks();
@@ -7809,19 +7822,42 @@ const Town = {
     if (t.petRef && (!pet || pet.rec.refObjId !== t.petRef)) return this.fail('Pickup pet is missing or changed.');
     if (t.salePetGid && pet?.rec.gid !== t.salePetGid) return this.fail('Pickup pet changed during selling.');
     // A refused sale leaves the item where it was. Skip it and sell the rest: one item the merchant will not take
-    // must not end the trip.
+    // must not end the trip. A refused pet-to-bag move leaves the item in the pet, handled the same way.
     const p = t.pending;
     if (p && gp.error && !gp.inventoryPending && now() - p.at >= 500 &&
         (p.bag ? World.items() : pet?.rec.inventory || []).some(i => i.slot === p.source && i.refObjId === p.ref)) {
       (t.unsold ||= []).push((p.bag ? 'bag:' : 'pet:') + p.source + ':' + p.ref);
       Activity.emit({ category: 'town', code: 'sale-refused', level: 'warn', text: 'Town sell: merchant refused an item (' + gp.error + '); skipped.', userText: 'The merchant refused one item; it was kept and selling continued.', outcome: 'refused', operationId: Activity.contexts.town?.id });
       t.pending = null;
+      if (p.stage) t.staged = null;
     }
-    if (!this.pendingDone(p => p.excess ? Restock.count(p.ref) <= p.before - p.quantity : p.bag ? !World.items().some(i => i.slot === p.source && i.refObjId === p.ref) : !pet.rec.inventory.some(i => i.slot === p.source && i.refObjId === p.ref)) || !this.trip || gp.inventoryPending) return;
+    if (!this.pendingDone(p => p.excess ? Restock.count(p.ref) <= p.before - p.quantity
+      : p.stage ? World.items().some(i => i.slot === p.destination && i.refObjId === p.ref) && !(pet?.rec.inventory || []).some(i => i.slot === p.source && i.refObjId === p.ref)
+      : !World.items().some(i => i.slot === p.source && i.refObjId === p.ref)) || !this.trip || gp.inventoryPending) return;
     const unsold = (where, i) => t.unsold?.includes(where + i.slot + ':' + i.refObjId);
-    const petItem = pet?.rec.inventory.find(i => this.sellable(i) && !unsold('pet:', i));
-    const bagItem = !petItem && t.sellFirst ? World.items().find(i => this.sellableBag(i) && !unsold('bag:', i)) : null;
-    const item = petItem || bagItem;
+    // The server refuses selling straight from the pet inventory (native notice UIIT_MSG_COSPETERR_CANT_TRADE):
+    // pet loot moves to a free bag slot first, then sells from the bag like any other item. With bag selling on, the
+    // bag sells before the pet, so a full bag frees the slots that pet loot has to pass through.
+    const staged = t.staged ? World.items().find(i => i.slot === t.staged.slot && i.refObjId === t.staged.ref) : null;
+    if (t.staged && !staged) return this.fail('Staged pet item changed unexpectedly.');
+    const bagItem = staged || (t.sellFirst ? World.items().find(i => this.sellableBag(i) && !unsold('bag:', i)) : null);
+    const petItem = bagItem ? null : pet?.rec.inventory.find(i => this.sellable(i) && !unsold('pet:', i));
+    const item = bagItem || null;
+    if (petItem && !item) {
+      const slot = this.free(gp.inventory, gp.equipmentSlotCount || 13, gp.inventorySlotCount);
+      if (slot === null) {
+        // Like protected items: no bag room to bring pet loot through is not a failure; the trip carries on.
+        this.message = 'Town sell: no free bag slot for pet loot; it stays in the pet for now.';
+        Log.warn(this.message);
+        this.enter(this.ammoSupplies().length ? 'ammo' : 'repair'); return;
+      }
+      if (Cmd.raw({ kind: 'cos-transfer', gid: pet.rec.gid, toCos: false, source: petItem.slot, destination: slot }, 'Town: move pet loot to the bag for selling')) {
+        t.salePetGid = pet.rec.gid;
+        t.pending = { stage: true, source: petItem.slot, destination: slot, ref: petItem.refObjId, quantity: petItem.quantity ?? 1, at: now() };
+        t.staged = { slot, ref: petItem.refObjId };
+      }
+      return;
+    }
     if (!item) {
       // Picked-up or overbought supplies crowd the bag: with the switch on, their surplus above the refill
       // target sells here. Only items this profile restocks are ever touched, so nothing else is at risk.
@@ -7837,13 +7873,9 @@ const Town = {
     }
     const quantity = item.quantity ?? 1;
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 65535) return this.fail('Invalid item sale quantity.');
-    if (bagItem) {
-      if (Cmd.raw({ kind: 'shop-sell', slot: item.slot, quantity }, 'Town: sell bag item at weapon merchant')) t.pending = { bag: true, source: item.slot, ref: item.refObjId, quantity, at: now() };
-      return;
-    }
-    if (Cmd.raw({ kind: 'cos-shop-sell', gid: pet.rec.gid, slot: item.slot, quantity }, 'Town: sell pet loot at weapon merchant')) {
-      t.salePetGid = pet.rec.gid;
-      t.pending = { source: item.slot, ref: item.refObjId, quantity, at: now() };
+    if (Cmd.raw({ kind: 'shop-sell', slot: item.slot, quantity }, staged ? 'Town: sell pet loot from the bag' : 'Town: sell bag item at weapon merchant')) {
+      t.pending = { bag: true, source: item.slot, ref: item.refObjId, quantity, at: now() };
+      if (staged) t.staged = null;
     }
   },
   // Tops up arrows and bolts at the weapon merchant. A shortfall here (not sold, no bag room, no gold) is reported and
@@ -8096,8 +8128,15 @@ const Town = {
         Hunt.stop('Recovery town services completed. Check the hunting spot before returning.');
         return true;
       }
-      if (gp.inventoryPending || World.isCasting()) return true;
-      if (t.supplies.some(s => Restock.count(s.refObjId) < s.target) || this.damaged().length || !t.revival && !this.scroll(0x09ec) || !this.scroll(0x19ec)) { this.fail('Final supply, repair or travel-scroll check failed.'); return true; }
+      // A pending inventory or cast that the game never resolves (seen live after a server update) would
+      // freeze the trip here forever. Wait it out like the other phases, then stop cleanly — nothing is
+      // ever sent twice over an unresolved game state.
+      if (gp.inventoryPending || World.isCasting()) {
+        if (now() - t.at > 60000) { this.fail('The game stayed busy for a full minute before the return scroll; nothing was sent twice. Reload the game and check the character.'); return true; }
+        this.message = 'Waiting for the game to settle before the return scroll.';
+        return true;
+      }
+      if (this.supplyShort(t) || this.damaged().length || !t.revival && !this.scroll(0x09ec) || !this.scroll(0x19ec)) { this.fail('Final supply, repair or travel-scroll check failed.'); return true; }
       if (World.freeBagSlots() <= 1) { this.fail('Returned to town; free at least two character bag slots before hunting again.'); return true; }
       const npc = this.npc('gate');
       if (!npc || gp.target !== npc.gid || !(gp.targetCapabilities & 0x20000000)) { this.fail('Reverse-return teleport NPC unavailable.'); return true; }
@@ -16008,7 +16047,7 @@ const Alchemy = {
 };
 
 
-const RELEASE_NOTES = [{"version": "1.8.4", "title": "Fork synced with upstream 1.2.218", "items": ["On a town trip, better gear you carry is worn and the piece it replaces is stored in the warehouse (off by default, Loot > Wear better gear).", "A spot with no XP can move hunting to the next level spot instead of returning to town.", "The wait for a party resurrection before reviving in town is configurable.", "Alert chimes: a player near, your own death, a level up and a unique in view (each off by default).", "Item names, icons and codenames are cached from the server wire when the game data files are not served, so item rules and Star checks work there; Don't pick up Star gear waits for an item the catalogue has never seen."], "note": "The upstream features come from upstream releases; this sync was checked with the offline test suite only."}, {"version": "1.8.3", "title": "Fork synced with upstream 1.2.213", "items": ["Town trips sell picked-up supplies above the refill amount, and all Star gear can be sold from the warehouse with one click (with an option to not pick up Star gear at all).", "Berserk can also fire when enough monsters attack at once, whatever their kind.", "The lure can stop when other players come near, or after a chosen number of pulls.", "Self buffs are kept up while walking back to the hunting spot.", "Anti-stuck recovery can go through town, party joining can wait for Start, and bug reports say why the bot stopped.", "Also carries 1.8.2 (the anti-KS monster scope), now merged upstream as 1.2.213."], "note": "The upstream features come from upstream releases; this sync was checked with the offline test suite only."}, {"version": "1.8.2", "title": "Avoid other players' targets, now by monster kind", "items": ["New \"Avoided monsters\" choice in Combat > Hunt area: All monsters (as before) or Normal & champion only.", "With Normal & champion only, a high-damage character still attacks party, giant, elite, titan and unique monsters another player is already fighting.", "The \"another player is fighting it\" skip count in the panel follows the same choice."], "note": "Tested in the offline test suite only; not yet verified on a live server."}, {"version": "1.8.1", "title": "Auto Quest, second pass", "items": ["Repeatable quests are taken again: after completing one, its NPC's new offer marker is answered like any other. The server's marker decides what can be accepted now.", "The Quest page's journal rows gain an Abandon button (with a confirm click) that sends the game's own give-up command once and settles on the journal's answer. Skipping keeps a quest out without dropping its progress.", "Journal rows also say \"targets not around\" while hunting when a quest's learned monsters have not spawned near, so a quest that needs another hunting spot is visible at a glance.", "Quest mechanics that need their own in-world actions are not automated: gathering with a quest tool (stand in its area and use the knife), and capture traps (cast the quest's trap skill on its monster, e.g. via your rotation). Accepting and turning those quests in is still automatic.", "Still simulation-tested only; the quest opcodes and the dialogue flow have not been verified on the live server yet."]}, {"version": "1.8.0", "title": "Auto Quest", "items": ["New Quest page: quests are done automatically. The quest markers the game itself sends route the bot - it walks to the quest NPC, accepts the quest, and turns it in when the journal says the objective is met.", "Quests the reward window can close are rewarded with the quest window's own command, without walking back to the NPC. A refused reward waits a minute and then falls back to its NPC.", "Which dialogue row belongs to which quest, and which monster kills advance which quest, are learned while playing - no quest database is shipped. Learned monsters are hunted first while their quest counts.", "The quest list shows each active quest's count and a Skip button; codename include/exclude patterns filter which quests are taken.", "Turn-ins never guess between several unknown dialogue rows (a wrong Yes would accept another quest); such an NPC is left with a message instead.", "Everything here was tested against a simulated game state only: the quest marker, journal, and NPC dialogue contracts were read from the game's own source. The opcodes and dialogue flow have not been verified on the live server yet."]}, {"version": "1.7.3", "title": "Clearer mall roles: scrolls with the potions, merchant-first thresholds", "items": ["Keeping the 20% damage and resistance scrolls active is now set under Automatic potion use, right beside the speed scroll it mirrors; the Item mall section only refills the stock.", "The mall potion thresholds now default below the merchant restock marks, so the merchant stays the primary source and the mall only steps in when that was not enough. Raising a mall mark above the merchant one flips that item to silk-first, for wallets that prefer it — the thresholds themselves express the priority."]}, {"version": "1.7.2", "title": "Item mall: MP bags and Reverse Return Scrolls", "items": ["The mall buyer can now also refill MP potion bags and Reverse Return Scrolls (the merchant with gold stays the cheaper source for scrolls; the mall is the fallback you arm yourself). Same rules as the HP bags: per-run silk budget, one measured order at a time, live catalogue prices."]}, {"version": "1.7.1", "title": "Mall buyer: no order inside an inventory rush, self-healing block", "items": ["Live test finding: the mall order and an item-use (the battle scroll's) went out in the same second; the game worker silently refuses mall commands while an inventory transaction is open, so the order never reached the server and looked like an unconfirmed purchase. The buyer now waits for a calm inventory window before ordering.", "A blocked buyer (unconfirmed order) now probes the catalogue read-only every 10 s: only a responsive mall moves its revision, so a change proves the session is usable and buying resumes by itself; a genuinely poisoned client stays silent and the block stays (re-entering the game still works too).", "The battle-scroll auto-use was confirmed working live (buff re-applied from bag stock)."], "note": "The first real purchase is still pending live verification."}];
+const RELEASE_NOTES = [{"version": "1.8.5", "title": "Fork synced with upstream 1.2.223", "items": ["Pet loot on town trips sells again: the server refuses sales straight from the pet's bag, so the bot now moves each sellable pet item to a free slot in your bag first (and the full bag itself is sold before the pet loot).", "Town trips no longer hang before the return scroll: a game that never settles gets a one-minute cap and a clean stop instead of waiting forever; an unexplained triple refusal now says the game itself may be refusing the scroll.", "Town trips no longer stop at the smith after a supply skipped on purpose (merchant does not sell it, or gold ran short).", "New hunt option \"Spare engaged giant/party below % HP (0 = off)\" for the \"Normal & champion only\" avoidance mode: a giant or party monster another player is fighting is skipped once its health is at or below the cutoff (default 50, set 0 to turn off)."], "note": "The upstream features come from upstream releases 1.2.219-1.2.223; this sync was checked with the offline test suite only."}, {"version": "1.8.4", "title": "Fork synced with upstream 1.2.218", "items": ["On a town trip, better gear you carry is worn and the piece it replaces is stored in the warehouse (off by default, Loot > Wear better gear).", "A spot with no XP can move hunting to the next level spot instead of returning to town.", "The wait for a party resurrection before reviving in town is configurable.", "Alert chimes: a player near, your own death, a level up and a unique in view (each off by default).", "Item names, icons and codenames are cached from the server wire when the game data files are not served, so item rules and Star checks work there; Don't pick up Star gear waits for an item the catalogue has never seen."], "note": "The upstream features come from upstream releases; this sync was checked with the offline test suite only."}, {"version": "1.8.3", "title": "Fork synced with upstream 1.2.213", "items": ["Town trips sell picked-up supplies above the refill amount, and all Star gear can be sold from the warehouse with one click (with an option to not pick up Star gear at all).", "Berserk can also fire when enough monsters attack at once, whatever their kind.", "The lure can stop when other players come near, or after a chosen number of pulls.", "Self buffs are kept up while walking back to the hunting spot.", "Anti-stuck recovery can go through town, party joining can wait for Start, and bug reports say why the bot stopped.", "Also carries 1.8.2 (the anti-KS monster scope), now merged upstream as 1.2.213."], "note": "The upstream features come from upstream releases; this sync was checked with the offline test suite only."}, {"version": "1.8.2", "title": "Avoid other players' targets, now by monster kind", "items": ["New \"Avoided monsters\" choice in Combat > Hunt area: All monsters (as before) or Normal & champion only.", "With Normal & champion only, a high-damage character still attacks party, giant, elite, titan and unique monsters another player is already fighting.", "The \"another player is fighting it\" skip count in the panel follows the same choice."], "note": "Tested in the offline test suite only; not yet verified on a live server."}, {"version": "1.8.1", "title": "Auto Quest, second pass", "items": ["Repeatable quests are taken again: after completing one, its NPC's new offer marker is answered like any other. The server's marker decides what can be accepted now.", "The Quest page's journal rows gain an Abandon button (with a confirm click) that sends the game's own give-up command once and settles on the journal's answer. Skipping keeps a quest out without dropping its progress.", "Journal rows also say \"targets not around\" while hunting when a quest's learned monsters have not spawned near, so a quest that needs another hunting spot is visible at a glance.", "Quest mechanics that need their own in-world actions are not automated: gathering with a quest tool (stand in its area and use the knife), and capture traps (cast the quest's trap skill on its monster, e.g. via your rotation). Accepting and turning those quests in is still automatic.", "Still simulation-tested only; the quest opcodes and the dialogue flow have not been verified on the live server yet."]}, {"version": "1.8.0", "title": "Auto Quest", "items": ["New Quest page: quests are done automatically. The quest markers the game itself sends route the bot - it walks to the quest NPC, accepts the quest, and turns it in when the journal says the objective is met.", "Quests the reward window can close are rewarded with the quest window's own command, without walking back to the NPC. A refused reward waits a minute and then falls back to its NPC.", "Which dialogue row belongs to which quest, and which monster kills advance which quest, are learned while playing - no quest database is shipped. Learned monsters are hunted first while their quest counts.", "The quest list shows each active quest's count and a Skip button; codename include/exclude patterns filter which quests are taken.", "Turn-ins never guess between several unknown dialogue rows (a wrong Yes would accept another quest); such an NPC is left with a message instead.", "Everything here was tested against a simulated game state only: the quest marker, journal, and NPC dialogue contracts were read from the game's own source. The opcodes and dialogue flow have not been verified on the live server yet."]}, {"version": "1.7.3", "title": "Clearer mall roles: scrolls with the potions, merchant-first thresholds", "items": ["Keeping the 20% damage and resistance scrolls active is now set under Automatic potion use, right beside the speed scroll it mirrors; the Item mall section only refills the stock.", "The mall potion thresholds now default below the merchant restock marks, so the merchant stays the primary source and the mall only steps in when that was not enough. Raising a mall mark above the merchant one flips that item to silk-first, for wallets that prefer it — the thresholds themselves express the priority."]}, {"version": "1.7.2", "title": "Item mall: MP bags and Reverse Return Scrolls", "items": ["The mall buyer can now also refill MP potion bags and Reverse Return Scrolls (the merchant with gold stays the cheaper source for scrolls; the mall is the fallback you arm yourself). Same rules as the HP bags: per-run silk budget, one measured order at a time, live catalogue prices."]}];
 
 // Check trusted repository metadata; never execute downloaded update code.
 const Updates = {
@@ -18026,6 +18065,7 @@ const UI = {
         el('p', 'Beta: a long walk back is first checked against the game map, and teleports and ferries are used where walking cannot get there. If a route looks wrong, send the log.', 'muted'),
         this.check('Avoid other players’ targets', () => H().avoidKs, v => H().avoidKs = v),
         this.select('Avoided monsters', () => [['all', 'All monsters'], ['minor', 'Normal & champion only']], () => H().avoidKsScope || 'all', v => H().avoidKsScope = v),
+        this.number('Spare engaged giant/party below % HP (0 = off)', () => H().avoidKsBelow ?? 50, v => H().avoidKsBelow = v, 0, 50),
         this.number('Minimum mob level (0 = any)', () => H().levelMin, v => H().levelMin = v, 0, 140),
         this.number('Maximum mob level (0 = any)', () => H().levelMax, v => H().levelMax = v, 0, 140),
         this.text('Only these mobs', () => H().include, v => H().include = v),

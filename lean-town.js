@@ -68,7 +68,7 @@ const Town = {
       this.message = 'Scroll not confirmed; waiting for fresh, settled game state.'; return true;
     }
     if (t.scrollAttempts >= 3) {
-      this.fail('Return request was not accepted after three attempts. ' + (gp.error || 'Check game travel restrictions.')); return true;
+      this.fail('Return request was not accepted after three attempts. ' + (gp.error || 'The game itself may be refusing this scroll — try using it by hand.')); return true;
     }
     const next = t.phase === 'recall-wait' ? 'recall' : 'reverse';
     this.enter(next); t.scrollRequest = null;
@@ -428,6 +428,8 @@ const Town = {
     const order = this.trip?.order || this.order(false), role = phase.replace(/^close-/, ''), next = order[order.indexOf(role) + 1] || 'gate';
     return next === 'gate' && !this.reverses() ? 'leave' : 'walk-' + next;
   },
+  // A supply the merchant does not sell, or the gold did not cover, was skipped on purpose and is not a reason to stop.
+  supplyShort(t) { return t.supplies.some(s => !t.buySkipped?.includes(s.refObjId) && Restock.count(s.refObjId) < s.target); },
   // Walk back instead of reversing: the trip ends here and WalkBack, which resumes hunting on arrival, takes over.
   // A trapped-character recovery trip stops in town instead, as it does before a reverse (lean-trap.js).
   leave() {
@@ -438,7 +440,7 @@ const Town = {
       return;
     }
     if (gp.inventoryPending || World.isCasting()) return;
-    if (t.supplies.some(s => Restock.count(s.refObjId) < s.target) || this.damaged().length || !t.revival && !this.scroll(0x09ec)) return this.fail('Final supply, repair or travel-scroll check failed.');
+    if (this.supplyShort(t) || this.damaged().length || !t.revival && !this.scroll(0x09ec)) return this.fail('Final supply, repair or travel-scroll check failed.');
     if (World.freeBagSlots() <= 1) return this.fail('Returned to town; free at least two character bag slots before hunting again.');
     if (!Hunt.cfg().center) return this.fail('No saved hunting spot to walk back to.');
     this.trip = null; Hunt.targetGid = Hunt.lootGid = 0; this.restartClocks();
@@ -654,19 +656,42 @@ const Town = {
     if (t.petRef && (!pet || pet.rec.refObjId !== t.petRef)) return this.fail('Pickup pet is missing or changed.');
     if (t.salePetGid && pet?.rec.gid !== t.salePetGid) return this.fail('Pickup pet changed during selling.');
     // A refused sale leaves the item where it was. Skip it and sell the rest: one item the merchant will not take
-    // must not end the trip.
+    // must not end the trip. A refused pet-to-bag move leaves the item in the pet, handled the same way.
     const p = t.pending;
     if (p && gp.error && !gp.inventoryPending && now() - p.at >= 500 &&
         (p.bag ? World.items() : pet?.rec.inventory || []).some(i => i.slot === p.source && i.refObjId === p.ref)) {
       (t.unsold ||= []).push((p.bag ? 'bag:' : 'pet:') + p.source + ':' + p.ref);
       Activity.emit({ category: 'town', code: 'sale-refused', level: 'warn', text: 'Town sell: merchant refused an item (' + gp.error + '); skipped.', userText: 'The merchant refused one item; it was kept and selling continued.', outcome: 'refused', operationId: Activity.contexts.town?.id });
       t.pending = null;
+      if (p.stage) t.staged = null;
     }
-    if (!this.pendingDone(p => p.excess ? Restock.count(p.ref) <= p.before - p.quantity : p.bag ? !World.items().some(i => i.slot === p.source && i.refObjId === p.ref) : !pet.rec.inventory.some(i => i.slot === p.source && i.refObjId === p.ref)) || !this.trip || gp.inventoryPending) return;
+    if (!this.pendingDone(p => p.excess ? Restock.count(p.ref) <= p.before - p.quantity
+      : p.stage ? World.items().some(i => i.slot === p.destination && i.refObjId === p.ref) && !(pet?.rec.inventory || []).some(i => i.slot === p.source && i.refObjId === p.ref)
+      : !World.items().some(i => i.slot === p.source && i.refObjId === p.ref)) || !this.trip || gp.inventoryPending) return;
     const unsold = (where, i) => t.unsold?.includes(where + i.slot + ':' + i.refObjId);
-    const petItem = pet?.rec.inventory.find(i => this.sellable(i) && !unsold('pet:', i));
-    const bagItem = !petItem && t.sellFirst ? World.items().find(i => this.sellableBag(i) && !unsold('bag:', i)) : null;
-    const item = petItem || bagItem;
+    // The server refuses selling straight from the pet inventory (native notice UIIT_MSG_COSPETERR_CANT_TRADE):
+    // pet loot moves to a free bag slot first, then sells from the bag like any other item. With bag selling on, the
+    // bag sells before the pet, so a full bag frees the slots that pet loot has to pass through.
+    const staged = t.staged ? World.items().find(i => i.slot === t.staged.slot && i.refObjId === t.staged.ref) : null;
+    if (t.staged && !staged) return this.fail('Staged pet item changed unexpectedly.');
+    const bagItem = staged || (t.sellFirst ? World.items().find(i => this.sellableBag(i) && !unsold('bag:', i)) : null);
+    const petItem = bagItem ? null : pet?.rec.inventory.find(i => this.sellable(i) && !unsold('pet:', i));
+    const item = bagItem || null;
+    if (petItem && !item) {
+      const slot = this.free(gp.inventory, gp.equipmentSlotCount || 13, gp.inventorySlotCount);
+      if (slot === null) {
+        // Like protected items: no bag room to bring pet loot through is not a failure; the trip carries on.
+        this.message = 'Town sell: no free bag slot for pet loot; it stays in the pet for now.';
+        Log.warn(this.message);
+        this.enter(this.ammoSupplies().length ? 'ammo' : 'repair'); return;
+      }
+      if (Cmd.raw({ kind: 'cos-transfer', gid: pet.rec.gid, toCos: false, source: petItem.slot, destination: slot }, 'Town: move pet loot to the bag for selling')) {
+        t.salePetGid = pet.rec.gid;
+        t.pending = { stage: true, source: petItem.slot, destination: slot, ref: petItem.refObjId, quantity: petItem.quantity ?? 1, at: now() };
+        t.staged = { slot, ref: petItem.refObjId };
+      }
+      return;
+    }
     if (!item) {
       // Picked-up or overbought supplies crowd the bag: with the switch on, their surplus above the refill
       // target sells here. Only items this profile restocks are ever touched, so nothing else is at risk.
@@ -682,13 +707,9 @@ const Town = {
     }
     const quantity = item.quantity ?? 1;
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 65535) return this.fail('Invalid item sale quantity.');
-    if (bagItem) {
-      if (Cmd.raw({ kind: 'shop-sell', slot: item.slot, quantity }, 'Town: sell bag item at weapon merchant')) t.pending = { bag: true, source: item.slot, ref: item.refObjId, quantity, at: now() };
-      return;
-    }
-    if (Cmd.raw({ kind: 'cos-shop-sell', gid: pet.rec.gid, slot: item.slot, quantity }, 'Town: sell pet loot at weapon merchant')) {
-      t.salePetGid = pet.rec.gid;
-      t.pending = { source: item.slot, ref: item.refObjId, quantity, at: now() };
+    if (Cmd.raw({ kind: 'shop-sell', slot: item.slot, quantity }, staged ? 'Town: sell pet loot from the bag' : 'Town: sell bag item at weapon merchant')) {
+      t.pending = { bag: true, source: item.slot, ref: item.refObjId, quantity, at: now() };
+      if (staged) t.staged = null;
     }
   },
   // Tops up arrows and bolts at the weapon merchant. A shortfall here (not sold, no bag room, no gold) is reported and
@@ -941,8 +962,15 @@ const Town = {
         Hunt.stop('Recovery town services completed. Check the hunting spot before returning.');
         return true;
       }
-      if (gp.inventoryPending || World.isCasting()) return true;
-      if (t.supplies.some(s => Restock.count(s.refObjId) < s.target) || this.damaged().length || !t.revival && !this.scroll(0x09ec) || !this.scroll(0x19ec)) { this.fail('Final supply, repair or travel-scroll check failed.'); return true; }
+      // A pending inventory or cast that the game never resolves (seen live after a server update) would
+      // freeze the trip here forever. Wait it out like the other phases, then stop cleanly — nothing is
+      // ever sent twice over an unresolved game state.
+      if (gp.inventoryPending || World.isCasting()) {
+        if (now() - t.at > 60000) { this.fail('The game stayed busy for a full minute before the return scroll; nothing was sent twice. Reload the game and check the character.'); return true; }
+        this.message = 'Waiting for the game to settle before the return scroll.';
+        return true;
+      }
+      if (this.supplyShort(t) || this.damaged().length || !t.revival && !this.scroll(0x09ec) || !this.scroll(0x19ec)) { this.fail('Final supply, repair or travel-scroll check failed.'); return true; }
       if (World.freeBagSlots() <= 1) { this.fail('Returned to town; free at least two character bag slots before hunting again.'); return true; }
       const npc = this.npc('gate');
       if (!npc || gp.target !== npc.gid || !(gp.targetCapabilities & 0x20000000)) { this.fail('Reverse-return teleport NPC unavailable.'); return true; }
