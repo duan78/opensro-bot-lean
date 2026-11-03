@@ -1,0 +1,406 @@
+[
+  {
+    "id": 1,
+    "date": "2026-11-02",
+    "title": "Bot bloqué à l'étape du scroll de retour",
+    "question": "Pourquoi le bot reste-t-il bloqué des minutes entières à l'étape du scroll de retour vers le spot de chasse ?",
+    "facts": [
+      {
+        "source": "log",
+        "text": "Town: reverse scroll sent (ref 61, attempt 1/3)"
+      },
+      {
+        "source": "log",
+        "text": "Waiting for teleport acceptance..."
+      },
+      {
+        "source": "wire",
+        "text": "Notice received 3 times: UIIT code WRONGTARGET"
+      },
+      {
+        "source": "log",
+        "text": "No movement confirmed by the server for 240 s; phase 'return-scroll' still active"
+      },
+      {
+        "source": "observation",
+        "text": "The same scroll worked yesterday; the game server applied a patch at 15:41 today"
+      },
+      {
+        "source": "observation",
+        "text": "A trip started from town (statue / travel gate) reaches the spot normally"
+      },
+      {
+        "source": "log",
+        "text": "Second and third scroll attempts receive the same WRONGTARGET notice"
+      }
+    ],
+    "expectedRootCause": "Le serveur refuse les Return Scrolls (ref 61) depuis sa mise à jour de 15h41 — notice WRONGTARGET ; le bot attendait indéfiniment une téléportation qui n'arrive pas.",
+    "expectedKeywords": [
+      "scroll",
+      "serveur",
+      "wrongtarget"
+    ]
+  },
+  {
+    "id": 2,
+    "date": "2026-11-02",
+    "title": "La vente du butin du pet échoue en ville",
+    "question": "Pourquoi aucun des 27 items du pet n'est-il vendu pendant le trip en ville, alors que la vente est configurée ?",
+    "facts": [
+      {
+        "source": "log",
+        "text": "Town: selling pet bag items at the blacksmith"
+      },
+      {
+        "source": "wire",
+        "text": "cos-shop-sell command sent; shop answer notice: UIIT_MSG_COSPETERR_CANT_TRADE (438)"
+      },
+      {
+        "source": "log",
+        "text": "inventoryPending is false during the stall; the command is dropped without retry"
+      },
+      {
+        "source": "observation",
+        "text": "Selling the same items from the character bag works instantly"
+      },
+      {
+        "source": "observation",
+        "text": "This worked two days ago on the same server"
+      }
+    ],
+    "expectedRootCause": "Le serveur interdit désormais la vente directe pet→boutique (UIIT 438 CANT_TRADE) ; il faut transférer les items du pet vers le sac (cos-transfer) puis les vendre depuis le sac.",
+    "expectedKeywords": [
+      "cant_trade",
+      "pet",
+      "transfer"
+    ]
+  },
+  {
+    "id": 3,
+    "date": "2026-11-02",
+    "title": "Le bot ne démarre plus après une mise à jour du jeu",
+    "question": "Pourquoi le bot échoue-t-il à s'initialiser depuis la mise à jour du serveur, avec des erreurs de décompression ?",
+    "facts": [
+      {
+        "source": "log",
+        "text": "Assets: fetching /assets/char/roster.json — 200 OK, 205905 bytes"
+      },
+      {
+        "source": "log",
+        "text": "gunzip: unexpected end of stream at byte 205905"
+      },
+      {
+        "source": "observation",
+        "text": "The bundle is 412000 bytes when fetched with curl --compressed"
+      },
+      {
+        "source": "observation",
+        "text": "Every large bundle served by the server stops at exactly 205905 bytes today"
+      },
+      {
+        "source": "observation",
+        "text": "Small bundles (< 200 KB) arrive complete"
+      }
+    ],
+    "expectedRootCause": "Le serveur coupe maintenant les réponses gzip à ~205 905 octets : les gros bundles arrivent tronqués et échouent à la décompression ; contournement = charger le bundle en blob avant décompression.",
+    "expectedKeywords": [
+      "gzip",
+      "tronqu",
+      "205905"
+    ]
+  },
+  {
+    "id": 4,
+    "date": "2026-10-31",
+    "title": "Catalogue, quêtes et XP vides",
+    "question": "Pourquoi les items n'ont-ils plus de noms, les quêtes de descriptions, et l'XP/heure reste à zéro ?",
+    "facts": [
+      {
+        "source": "log",
+        "text": "Assets: GET /assets/data/questData.json — 404"
+      },
+      {
+        "source": "log",
+        "text": "Assets: GET /assets/text/textdataname.en.json — 404"
+      },
+      {
+        "source": "log",
+        "text": "Assets: GET /assets/data/levelData.json — 404"
+      },
+      {
+        "source": "observation",
+        "text": "The deployed JS bundle still references these /assets/data/*.json paths"
+      },
+      {
+        "source": "observation",
+        "text": "An anonymous browser gets the same 404; the files are simply not served in production anymore"
+      }
+    ],
+    "expectedRootCause": "Les /assets/data/*.json ne sont plus servis par le serveur de prod (404) alors que le bundle les référence ; il faut apprendre noms/icônes depuis le wire au fil du jeu (cache) au lieu de compter sur ces fichiers.",
+    "expectedKeywords": [
+      "404",
+      "assets"
+    ]
+  },
+  {
+    "id": 5,
+    "date": "2026-10-31",
+    "title": "Achat au mall silencieusement refusé",
+    "question": "Pourquoi l'achat automatique au item mall échoue-t-il et pourquoi plus rien ne répond pendant 10 secondes après ?",
+    "facts": [
+      {
+        "source": "wire",
+        "text": "mall-buy sent for 1x HP recovery bag (82 silk)"
+      },
+      {
+        "source": "wire",
+        "text": "Server answer opcode 0x80: refused; no items received"
+      },
+      {
+        "source": "log",
+        "text": "The session ignores every game message for the next 10 s (poison window)"
+      },
+      {
+        "source": "observation",
+        "text": "Retrying the buy inside the window fails the same way and re-poisons the session"
+      },
+      {
+        "source": "observation",
+        "text": "The wallet is account-wide silk, so a second character on the account shares the balance"
+      }
+    ],
+    "expectedRootCause": "Le serveur a refusé l'achat (0x80) et empoisonne la session 10 s : il ne faut jamais réessayer immédiatement pendant cette fenêtre ; l'absence de réception d'item = échec définitif de l'achat.",
+    "expectedKeywords": [
+      "0x80",
+      "10",
+      "poison"
+    ]
+  },
+  {
+    "id": 6,
+    "date": "2026-11-01",
+    "title": "Le reverse scroll téléporte au mauvais endroit",
+    "question": "Pourquoi le personnage revient-il à un ancien point de retour au lieu du spot de chasse enregistré ?",
+    "facts": [
+      {
+        "source": "log",
+        "text": "Return point saved: region 26146, x 612, y 138"
+      },
+      {
+        "source": "wire",
+        "text": "Teleport accepted; character pose after: region 26146, x 240, y 902"
+      },
+      {
+        "source": "log",
+        "text": "Walk-back recalculating: 1840 m to the saved spot"
+      },
+      {
+        "source": "observation",
+        "text": "The landing point matches where the character last used a return scroll manually yesterday"
+      },
+      {
+        "source": "observation",
+        "text": "The server snapshot of the return point differs from what the client saved"
+      }
+    ],
+    "expectedRootCause": "Bug serveur : le point de retour utilisé par la téléportation n'est pas celui que le client a sauvegardé (le serveur garde un ancien point) — le bot doit re-marcher vers le spot.",
+    "expectedKeywords": [
+      "serveur",
+      "point"
+    ]
+  },
+  {
+    "id": 7,
+    "date": "2026-11-01",
+    "title": "Réglages fantômes après injection du script",
+    "question": "Pourquoi le bot repart-il avec d'anciens réglages après une injection manuelle du script en plusieurs morceaux ?",
+    "facts": [
+      {
+        "source": "log",
+        "text": "Settings loaded for profile: default"
+      },
+      {
+        "source": "observation",
+        "text": "The character in game is the healer; the loaded radius and potions belong to another character"
+      },
+      {
+        "source": "log",
+        "text": "Store key used: profile:default instead of profile:<character name>"
+      },
+      {
+        "source": "observation",
+        "text": "The script was injected in chunks through localStorage+eval during testing"
+      },
+      {
+        "source": "observation",
+        "text": "Settings.profile was captured before the character name was known"
+      }
+    ],
+    "expectedRootCause": "Le profil chargé est resté sur 'default' (profile stale) parce que le script a été injecté avant la connaissance du nom du personnage ; il faut recharger le profil du personnage (useCharacter) après l'injection.",
+    "expectedKeywords": [
+      "profile",
+      "default"
+    ]
+  },
+  {
+    "id": 8,
+    "date": "2026-10-31",
+    "title": "Le restock échoue à Hotan",
+    "question": "Pourquoi le bot n'achète-t-il ni poudres, ni pierres, ni certains scrolls pendant ses trips à Hotan ?",
+    "facts": [
+      {
+        "source": "log",
+        "text": "Restock: opening grocery merchant offers"
+      },
+      {
+        "source": "wire",
+        "text": "Shop tabs listed; no lucky powder, no magic/attribute stones, no speed scroll in the offers"
+      },
+      {
+        "source": "log",
+        "text": "Restock: waiting for offers... timeout, retrying 3 times"
+      },
+      {
+        "source": "observation",
+        "text": "The same items are sold by the blacksmith in Donwhang"
+      },
+      {
+        "source": "observation",
+        "text": "Other characters shopping in Hotan see the same empty categories"
+      }
+    ],
+    "expectedRootCause": "Ces items ne sont simplement pas vendus par les marchands de Hotan ; le comportement correct est skip-if-not-sold (passer la catégorie absente) au lieu de réessayer.",
+    "expectedKeywords": [
+      "hotan",
+      "vend"
+    ]
+  },
+  {
+    "id": 9,
+    "date": "2026-06-01",
+    "title": "Les kits de soin du pet ne sont jamais achetés",
+    "question": "Pourquoi le restock n'achète-t-il jamais de kits de soin pour le pet d'attaque, même à court ?",
+    "facts": [
+      {
+        "source": "log",
+        "text": "Restock: pet kit target refObjId 0, observed max seen: 0"
+      },
+      {
+        "source": "log",
+        "text": "No kit offer matched; skip"
+      },
+      {
+        "source": "observation",
+        "text": "The pet potions reference table has no entries for this server's items"
+      },
+      {
+        "source": "observation",
+        "text": "Once a kit is observed in the character's own bag, the refObjId is learned and buying works"
+      }
+    ],
+    "expectedRootCause": "Les références des kits pet sont inconnues au départ (table vide) : le bot doit apprendre le refObjId par observation (observed-max seenMax) avant de pouvoir acheter.",
+    "expectedKeywords": [
+      "refobjid",
+      "observ"
+    ]
+  },
+  {
+    "id": 10,
+    "date": "2026-05-20",
+    "title": "Les quêtes automatiques bouclent",
+    "question": "Pourquoi la quête automatique reste-t-elle bloquée sur « objectifs introuvables » en boucle ?",
+    "facts": [
+      {
+        "source": "log",
+        "text": "Quest: targets not around; waiting..."
+      },
+      {
+        "source": "log",
+        "text": "Quest: retrying target lookup (attempt 12)"
+      },
+      {
+        "source": "wire",
+        "text": "questData entry for QNO_xxx has empty objective fields"
+      },
+      {
+        "source": "observation",
+        "text": "The quest journal in the game shows proper objectives"
+      },
+      {
+        "source": "observation",
+        "text": "Some quest data entries are placeholders on this server"
+      }
+    ],
+    "expectedRootCause": "Les données de quête servies contiennent des entrées vides/placeholder : il faut une allowlist des quêtes dont les objectifs sont réellement connus et un backoff au lieu de réessayer indéfiniment.",
+    "expectedKeywords": [
+      "placeholder",
+      "donnees"
+    ]
+  },
+  {
+    "id": 11,
+    "date": "2026-10-28",
+    "title": "L'équipement de buff n'est pas restauré après une mort",
+    "question": "Pourquoi le personnage se remet-il à chasser avec l'arme de buff après sa résurrection ?",
+    "facts": [
+      {
+        "source": "log",
+        "text": "Buff gear equipped: cleric rod + shield for group buffs"
+      },
+      {
+        "source": "log",
+        "text": "Character died; resurrected in town"
+      },
+      {
+        "source": "log",
+        "text": "Walk-back started; combat resumed with equipped: cleric rod"
+      },
+      {
+        "source": "observation",
+        "text": "The main weapon is protected in settings and stored in the bag"
+      },
+      {
+        "source": "log",
+        "text": "No 'restoring main weapon' entry in the log after the resurrection"
+      }
+    ],
+    "expectedRootCause": "Après la mort, le buff-gear est resté équipé et le module ne restaurait pas l'arme principale : il faut un recovery explicite de l'équipement principal après résurrection.",
+    "expectedKeywords": [
+      "buff",
+      "arme"
+    ]
+  },
+  {
+    "id": 12,
+    "date": "2026-10-15",
+    "title": "Le rebirth échoue une fois sur trois",
+    "question": "Pourquoi la renaissance (rebirth) échoue-t-elle parfois et laisse-t-elle le personnage mort en ville ?",
+    "facts": [
+      {
+        "source": "wire",
+        "text": "rebirth request sent (choice 1)"
+      },
+      {
+        "source": "wire",
+        "text": "No answer before the 8 s timeout; character still dead"
+      },
+      {
+        "source": "log",
+        "text": "Rebirth: single attempt, no retry coded"
+      },
+      {
+        "source": "observation",
+        "text": "A second manual rebirth right after always succeeds"
+      },
+      {
+        "source": "observation",
+        "text": "The failure happens when the town is crowded (many players reviving)"
+      }
+    ],
+    "expectedRootCause": "La commande rebirth peut ne pas recevoir de réponse (timeout) sans avoir été réellement traitée : il faut un retry borné du rebirth, comme pour les autres commandes sans identifiant de transaction.",
+    "expectedKeywords": [
+      "rebirth",
+      "tentative"
+    ]
+  }
+]

@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/bot.lean.user.js', 'utf8');
 const isolated = source.slice(0, source.lastIndexOf('installWorkerHook();')) +
-  'globalThis.bot = {AutoStart, RenderControl, Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Assets, Hook, Cmd, Hunt, Loot, Restock, Trade, WalkBack, Navigation, ClipRoute, Route, RouteCheck, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, Travel, Quest, QuestData, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, RepairHammer, Stall, SellStar, Team, TeamIntel, TeamKnowledge, TeamArbiter, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, Lure, Equip, stopAll, toggleBot, userStop, RunIntent, Retry, PetAttack, MallProbe, MallBuyer, LevelSpot, ScrollBuff, boot, Ticker, Sound, LeanMap};\n})();';
+  'globalThis.bot = {AutoStart, RenderControl, Activity, World, Settings, Updates, Diagnostics, Reports, Alchemy, BuffGear, Icons, Assets, Hook, Cmd, Hunt, Loot, Restock, Trade, WalkBack, Navigation, ClipRoute, Route, RouteCheck, Learned, Display, Wardrobe, WdData, LeanWardrobe, Controller, UI, Stats, Combat, Potion, Party, Town, Travel, Quest, QuestData, bus, Manual, Resurrect, Support, ItemRules, SpeedScroll, RepairHammer, Stall, SellStar, Team, TeamIntel, TeamKnowledge, TeamArbiter, Log, AntiStuck, Chase, Trap, botProfile, ItemRules, Items, AutoMastery, StatPoints, ProfileShare, Setup, Trace, DEFAULT_PROFILE, PetPotion, Reconnect, Reconnect, Lure, Equip, stopAll, toggleBot, userStop, RunIntent, Retry, PetAttack, MallProbe, MallBuyer, LevelSpot, ScrollBuff, boot, Ticker, Sound, LeanMap, Assistant};\n})();';
 function fixture(document, sharedStorage) {
   let time = 100000;
   const storage = sharedStorage || new Map(), commands = [], notices = [], intervals = [], timers = [];
@@ -7697,8 +7697,8 @@ async function updateTests() {
   }
   await check('updates compare numeric version components and ignore malformed versions', async () => {
     const f = fixture();
-    for (const v of ['9.9.9', '1.8.8', '2.0.0']) assert.equal(f.Updates.newer(v), true);
-    for (const v of ['1.2.9', '1.2.36', '1.2.169', '1.2.173', '1.3.0', '1.4.3', '1.5.0', '1.5.1', '1.5.2', '1.5.3', '1.5.4', '1.6.0', '1.6.1', '1.7.0', '1.7.1', '1.7.2', '1.7.3', '1.7.4', '1.8.0', '1.8.1', '1.8.2', '1.8.3', '1.8.4', '1.8.5', '1.8.6', '1.8.7', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
+    for (const v of ['9.9.9', '1.8.9', '2.0.0']) assert.equal(f.Updates.newer(v), true);
+    for (const v of ['1.2.9', '1.2.36', '1.2.169', '1.2.173', '1.3.0', '1.4.3', '1.5.0', '1.5.1', '1.5.2', '1.5.3', '1.5.4', '1.6.0', '1.6.1', '1.7.0', '1.7.1', '1.7.2', '1.7.3', '1.7.4', '1.8.0', '1.8.1', '1.8.2', '1.8.3', '1.8.4', '1.8.5', '1.8.6', '1.8.7', '1.8.8', '1.1.999', 'bad', '1.2.35-beta', '1.2.999999999999999999999']) assert.equal(f.Updates.newer(v), false);
   });
   await check('updates pin metadata and user-initiated installer to the same trusted commit', async () => {
     const f = fixture(), calls = updater(f); f.UI.updateButton = {};
@@ -8938,4 +8938,55 @@ test('skipStar waits for an equipment drop the catalogue has never seen', () => 
   assert.equal(f.Loot.allowed(unseen), false, 'once the wire teaches it and it is Star, still skipped');
   f.Items.data.set(901, { name: 'Plain sword', icon: '', code: 'ITEM_CH_SWORD_01' });
   assert.equal(f.Loot.allowed(unseen), true, 'a seen plain sword is picked up');
+});
+
+// ---- Assistant (local LLM endpoint) ----
+test('assistant session snapshot is the redacted report shape and carries no identity', () => {
+  const f = fixture();
+  f.Stats.character = 'SecretChar';
+  f.Stats.session.kills = 42;
+  f.Stats.session.deaths = 3;
+  const snap = f.Assistant.snapshot();
+  const text = JSON.stringify(snap);
+  assert.ok(snap.session && snap.current && Array.isArray(snap.recentStateChanges));
+  assert.equal(snap.session.kills, '42');
+  assert.equal(snap.session.deaths, '3');
+  assert.ok(!text.includes('SecretChar'), 'the character name never rides along');
+  assert.ok(!/"name"/i.test(text), 'no name fields at all');
+});
+test('assistant query sends one redacted request with the measured effort and renders the answer', async () => {
+  const f = fixture();
+  f.Settings.profile.assistant.endpoint = 'http://127.0.0.1:1234';
+  f.Settings.profile.assistant.model = 'model-x';
+  f.Stats.character = 'SecretChar';
+  let seen = null;
+  f.Assistant.fetchImpl = async (url, opts) => {
+    seen = { url, body: JSON.parse(opts.body) };
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'All good.' }, finish_reason: 'stop' }] }) };
+  };
+  const status = { textContent: '' }, output = { textContent: '' };
+  await f.Assistant.query('How is it going?', status, output);
+  assert.equal(seen.url, 'http://127.0.0.1:1234/v1/chat/completions');
+  assert.equal(seen.body.model, 'model-x');
+  assert.equal(seen.body.reasoning_effort, 'low');
+  assert.equal(seen.body.messages[0].role, 'system');
+  assert.ok(seen.body.messages[1].content.includes('Session snapshot'));
+  assert.ok(!seen.body.messages[1].content.includes('SecretChar'), 'the redacted snapshot never carries the character name');
+  assert.equal(output.textContent, 'All good.');
+  assert.match(status.textContent, /model-x/);
+  assert.equal(f.commands.length, 0, 'an assistant exchange never sends game commands');
+});
+test('assistant query degrades to a plain message and never blocks the bot', async () => {
+  const f = fixture();
+  f.Settings.profile.assistant.endpoint = 'http://127.0.0.1:9';
+  f.Settings.profile.assistant.model = 'model-x';
+  f.Assistant.fetchImpl = async () => { throw new TypeError('Failed to fetch'); };
+  const status = { textContent: '' }, output = { textContent: '' };
+  await f.Assistant.query('question', status, output);
+  assert.match(status.textContent, /Could not reach/);
+  assert.equal(output.textContent, '');
+  f.Settings.profile.assistant.endpoint = '  ';
+  status.textContent = '';
+  await f.Assistant.query('question', status, output);
+  assert.match(status.textContent, /endpoint/);
 });

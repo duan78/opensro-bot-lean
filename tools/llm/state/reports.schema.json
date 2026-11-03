@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reports",
+  "description": "The existing anonymous diagnostics payload (lean-reports) as an LLM input: same privacy posture, nothing added.",
+  "type": "object",
+  "required": ["schema", "version", "sections"],
+  "properties": {
+    "schema": { "const": 1 },
+    "version": { "type": "string" },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title", "body"],
+        "properties": {
+          "title": { "type": "string", "maxLength": 60 },
+          "body": { "type": "string", "maxLength": 4000 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "description": { "type": "string", "maxLength": 1000 }
+  },
+  "additionalProperties": false
+}

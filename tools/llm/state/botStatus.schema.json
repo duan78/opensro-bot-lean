@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "botStatus",
+  "description": "Per-character bot state digest shown to the local LLM. Redacted: no names, no chat, no coordinates beyond region ids already public in reports.",
+  "type": "object",
+  "required": ["schema", "phase", "settings", "recentMessages"],
+  "properties": {
+    "schema": { "const": 1 },
+    "phase": { "type": "string", "enum": ["idle", "hunt", "town-trip", "walk-back", "return-scroll", "detour", "reconnect"] },
+    "level": { "type": "integer", "minimum": 1, "maximum": 140 },
+    "settings": {
+      "type": "object",
+      "description": "Only the whitelisted keys an assistant may read or propose changes to.",
+      "properties": {
+        "huntRadius": { "type": "integer", "minimum": 10, "maximum": 2000 },
+        "monsterClasses": { "type": "array", "items": { "type": "string", "enum": ["normal", "champion", "giant", "party", "elite", "unique", "titan"] } },
+        "hpPotionPct": { "type": "integer", "minimum": 1, "maximum": 99 },
+        "mpPotionPct": { "type": "integer", "minimum": 1, "maximum": 99 },
+        "vigorHpPct": { "type": "integer", "minimum": 1, "maximum": 99 },
+        "avoidKs": { "type": "boolean" },
+        "townEveryMinutes": { "type": "integer", "minimum": 5, "maximum": 720 }
+      },
+      "additionalProperties": false
+    },
+    "recentMessages": {
+      "type": "array", "maxItems": 20,
+      "items": { "type": "object", "required": ["text"], "properties": { "at": { "type": "string" }, "text": { "type": "string", "maxLength": 200 } }, "additionalProperties": false }
+    }
+  },
+  "additionalProperties": false
+}

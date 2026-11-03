@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "durationMin": 137,
+  "level": 90,
+  "kills": 412,
+  "killsByClass": { "normal": 331, "champion": 58, "giant": 19, "party": 4 },
+  "xp": 1840000,
+  "goldEarned": 31100000,
+  "goldSpent": 2100000,
+  "deaths": 2,
+  "deathCauses": ["giant party while potions on cooldown", "unknown"],
+  "townTrips": 3,
+  "returnReasons": { "bag full": 2, "potions low": 1 },
+  "phaseDurationsMin": { "hunt": 118, "town-trip": 11, "walk-back": 8 },
+  "potionsUsed": { "hp tier 4": 640, "mp tier 4": 210, "vigor": 90 },
+  "stucks": 1
+}

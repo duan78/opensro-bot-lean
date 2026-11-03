@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sessionStats",
+  "description": "Measured session outcomes (the U2 feedback loop). Every number must be traceable to lean-stats counters; an LLM never invents one.",
+  "type": "object",
+  "required": ["schema", "durationMin", "kills", "deaths", "xp", "gold"],
+  "properties": {
+    "schema": { "const": 1 },
+    "durationMin": { "type": "number", "minimum": 0 },
+    "level": { "type": "integer" },
+    "kills": { "type": "integer", "minimum": 0 },
+    "killsByClass": { "type": "object", "additionalProperties": { "type": "integer" } },
+    "xp": { "type": "integer", "minimum": 0 },
+    "goldEarned": { "type": "integer" },
+    "goldSpent": { "type": "integer" },
+    "deaths": { "type": "integer", "minimum": 0 },
+    "deathCauses": { "type": "array", "items": { "type": "string", "maxLength": 80 } },
+    "townTrips": { "type": "integer", "minimum": 0 },
+    "returnReasons": { "type": "object", "additionalProperties": { "type": "integer" } },
+    "phaseDurationsMin": { "type": "object", "additionalProperties": { "type": "number" } },
+    "potionsUsed": { "type": "object", "additionalProperties": { "type": "integer" } },
+    "stucks": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": false
+}

@@ -589,7 +589,7 @@ const UI = {
     } else if (this.current === 'Wardrobe') {
       LeanWardrobe.draw(this.pane);
     } else {
-      this.sections('settingsStats', 'settingsBehaviour', 'settingsObstacles', 'settingsAntiStuck', 'settingsMastery', 'settingsStatPoints', 'settingsProfiles', 'settingsShare', 'settingsReports', 'settingsActivity');
+      this.sections('settingsStats', 'settingsBehaviour', 'settingsObstacles', 'settingsAntiStuck', 'settingsMastery', 'settingsStatPoints', 'settingsProfiles', 'settingsShare', 'settingsAssistant', 'settingsReports', 'settingsActivity');
     }
     this.balance();
     this.update();
@@ -616,7 +616,7 @@ const UI = {
       { name: 'Auto alchemy', icon: 'action\\icon_cha_alchemy', pages: ['Alchemy'], draw() { Alchemy.draw(); } },
       { name: 'Stall', icon: 'action\\icon_cha_shop', pages: ['Stall'], draw() { Stall.draw(); } },
       { name: 'Extra', icon: 'action\\icon_cha_helper', pages: ['Settings'], sections: [
-        ['settingsStats'], ['settingsMastery'], ['settingsStatPoints'], ['settingsProfiles'], ['settingsShare'], ['settingsReports'], ['settingsActivity']] },
+        ['settingsStats'], ['settingsMastery'], ['settingsStatPoints'], ['settingsProfiles'], ['settingsShare'], ['settingsAssistant', 'Local assistant'], ['settingsReports'], ['settingsActivity']] },
       { name: 'Map', pages: ['Map'], draw() { LeanMap.draw(this.pane); } },
       { name: 'Auto trade', icon: 'action\\icon_cha_shop', pages: ['Trade'], draw() { Trade.draw(); } },
       { name: 'Wardrobe', icon: 'action\\icon_cha_shop', pages: ['Wardrobe'], draw() { LeanWardrobe.draw(this.pane); } },
@@ -1271,6 +1271,29 @@ const UI = {
   section_settingsShare(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
       ProfileShare.draw(host);
+  },
+  section_settingsAssistant(host) {
+    const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();
+    const status = el('p', '', 'muted'); status.setAttribute('role', 'status');
+    const answer = el('textarea'); answer.readOnly = true; answer.rows = 10; answer.setAttribute('aria-label', 'Assistant answer');
+    const endpoint = el('input'); endpoint.type = 'text'; endpoint.value = Settings.profile.assistant.endpoint; endpoint.placeholder = 'http://127.0.0.1:1234';
+    endpoint.setAttribute('aria-label', 'Assistant endpoint');
+    endpoint.addEventListener('change', () => { Settings.profile.assistant.endpoint = endpoint.value.trim(); Settings.saveProfile(); });
+    const model = el('input'); model.type = 'text'; model.value = Settings.profile.assistant.model; model.placeholder = 'first model the server lists';
+    model.setAttribute('aria-label', 'Assistant model');
+    model.addEventListener('change', () => { Settings.profile.assistant.model = model.value.trim(); Settings.saveProfile(); });
+    const question = el('input'); question.type = 'text'; question.placeholder = 'ask about this session…';
+    question.setAttribute('aria-label', 'Assistant question');
+    const ask = () => { void Assistant.query(question.value.trim() || 'How is my session going?', status, answer); };
+    question.addEventListener('keydown', e => { if (e.key === 'Enter') ask(); });
+    const test = this.button('Test connection', () => { void Assistant.test(status, test); });
+    host.append(this.group('Assistant (local)',
+      el('p', 'Point this at your own OpenAI-compatible server (for example LM Studio on this machine), then ask about the running session. Only the redacted snapshot the bug report uses is sent — no names, chat or locations. Leave the model empty to use the first one the server lists. A failure just shows a message; the bot never waits on it.', 'muted'),
+      this.field('Assistant endpoint', endpoint),
+      this.field('Model', model),
+      this.row(test, this.button('Explain my session', () => Assistant.explain(status, answer))),
+      this.row(question, this.button('Ask', ask)),
+      answer, status));
   },
   section_settingsReports(host) {
     const H = () => Settings.profile.hunt, M = () => Settings.profile.macro, P = () => Settings.profile.potion, C = () => Restock.cfg();

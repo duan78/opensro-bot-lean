@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "fleetSnapshot",
+  "description": "Fork only (L5). What the relay already knows; the LLM arbiter reads this and emits console-vocabulary intents. No new reporting from the userscript.",
+  "type": "object",
+  "required": ["schema", "peers"],
+  "properties": {
+    "schema": { "const": 1 },
+    "peers": {
+      "type": "array", "maxItems": 12,
+      "items": {
+        "type": "object",
+        "required": ["id", "state"],
+        "properties": {
+          "id": { "type": "string", "description": "Stable pseudonym, not the character name", "maxLength": 24 },
+          "state": { "type": "string", "enum": ["hunting", "town", "walk-back", "stopped", "offline"] },
+          "role": { "type": "string", "enum": ["none", "tank", "healer", "buffer", "dps", "puller", "scout", "mule", "coordinator"] },
+          "level": { "type": "integer" },
+          "regionId": { "type": "integer" },
+          "hasRes": { "type": "boolean" },
+          "atMsAgo": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "uniqueNotices": {
+      "type": "array", "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["refId", "event"],
+        "properties": {
+          "refId": { "type": "integer" },
+          "event": { "type": "string", "enum": ["appear", "dead"] },
+          "atMsAgo": { "type": "integer" },
+          "respawnWindowMin": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "hostilePlayersNearby": { "type": "integer", "minimum": 0 },
+    "intents": { "type": "array", "description": "Emitted decisions audit trail", "items": { "type": "object", "additionalProperties": true } }
+  },
+  "additionalProperties": false
+}

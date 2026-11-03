@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "economy",
+  "description": "Observed economy facts for L7: mall catalogue digests and recorded stall sales. Observations only — the LLM suggests, it never trades.",
+  "type": "object",
+  "required": ["schema", "sources"],
+  "properties": {
+    "schema": { "const": 1 },
+    "sources": { "type": "array", "items": { "type": "string", "enum": ["mall-catalog-live", "stall-sales", "session-gold"] } },
+    "mall": {
+      "type": "array", "maxItems": 200,
+      "items": {
+        "type": "object",
+        "required": ["name", "priceSilk"],
+        "properties": {
+          "name": { "type": "string", "maxLength": 80 },
+          "priceSilk": { "type": "integer", "minimum": 0 },
+          "category": { "type": "string", "maxLength": 40 },
+          "observedAt": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "stallSales": {
+      "type": "array", "maxItems": 500,
+      "items": {
+        "type": "object",
+        "required": ["itemName", "qty", "unitPrice"],
+        "properties": {
+          "itemName": { "type": "string", "maxLength": 80 },
+          "qty": { "type": "integer", "minimum": 1 },
+          "unitPrice": { "type": "integer", "minimum": 0 },
+          "at": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "goldFlow": {
+      "type": "array", "maxItems": 50,
+      "items": {
+        "type": "object",
+        "required": ["session", "earned", "spent"],
+        "properties": {
+          "session": { "type": "string" },
+          "earned": { "type": "integer" },
+          "spent": { "type": "integer" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
