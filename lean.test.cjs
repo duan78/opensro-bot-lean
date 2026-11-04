@@ -8997,12 +8997,18 @@ test('assistant endpoint accepts this machine and the local network, refuses pub
   assert.equal(f.Assistant.base('http://192.168.0.33:1234/'), 'http://192.168.0.33:1234', 'the local network may serve the assistant');
   assert.equal(f.Assistant.base('http://10.0.0.5:1234'), 'http://10.0.0.5:1234');
   assert.equal(f.Assistant.base('mypc.local:1234'), 'http://mypc.local:1234');
+  assert.equal(f.Assistant.base('http://10.example.com:1234'), '', 'a public name with a private prefix is refused');
+  assert.equal(f.Assistant.base('http://127.attacker.net:1234'), '', 'prefix look-alikes are not loopback');
+  assert.equal(f.Assistant.base('http://192.168.evil.com:1234'), '', 'or a private network');
+  assert.equal(f.Assistant.base('http://169.254.evil.com:1234'), '', 'or link-local');
   assert.equal(f.Assistant.base('http://172.32.0.1:1234'), '', 'just outside the private ranges');
   assert.equal(f.Assistant.base('https://api.openai.com'), '', 'public hosts are refused');
   let called = false;
   f.Assistant.fetchImpl = async () => { called = true; throw new TypeError('x'); };
-  assert.match((await f.Assistant.probe('http://8.8.8.8:1234')).error, /local network/);
-  assert.equal(called, false, 'a public address is refused before any request is made');
+  for (const host of ['http://8.8.8.8:1234', 'http://10.example.com:1234', 'http://127.evil.net:1234', 'http://192.168.evil.com:1234']) {
+    assert.match((await f.Assistant.probe(host)).error, /local network/, host + ' is refused');
+    assert.equal(called, false, 'and it is refused before any request is made');
+  }
 });
 test('assistant learns a journal from a measured session and feeds it to later questions', async () => {
   const f = fixture();
@@ -9087,6 +9093,7 @@ test('assistant suggests only whitelisted clamped actions and applies them rever
   const status = { textContent: '' };
   const list = await f.Assistant.suggest(status);
   assert.equal(seen.messages[1].content.includes('Giants kill this character'), true, 'the journal grounds the suggestions');
+  assert.ok(seen.messages[1].content.includes('"current"'), 'current diagnostics (errors, stops) ground the suggestions too');
   assert.equal(list.length, 2, 'an out-of-vocabulary action is dropped');
   assert.equal(f.Assistant.describe(0), 'Hunt radius: 400 → 300', 'the target is clamped for display');
   const radiusBefore = f.Settings.profile.hunt.radius, giantBefore = f.Settings.profile.hunt.classes.giant;

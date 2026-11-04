@@ -14,9 +14,15 @@ const Assistant = {
   // public host is refused outright, so nothing can point the bot at someone else's server.
   isLocalHost(hostname) {
     const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
-    return host === 'localhost' || host === '::1' || host === '[::1]' || /^127\./.test(host) ||
-      /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
-      /^169\.254\./.test(host) || /\.local$/.test(host);
+    if (host === 'localhost' || host === '::1') return true;
+    if (/\.local$/.test(host)) return true;
+    // The private ranges only ever match a complete dotted-quad literal: a public DNS
+    // name such as 10.example.com or 127.attacker.net must not slip through a prefix.
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return false;
+    const a = host.split('.').map(Number);
+    if (a.some(n => n > 255)) return false;
+    return a[0] === 127 || a[0] === 10 || (a[0] === 192 && a[1] === 168) ||
+      (a[0] === 172 && a[1] >= 16 && a[1] <= 31) || (a[0] === 169 && a[1] === 254);
   },
   // Collapse anything the player typed into a bare base address. Addresses without a
   // scheme are http, paths and queries are dropped, and credentials never reach settings.
@@ -286,7 +292,8 @@ const Assistant = {
   suggestData() {
     const H = Settings.profile.hunt, P = Settings.profile.potion;
     return { settings: { huntRadius: H.radius, hpPotionPct: P.hp.pct, mpPotionPct: P.mp.pct, vigorHpPct: P.vigor.hpPct, classes: { ...H.classes } },
-      session: this.sessionSummary(), journal: Settings.profile.assistant.journal?.entries || [] };
+      session: this.sessionSummary(), journal: Settings.profile.assistant.journal?.entries || [],
+      current: { action: Diagnostics.main(), townReason: Diagnostics.townReason(), errors: Diagnostics.errors.slice(-5), stops: Diagnostics.stops.slice(-5) } };
   },
   lastSuggestions: null,
   appliedBackup: null,
