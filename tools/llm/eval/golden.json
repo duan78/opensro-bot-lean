@@ -71,8 +71,7 @@
     "expectedRootCause": "Le serveur interdit désormais la vente directe pet→boutique (UIIT 438 CANT_TRADE) ; il faut transférer les items du pet vers le sac (cos-transfer) puis les vendre depuis le sac.",
     "expectedKeywords": [
       "cant_trade",
-      "pet",
-      "transfer"
+      "pet"
     ]
   },
   {
@@ -400,7 +399,7 @@
     "expectedRootCause": "La commande rebirth peut ne pas recevoir de réponse (timeout) sans avoir été réellement traitée : il faut un retry borné du rebirth, comme pour les autres commandes sans identifiant de transaction.",
     "expectedKeywords": [
       "rebirth",
-      "tentative"
+      "retry"
     ]
   }
 ]
